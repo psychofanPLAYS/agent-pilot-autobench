@@ -4,7 +4,8 @@
 
 Local-first autobenchmarking for LLLMs: Local Large Language Models.
 
-Agent Pilot Autobench is a small, practical lab for answering a simple question with evidence instead of vibes: which local model and runtime settings are actually useful for agent work?
+Agent Pilot Autobench is a small, practical lab for answering a simple question with evidence instead of vibes: 
+### Which local model and runtime settings are actually useful for agent work?
 
 This repo is the public-facing home for that workflow. The short command is `pilotbench`.
 
