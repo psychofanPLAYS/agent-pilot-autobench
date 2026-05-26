@@ -341,10 +341,3 @@ Planned next:
 ## License
 
 MIT License. See the repository license file when present.
-
-## Glossary
-
-- `Agent Pilot Autobench`: the public project name for this local-first benchmarking workflow.
-- `pilotBENCHY`: the project codename for the product and workflow behind Agent Pilot Autobench.
-- `PILOT`: Primary Inference Layer for Orchestrated Tasks; the measured model/runtime configuration selected for agent work.
-- `apb`: optional short command alias for `agent-autobench`.
