@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make the existing GGUF benchmark cockpit easier to run, safer to publish, and clearer as the start of LlamaLab AutoResearcher.
+**Goal:** Make the existing GGUF benchmark cockpit easier to run, safer to publish, and clearer as the start of Agent Pilot Autobench.
 
 **Architecture:** Keep the existing package name and benchmark internals stable. Add a small readiness-check module, public-facing README, and CI while preserving local `G:\` defaults for David's workstation.
 
@@ -31,7 +31,7 @@ Add dataclasses for checks and reports. Check model roots, `llama-bench`, `llama
 
 - [x] **Step 3: Wire `doctor` into Typer**
 
-Expose `gguf-limit-bench doctor` with `--root`, `--llama-bench`, `--llama-cli`, `--runs-root`, `--strict`, and `--json-out`.
+Expose `pilotbench doctor` with `--root`, `--llama-bench`, `--llama-cli`, `--runs-root`, `--strict`, and `--json-out`.
 
 - [x] **Step 4: Verify focused tests**
 
@@ -81,8 +81,8 @@ Expected: all tests pass.
 - [x] **Step 2: Run CLI smoke checks**
 
 ```powershell
-uv run --extra dev gguf-limit-bench --help
-uv run --extra dev gguf-limit-bench doctor --json-out
+uv run --extra dev pilotbench --help
+uv run --extra dev pilotbench doctor --json-out
 ```
 
 Expected: help renders and doctor returns JSON.

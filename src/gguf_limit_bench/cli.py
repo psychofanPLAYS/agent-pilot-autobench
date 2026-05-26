@@ -26,7 +26,7 @@ DEFAULT_LLAMA_CLI = Path("G:/AI/llamaCPP-server/_internal/runtime/llama.cpp/llam
 DEFAULT_RUNS_ROOT = Path("runs")
 
 app = typer.Typer(
-    help="Local-first GGUF autoresearch lab for finding useful agent pilot settings.",
+    help="Local-first autobenchmarking for choosing the best LLLM agent pilot.",
     no_args_is_help=True,
     invoke_without_command=True,
     rich_markup_mode="rich",
@@ -47,7 +47,7 @@ def main(
         help="Only check the computer. Do not open the picker.",
     ),
 ) -> None:
-    """Local-first GGUF autoresearch lab."""
+    """Local-first LLLM agent-pilot autobench."""
     if not start_now:
         return
     _start_app(root=DEFAULT_MODEL_ROOT, check_only=check_only)
@@ -95,7 +95,7 @@ def _start_app(
     if not report.ready:
         console.print("Something is missing. No benchmark was started.")
         _print_doctor_report(report)
-        console.print("Run this first: uv run --extra dev gguf-limit-bench doctor")
+        console.print("Run this first: uv run --extra dev pilotbench doctor")
         raise typer.Exit(1)
     console.print("Everything looks ready.")
     if check_only:
@@ -355,7 +355,7 @@ def _filter_models(
 
 
 def _print_doctor_report(report: DoctorReport) -> None:
-    table = Table(title="GGUF Limit Bench Doctor")
+    table = Table(title="Agent Pilot Autobench Doctor")
     table.add_column("Check")
     table.add_column("Status")
     table.add_column("Path")

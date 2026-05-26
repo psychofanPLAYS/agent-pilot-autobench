@@ -25,13 +25,13 @@ If something is missing, it will tell you what is missing.
 Open a terminal in this folder and run:
 
 ```powershell
-uv run --extra dev gguf-limit-bench --start
+uv run --extra dev pilotbench --start
 ```
 
 Check only, without opening the picker:
 
 ```powershell
-uv run --extra dev gguf-limit-bench --start --check-only
+uv run --extra dev pilotbench --start --check-only
 ```
 
 ## What To Do In The Picker

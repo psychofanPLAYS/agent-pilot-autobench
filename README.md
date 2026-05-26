@@ -1,16 +1,16 @@
-# LlamaLab AutoResearcher
+# Agent Pilot Autobench
 
-[![CI](https://github.com/psychofanPLAYS/gguf-limit-bench/actions/workflows/ci.yml/badge.svg)](https://github.com/psychofanPLAYS/gguf-limit-bench/actions/workflows/ci.yml)
+[![CI](https://github.com/psychofanPLAYS/agent-pilot-autobench/actions/workflows/ci.yml/badge.svg)](https://github.com/psychofanPLAYS/agent-pilot-autobench/actions/workflows/ci.yml)
 
-Local-first GGUF benchmarking and autoresearch for building better local agent pilots.
+Local-first autobenchmarking for LLLMs: Local Large Language Models.
 
-LlamaLab AutoResearcher is a small, practical lab for answering a simple question with evidence instead of vibes: which GGUF model and runtime settings are actually useful on real hardware?
+Agent Pilot Autobench is a small, practical lab for answering a simple question with evidence instead of vibes: which local model and runtime settings are actually useful for agent work?
 
-This repo is the public-facing home for that workflow. The package name is still `gguf-limit-bench` for now, but the project name shown here is LlamaLab AutoResearcher.
+This repo is the public-facing home for that workflow. The short command is `pilotbench`.
 
 ## What It Does
 
-LlamaLab AutoResearcher helps you measure:
+Agent Pilot Autobench helps you measure:
 
 - which local GGUF model is usable behind an agent-style workflow
 - which settings are faster without becoming unstable
@@ -37,7 +37,7 @@ Local model testing often collapses into guesses:
 
 That is not enough when you are trying to pick a real agent pilot for work.
 
-LlamaLab AutoResearcher keeps the process measurable, repeatable, and easy to inspect later. The output is meant to be useful to a human, a future run, and a reviewer on GitHub.
+Agent Pilot Autobench keeps the process measurable, repeatable, and easy to inspect later. The output is meant to be useful to a human, a future run, and a reviewer on GitHub.
 
 ## How It Works
 
@@ -93,19 +93,19 @@ More detail is in [docs/START-FOR-NORMAL-PEOPLE.md](docs/START-FOR-NORMAL-PEOPLE
 If you already know how to open a terminal in this folder, run:
 
 ```powershell
-uv run --extra dev gguf-limit-bench --start
+uv run --extra dev pilotbench --start
 ```
 
 This also works:
 
 ```powershell
-uv run --extra dev gguf-limit-bench start
+uv run --extra dev pilotbench start
 ```
 
 Check only, without opening the picker:
 
 ```powershell
-uv run --extra dev gguf-limit-bench --start --check-only
+uv run --extra dev pilotbench --start --check-only
 ```
 
 ### Manual Check
@@ -113,7 +113,7 @@ uv run --extra dev gguf-limit-bench --start --check-only
 The doctor command checks paths before you spend time on benchmarks:
 
 ```powershell
-uv run --extra dev gguf-limit-bench doctor
+uv run --extra dev pilotbench doctor
 ```
 
 On David's machine the defaults are:
@@ -127,7 +127,7 @@ On David's machine the defaults are:
 For a different machine, pass your paths explicitly:
 
 ```powershell
-uv run --extra dev gguf-limit-bench doctor `
+uv run --extra dev pilotbench doctor `
   --root "D:\models" `
   --llama-bench "D:\llama.cpp\llama-bench.exe" `
   --llama-cli "D:\llama.cpp\llama-cli.exe" `
@@ -140,31 +140,31 @@ uv run --extra dev gguf-limit-bench doctor `
 List discovered models:
 
 ```powershell
-uv run --extra dev gguf-limit-bench survey
+uv run --extra dev pilotbench survey
 ```
 
 List Qwen models only:
 
 ```powershell
-uv run --extra dev gguf-limit-bench survey --qwen-only
+uv run --extra dev pilotbench survey --qwen-only
 ```
 
 List Qwen 35B MTP candidates:
 
 ```powershell
-uv run --extra dev gguf-limit-bench survey --qwen-35b-only --mtp-only
+uv run --extra dev pilotbench survey --qwen-35b-only --mtp-only
 ```
 
 Open the terminal model picker:
 
 ```powershell
-uv run --extra dev gguf-limit-bench start
+uv run --extra dev pilotbench start
 ```
 
 Run one autoresearch loop:
 
 ```powershell
-uv run --extra dev gguf-limit-bench autoresearch `
+uv run --extra dev pilotbench autoresearch `
   --model "G:\AI\models\path\to\model.gguf" `
   --budget-minutes 5 `
   --parallel-max 4
@@ -173,7 +173,7 @@ uv run --extra dev gguf-limit-bench autoresearch `
 Run a focused Qwen 35B campaign:
 
 ```powershell
-uv run --extra dev gguf-limit-bench autoresearch-all `
+uv run --extra dev pilotbench autoresearch-all `
   --qwen-35b-only `
   --total-budget-minutes 30 `
   --budget-minutes 5 `
@@ -225,7 +225,7 @@ Working now:
 - Textual model picker
 - small workflow evaluation path
 - path readiness checks through `doctor`
-- beginner startup through `START-HERE.bat` and `gguf-limit-bench start`
+- beginner startup through `START-HERE.bat` and `pilotbench start`
 - unit tests and a GitHub Actions CI workflow
 
 Planned next:

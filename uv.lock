@@ -3,6 +3,36 @@ revision = 2
 requires-python = ">=3.11"
 
 [[package]]
+name = "agent-pilot-autobench"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "nvidia-ml-py" },
+    { name = "optuna" },
+    { name = "psutil" },
+    { name = "rich" },
+    { name = "textual" },
+    { name = "typer" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "nvidia-ml-py", specifier = ">=12.0.0" },
+    { name = "optuna", specifier = ">=4.8.0" },
+    { name = "psutil", specifier = ">=5.9.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
+    { name = "rich", specifier = ">=13.0.0" },
+    { name = "textual", specifier = ">=0.80.0" },
+    { name = "typer", specifier = ">=0.12.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "alembic"
 version = "1.18.4"
 source = { registry = "https://pypi.org/simple" }
@@ -57,36 +87,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/a2/61/f083b5ac52e505dfc
 wheels = [
     { url = "https://files.pythonhosted.org/packages/6d/c1/e419ef3723a074172b68aaa89c9f3de486ed4c2399e2dbd8113a4fdcaf9e/colorlog-6.10.1-py3-none-any.whl", hash = "sha256:2d7e8348291948af66122cff006c9f8da6255d224e7cf8e37d8de2df3bad8c9c", size = 11743, upload-time = "2025-10-16T16:14:10.512Z" },
 ]
-
-[[package]]
-name = "gguf-limit-bench"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "nvidia-ml-py" },
-    { name = "optuna" },
-    { name = "psutil" },
-    { name = "rich" },
-    { name = "textual" },
-    { name = "typer" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "nvidia-ml-py", specifier = ">=12.0.0" },
-    { name = "optuna", specifier = ">=4.8.0" },
-    { name = "psutil", specifier = ">=5.9.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
-    { name = "rich", specifier = ">=13.0.0" },
-    { name = "textual", specifier = ">=0.80.0" },
-    { name = "typer", specifier = ">=0.12.0" },
-]
-provides-extras = ["dev"]
 
 [[package]]
 name = "greenlet"

@@ -3,8 +3,8 @@ setlocal
 cd /d "%~dp0"
 
 echo.
-echo LlamaLab AutoResearcher
-echo =======================
+echo Agent Pilot Autobench
+echo =====================
 echo.
 echo This opens the easy model picker.
 echo You can close this window any time.
@@ -21,7 +21,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-uv run --extra dev gguf-limit-bench --start
+uv run --extra dev pilotbench --start
 set EXIT_CODE=%ERRORLEVEL%
 
 echo.
