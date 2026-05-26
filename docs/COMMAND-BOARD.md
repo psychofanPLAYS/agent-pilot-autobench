@@ -4,6 +4,8 @@ This project is a local-first pilot tester for finding practical Hermes-agent GG
 
 Hero command after install: `agent-autobench`
 
+Tiny shortcut after install: `apb`
+
 Beginner command before install:
 
 ```powershell
@@ -14,6 +16,12 @@ Beginner command after install:
 
 ```powershell
 agent-autobench first-run
+```
+
+Tiny shortcut:
+
+```powershell
+apb first-run
 ```
 
 `first-run` is the friendly startup check. It checks the machine, prepares local
@@ -136,6 +144,7 @@ Double-click INSTALL-COMMAND.bat
 What it does:
 
 - Creates `G:\_codex_global\bin\agent-autobench.bat`.
+- Creates `G:\_codex_global\bin\apb.bat`.
 - Points that shim back to this repo.
 - Asks before adding `G:\_codex_global\bin` to the user PATH.
 - Does not touch the system PATH.
@@ -145,6 +154,7 @@ After adding PATH, close and reopen the terminal, then run:
 
 ```powershell
 agent-autobench first-run
+apb first-run
 ```
 
 Run the basic autoresearch loop for one model:

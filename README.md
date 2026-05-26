@@ -18,6 +18,12 @@ agent-autobench first-run
 That command is the intended beginner entry point. The older `pilotbench`
 command remains as a compatibility alias.
 
+Short command after installing shortcuts:
+
+```powershell
+apb first-run
+```
+
 ## What It Does
 
 Agent Pilot Autobench helps you measure:
@@ -335,3 +341,8 @@ Planned next:
 ## License
 
 MIT License. See the repository license file when present.
+
+## Tiny Glossary
+
+- `PilotBENCHY`: our nickname for Agent Pilot Autobench.
+- `apb`: short for Agent Pilot Benchy, the quick command alias.

@@ -5,6 +5,7 @@ cd /d "%~dp0"
 set "REPO_DIR=%CD%"
 set "SHIM_DIR=G:\_codex_global\bin"
 set "SHIM_FILE=%SHIM_DIR%\agent-autobench.bat"
+set "SHORT_SHIM_FILE=%SHIM_DIR%\apb.bat"
 
 echo.
 echo Install agent-autobench command
@@ -12,6 +13,7 @@ echo ===============================
 echo.
 echo This will create:
 echo %SHIM_FILE%
+echo %SHORT_SHIM_FILE%
 echo.
 echo The shim will run this repo:
 echo %REPO_DIR%
@@ -53,7 +55,20 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo Created command shim.
+(
+  echo @echo off
+  echo cd /d "%REPO_DIR%"
+  echo uv run --extra dev apb %%*
+) > "%SHORT_SHIM_FILE%"
+if errorlevel 1 (
+  echo Could not write:
+  echo %SHORT_SHIM_FILE%
+  echo.
+  pause
+  exit /b 1
+)
+
+echo Created command shims.
 echo.
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$dir = $env:SHIM_DIR; $old = [Environment]::GetEnvironmentVariable('Path', 'User'); if (($old -split ';') -contains $dir) { exit 0 } exit 1"
@@ -63,6 +78,7 @@ if not errorlevel 1 (
   echo.
   echo You can run:
   echo agent-autobench first-run
+  echo apb first-run
   echo.
   pause
   exit /b 0
@@ -79,6 +95,7 @@ if errorlevel 2 (
   echo PATH was not changed.
   echo You can still run the shim directly:
   echo %SHIM_FILE% first-run
+  echo %SHORT_SHIM_FILE% first-run
   echo.
   pause
   exit /b 0
@@ -99,6 +116,7 @@ echo.
 echo User PATH updated.
 echo Close and reopen your terminal, then run:
 echo agent-autobench first-run
+echo apb first-run
 echo.
 pause
 exit /b 0

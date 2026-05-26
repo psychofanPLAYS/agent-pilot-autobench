@@ -8,7 +8,9 @@ def test_public_package_name_and_command_are_agent_pilot_autobench():
     assert pyproject["project"]["name"] == "agent-pilot-autobench"
     assert "pilotbench" in pyproject["project"]["scripts"]
     assert "agent-autobench" in pyproject["project"]["scripts"]
+    assert "apb" in pyproject["project"]["scripts"]
     assert pyproject["project"]["scripts"]["agent-autobench"] == "gguf_limit_bench.cli:app"
+    assert pyproject["project"]["scripts"]["apb"] == "gguf_limit_bench.cli:app"
     assert "gguf-limit-bench" not in pyproject["project"]["scripts"]
 
 
@@ -17,6 +19,8 @@ def test_readme_uses_public_command_name():
 
     assert "# Agent Pilot Autobench" in readme
     assert "agent-autobench first-run" in readme
+    assert "PilotBENCHY" in readme
+    assert "apb first-run" in readme
     assert "pilotbench --start" in readme
     assert "Legacy command" not in readme
     assert "`gguf-limit-bench`" not in readme

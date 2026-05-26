@@ -8,6 +8,12 @@ The new short command is:
 agent-autobench
 ```
 
+After installing shortcuts, the tiny command also works:
+
+```text
+apb
+```
+
 The easiest command is:
 
 ```text
@@ -64,6 +70,7 @@ That creates a small Windows command file named:
 
 ```text
 G:\_codex_global\bin\agent-autobench.bat
+G:\_codex_global\bin\apb.bat
 ```
 
 The installer asks before it changes your user PATH. PATH is the Windows list of
@@ -71,6 +78,12 @@ folders where commands can be found. If you say yes, open a new terminal and run
 
 ```powershell
 agent-autobench first-run
+```
+
+Or the shorter version:
+
+```powershell
+apb first-run
 ```
 
 ## What To Do In The Picker
