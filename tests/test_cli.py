@@ -829,5 +829,10 @@ def test_benchmark_suite_plans_lists_bundled_plans():
 
     assert result.exit_code == 0
     plans = json.loads(result.output)
-    assert any(path.endswith("benchmarks\\plans\\local-openai-smoke.plan.json") for path in plans)
-    assert any(path.endswith("benchmarks\\plans\\local-bfcl-smoke.plan.json") for path in plans)
+    normalized_plans = [path.replace("\\", "/") for path in plans]
+    assert any(
+        path.endswith("benchmarks/plans/local-openai-smoke.plan.json") for path in normalized_plans
+    )
+    assert any(
+        path.endswith("benchmarks/plans/local-bfcl-smoke.plan.json") for path in normalized_plans
+    )
