@@ -2,6 +2,14 @@
 
 This is the easy path.
 
+The new short command is:
+
+```text
+pilotbench
+```
+
+The old command, `gguf-limit-bench`, still works for older notes and scripts.
+
 ## If You Are On Windows
 
 Double-click this file:

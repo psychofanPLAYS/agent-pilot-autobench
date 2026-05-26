@@ -2,6 +2,10 @@
 
 This project is a local-first pilot tester for finding practical Hermes-agent GGUF settings without loading models one by one in LM Studio.
 
+Primary command: `pilotbench`
+
+Legacy command: `gguf-limit-bench` still works while older scripts are migrated.
+
 ## Safe First Commands
 
 For complete beginners on Windows:

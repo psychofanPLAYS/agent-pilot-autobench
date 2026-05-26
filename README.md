@@ -8,6 +8,8 @@ Agent Pilot Autobench is a small, practical lab for answering a simple question 
 
 This repo is the public-facing home for that workflow. The short command is `pilotbench`.
 
+Legacy command: `gguf-limit-bench` still works as a compatibility alias while the project migrates to the `pilotbench` naming schema.
+
 ## What It Does
 
 Agent Pilot Autobench helps you measure:

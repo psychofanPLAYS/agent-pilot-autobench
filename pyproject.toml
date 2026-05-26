@@ -20,6 +20,7 @@ dev = [
 
 [project.scripts]
 pilotbench = "gguf_limit_bench.cli:app"
+gguf-limit-bench = "gguf_limit_bench.cli:app"
 
 [build-system]
 requires = ["hatchling"]
