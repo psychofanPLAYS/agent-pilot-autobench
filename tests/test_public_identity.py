@@ -19,7 +19,7 @@ def test_readme_uses_public_command_name():
 
     assert "# Agent Pilot Autobench" in readme
     assert "agent-autobench first-run" in readme
-    assert "PilotBENCHY" in readme
+    assert "pilotBENCHY" in readme
     assert "apb first-run" in readme
     assert "pilotbench --start" in readme
     assert "Legacy command" not in readme

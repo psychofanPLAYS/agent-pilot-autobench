@@ -2,9 +2,9 @@
 
 This project is a local-first pilot tester for finding practical Hermes-agent GGUF settings without loading models one by one in LM Studio.
 
-Hero command after install: `agent-autobench`
+Primary command after install: `agent-autobench`
 
-Tiny shortcut after install: `apb`
+Short command after install: `apb`
 
 Beginner command before install:
 
@@ -18,7 +18,7 @@ Beginner command after install:
 agent-autobench first-run
 ```
 
-Tiny shortcut:
+Short command:
 
 ```powershell
 apb first-run

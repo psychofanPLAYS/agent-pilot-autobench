@@ -2,23 +2,23 @@
 
 [![CI](https://github.com/psychofanPLAYS/agent-pilot-autobench/actions/workflows/ci.yml/badge.svg)](https://github.com/psychofanPLAYS/agent-pilot-autobench/actions/workflows/ci.yml)
 
-Local-first autobenchmarking for LLLMs: Local Large Language Models.
+Local-first autobenchmarking for local LLMs.
 
-Agent Pilot Autobench is a small, practical lab for answering a simple question with evidence instead of vibes: 
+Agent Pilot Autobench is a practical lab for answering one operational question with evidence:
 ### Which local model and runtime settings are actually useful for agent work?
 
 This repo is the public-facing home for that workflow.
 
-Hero command:
+First-run command:
 
 ```powershell
 agent-autobench first-run
 ```
 
 That command is the intended beginner entry point. The older `pilotbench`
-command remains as a compatibility alias.
+command remains available as a compatibility alias.
 
-Short command after installing shortcuts:
+Short command after installing optional shortcuts:
 
 ```powershell
 apb first-run
@@ -45,7 +45,7 @@ It wraps proven open-source tools instead of reinventing them:
 
 ## Why It Exists
 
-Local model testing often collapses into guesses:
+Local model testing often collapses into subjective guesses:
 
 - "this one feels faster"
 - "that one loaded"
@@ -117,7 +117,7 @@ START-HERE.bat
 That is the start button. It runs `agent-autobench first-run`, then opens the
 model picker when the checks pass.
 
-More detail is in [docs/START-FOR-NORMAL-PEOPLE.md](docs/START-FOR-NORMAL-PEOPLE.md).
+More detail is in the [beginner setup guide](docs/START-FOR-NORMAL-PEOPLE.md).
 
 ### Install The Windows Command
 
@@ -342,7 +342,9 @@ Planned next:
 
 MIT License. See the repository license file when present.
 
-## Tiny Glossary
+## Glossary
 
-- `PilotBENCHY`: our nickname for Agent Pilot Autobench.
-- `apb`: short for Agent Pilot Benchy, the quick command alias.
+- `Agent Pilot Autobench`: the public project name for this local-first benchmarking workflow.
+- `pilotBENCHY`: the project codename for the product and workflow behind Agent Pilot Autobench.
+- `PILOT`: Primary Inference Layer for Orchestrated Tasks; the measured model/runtime configuration selected for agent work.
+- `apb`: optional short command alias for `agent-autobench`.

@@ -2,13 +2,13 @@
 
 This is the easy path.
 
-The new short command is:
+The primary command is:
 
 ```text
 agent-autobench
 ```
 
-After installing shortcuts, the tiny command also works:
+After installing shortcuts, the short command also works:
 
 ```text
 apb

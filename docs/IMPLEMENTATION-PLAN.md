@@ -8,7 +8,7 @@ Tech stack: Python, Textual, Rich, Typer, pytest, psutil, nvidia-ml-py, Optuna, 
 
 ## 18 Step Plan
 
-- [x] Back up `G:\_codex_global\config.toml` and register selected `G:\AI\skills` by path.
+- [x] Back up the local Codex config and register selected skill folders by path.
 - [x] Create the project folder and initialize git.
 - [x] Create a small project plan, receipts folder, and test-first structure.
 - [x] Add tests for GGUF discovery, family parsing, quant parsing, and mmproj vision detection.
