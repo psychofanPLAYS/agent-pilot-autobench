@@ -4,8 +4,6 @@ This project is a local-first pilot tester for finding practical Hermes-agent GG
 
 Primary command: `pilotbench`
 
-Legacy command: `gguf-limit-bench` still works while older scripts are migrated.
-
 ## Safe First Commands
 
 For complete beginners on Windows:

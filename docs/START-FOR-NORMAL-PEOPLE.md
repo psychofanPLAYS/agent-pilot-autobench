@@ -8,8 +8,6 @@ The new short command is:
 pilotbench
 ```
 
-The old command, `gguf-limit-bench`, still works for older notes and scripts.
-
 ## If You Are On Windows
 
 Double-click this file:
