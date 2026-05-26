@@ -1,0 +1,120 @@
+# GGUF Limit Bench Command Board
+
+This project is a local llama.cpp-first bench tester for finding practical Hermes-agent GGUF settings without loading models one by one in LM Studio.
+
+## Safe First Commands
+
+List Qwen-family GGUF models:
+
+```powershell
+uv run --extra dev gguf-limit-bench survey --qwen-only
+```
+
+List only the Qwen 35B models David cares about:
+
+```powershell
+uv run --extra dev gguf-limit-bench survey --qwen-35b-only
+```
+
+List only Qwen 35B MTP models:
+
+```powershell
+uv run --extra dev gguf-limit-bench survey --qwen-35b-only --mtp-only
+```
+
+Default discovery should cover David's normal G-drive model roots:
+
+- `G:\AI\models`
+- `G:\AI\models\LM_Studio-gguf`
+
+Open the model picker TUI:
+
+```powershell
+uv run --extra dev gguf-limit-bench tui
+```
+
+Run the basic autoresearch loop for one model:
+
+```powershell
+uv run --extra dev gguf-limit-bench autoresearch --model "G:\AI\models\path\to\model.gguf" --budget-minutes 5 --parallel-max 4
+```
+
+Learning is on by default. To do a one-off run without updating the learning database:
+
+```powershell
+uv run --extra dev gguf-limit-bench autoresearch --model "G:\AI\models\path\to\model.gguf" --no-learning
+```
+
+Run the basic autoresearch loop across discovered Qwen models:
+
+```powershell
+uv run --extra dev gguf-limit-bench autoresearch-all --qwen-only --budget-minutes 5 --parallel-max 4
+```
+
+Run the recommended Qwen 35B queue:
+
+```powershell
+uv run --extra dev gguf-limit-bench autoresearch-all --qwen-35b-only --total-budget-minutes 30 --budget-minutes 5 --parallel-max 4 --workflow-eval
+```
+
+Run only Qwen 35B MTP candidates:
+
+```powershell
+uv run --extra dev gguf-limit-bench autoresearch-all --qwen-35b-only --mtp-only --total-budget-minutes 20 --budget-minutes 5 --workflow-eval
+```
+
+For a Codex-friendly bulk loop, the target behavior is:
+
+- Accept a total wall-clock budget for the whole queue, not only a per-model budget.
+- Support a finish-early control so one strong-enough result can stop the queue before spending the full budget.
+- Keep every run resumable from its receipt folder, so Codex can inspect what happened without rerunning expensive benchmarks.
+
+## Receipts
+
+Each autoresearch run writes a folder under `runs/<timestamp>-<model>`:
+
+- `events.jsonl`: every attempt, settings, result, telemetry, and failure class.
+- `summary.md`: plain-English best result.
+- `best-settings.json`: machine-readable best settings and score.
+- `learning.json`: best learned settings when learning is enabled.
+- `recovery.json`: latest recovery status.
+
+Receipts should stay small and deterministic. They should contain the settings, scores, failure class, and short command output needed for debugging, but not huge raw logs or machine-specific noise. This makes them friendly for Codex, Git diffs, and quick human review.
+
+## Learning Brain
+
+The app uses Optuna with a local SQLite database at `runs/learning/optuna.sqlite3`.
+
+In plain English:
+
+- Before an attempt, Optuna suggests settings from the search space.
+- The app runs `llama-bench`.
+- The app scores the result.
+- The score is written back to Optuna.
+- Future runs for the same model reuse those past trials instead of starting blind.
+
+This is real persistent optimization, but it is still local and small. It does not train a huge neural network or send benchmark data to a cloud service.
+
+## Current Autoresearch Shape
+
+The loop follows the Karpathy-style autoresearch shape:
+
+- Fixed wall-clock budget.
+- One main score.
+- Baseline first.
+- Mutate one setting at a time when learning is off.
+- Use Optuna's persistent suggestions when learning is on, while still accepting only measured score improvements.
+- Record failures such as GPU OOM, model-load failure, crash, and timeout, then keep going.
+- Keep unified KV cache marked as mandatory target metadata for Hermes deployment.
+
+## MTP Notes
+
+The app detects MTP candidates from the model filename and exposes `--mtp-only` for focused queues. For real workflow evals, MTP candidates get a llama-cli draft probe using `--draft-max 16`.
+
+Current local evidence:
+
+- `Qwen3.6-35B-A3B-MTP-TQ3_4S.gguf` failed to load in this llama.cpp build.
+- `Qwen3.6-35B-A3B-uncensored-heretic-Native-MTP-Preserved-Q4_K_M.gguf` also failed to load in this llama.cpp build.
+- Those failures are classified as `model_load` and written to receipts, so Codex can inspect them without rerunning.
+
+Important note: `llama-bench.exe` does not expose a `--parallel` flag in the local build checked on this machine. The loop still explores `parallel` as target metadata for the later `llama-server` adapter, while the current executable checks focus on speed, batch, ubatch, GPU layers, flash attention, and context depth.
