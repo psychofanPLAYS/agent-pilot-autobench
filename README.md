@@ -322,6 +322,7 @@ Working now:
 
 Planned next:
 
+- product design details in [docs/PRODUCT-DESIGN.md](docs/PRODUCT-DESIGN.md)
 - richer OpenAI-compatible `llama-server` endpoint tests
 - richer final report rendering inside the TUI itself
 - paired KV-cache quality comparisons
