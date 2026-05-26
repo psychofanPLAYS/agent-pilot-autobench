@@ -100,12 +100,16 @@ class BenchTui(App):
         self.models_to_run = selected_models
         if self.run_model is None:
             self.query_one("#dashboard", Static).update(
-                self._dashboard_text(f"Starting {len(selected_models)} model(s) with {self.run_config.preset_id} preset.")
+                self._dashboard_text(
+                    f"Starting {len(selected_models)} model(s) with {self.run_config.preset_id} preset."
+                )
             )
             self.exit()
             return
         self.ran_inside_tui = True
-        self.run_worker(lambda: self._run_models_inside_tui(selected_models), thread=True, exclusive=True)
+        self.run_worker(
+            lambda: self._run_models_inside_tui(selected_models), thread=True, exclusive=True
+        )
 
     def _run_models_inside_tui(self, selected_models: list[ModelInfo]) -> None:
         for index, model in enumerate(selected_models, start=1):
@@ -149,7 +153,9 @@ class BenchTui(App):
         if mode == "name":
             return sorted(models, key=lambda model: model.name.lower())
         if mode == "family":
-            return sorted(models, key=lambda model: (model.family, -model.size_bytes, model.name.lower()))
+            return sorted(
+                models, key=lambda model: (model.family, -model.size_bytes, model.name.lower())
+            )
         return sorted(models, key=lambda model: (-model.size_bytes, model.name.lower()))
 
     def _menu_text(self) -> str:
@@ -157,7 +163,9 @@ class BenchTui(App):
         for preset in PRESETS.values():
             marker = "*" if preset.id == self.run_config.preset_id else " "
             lines.append(f"{marker} {preset.label}: {preset.description}")
-        lines.append("Advanced defaults: target TTFT <10s, generation >=20 tok/s, full GPU offload, no swap.")
+        lines.append(
+            "Advanced defaults: target TTFT <10s, generation >=20 tok/s, full GPU offload, no swap."
+        )
         return "\n".join(lines)
 
     def _dashboard_text(self, message: str) -> str:

@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 
 def context_ladder(max_context: int = 262_144) -> list[int]:
-    ladder = [16_384, 32_768, 65_536, 131_072, 163_840, 196_608, 229_376, 262_144]
+    ladder = [4_096, 8_192, 16_384, 32_768, 65_536, 131_072, 163_840, 196_608, 229_376, 262_144]
     return [value for value in ladder if value <= max_context]
 
 

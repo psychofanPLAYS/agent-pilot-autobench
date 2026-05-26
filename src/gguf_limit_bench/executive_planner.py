@@ -21,11 +21,17 @@ class PlannerDecision:
 
 def validate_planner_suggestion(suggestion: PlannerSuggestion) -> PlannerDecision:
     if suggestion.action == "promote_self":
-        return PlannerDecision(False, "Self-promotion requires objective metrics and external receipt evidence.")
+        return PlannerDecision(
+            False, "Self-promotion requires objective metrics and external receipt evidence."
+        )
     if suggestion.action not in {"try_next_settings", "skip_zone", "needs_retest"}:
         return PlannerDecision(False, f"Unsupported planner action: {suggestion.action}")
     if not suggestion.evidence.get("receipt_path"):
         return PlannerDecision(False, "Planner suggestions need a receipt path as evidence.")
-    if any(key.lower() in {"delete", "remove", "format", "reset"} for key in suggestion.next_settings):
-        return PlannerDecision(False, "Planner suggestions cannot request unsafe system or file actions.")
+    if any(
+        key.lower() in {"delete", "remove", "format", "reset"} for key in suggestion.next_settings
+    ):
+        return PlannerDecision(
+            False, "Planner suggestions cannot request unsafe system or file actions."
+        )
     return PlannerDecision(True, "Accepted as a measured next-experiment proposal.")

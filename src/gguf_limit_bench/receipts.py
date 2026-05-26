@@ -14,7 +14,14 @@ class RunReceipt:
     def create(cls, root: Path, slug: str) -> "RunReceipt":
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         path = root / f"{timestamp}-{slug}"
-        path.mkdir(parents=True, exist_ok=False)
+        suffix = 2
+        while True:
+            try:
+                path.mkdir(parents=True, exist_ok=False)
+                break
+            except FileExistsError:
+                path = root / f"{timestamp}-{slug}-{suffix}"
+                suffix += 1
         return cls(path=path)
 
     def event(self, event_type: str, data: dict) -> None:

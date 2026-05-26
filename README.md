@@ -2,9 +2,12 @@
 
 [![CI](https://github.com/psychofanPLAYS/agent-pilot-autobench/actions/workflows/ci.yml/badge.svg)](https://github.com/psychofanPLAYS/agent-pilot-autobench/actions/workflows/ci.yml)
 
-Local-first autobenchmarking for LLLMs: Local Large Language Models.
+Local-first benchmarking for local LLMs, GGUF models, and llama.cpp runtime settings.
 
-Agent Pilot Autobench is a small, practical lab for answering a simple question with evidence instead of vibes: 
+Agent Pilot Autobench is a local-first evaluation cockpit for choosing, stress-testing, and deploying agent-capable local LLMs on real hardware.
+
+It answers a practical question with evidence instead of vibes:
+
 ### Which local model and runtime settings are actually useful for agent work?
 
 This repo is the public-facing home for that workflow.
@@ -100,11 +103,20 @@ agent-autobench first-run
 
 In plain English, `first-run` means:
 
-1. Check that the needed tools are installed.
-2. Check the model and llama.cpp paths.
-3. Create the local experiment database.
-4. Prepare the results folder and report files.
-5. Tell you the next command instead of failing silently.
+1. Sync the local `.venv` dependencies with `uv`, including benchmark-suite
+   harness wrappers.
+2. Create the `agent-autobench` and `apb` command shims in `G:\_codex_global\bin`.
+3. Check the model and llama.cpp paths.
+4. Create the local experiment database.
+5. Prepare the results folder and report files.
+6. Tell you the next command instead of failing silently.
+
+By default it does not silently change your Windows user PATH. To do that from
+the terminal, run:
+
+```powershell
+agent-autobench first-run --add-to-path
+```
 
 ### Easiest Windows Path
 
@@ -129,12 +141,19 @@ INSTALL-COMMAND.bat
 ```
 
 That script creates a small command shim at `G:\_codex_global\bin\agent-autobench.bat`.
-It will ask before adding that folder to your user PATH. It does not change the
-system PATH silently.
+It will ask before adding that folder to your user PATH. `first-run` now creates
+the same shims itself, so this `.bat` is mostly the double-click helper for PATH.
+It does not change the system PATH silently.
 
 ### Easy Terminal Path
 
-If you already know how to open a terminal in this folder, run:
+If you already know how to open a terminal in this folder, use the local command:
+
+```powershell
+.\.venv\Scripts\agent-autobench.exe first-run
+```
+
+If the local `.venv` is not installed yet, run:
 
 ```powershell
 uv run --extra dev agent-autobench first-run
@@ -143,13 +162,13 @@ uv run --extra dev agent-autobench first-run
 The older compatibility command also works:
 
 ```powershell
-uv run --extra dev pilotbench start
+uv run --extra dev pilotbench --start
 ```
 
 Check only, without opening the picker:
 
 ```powershell
-uv run --extra dev pilotbench --start --check-only
+.\.venv\Scripts\agent-autobench.exe --start --check-only
 ```
 
 ### Manual Check
@@ -160,7 +179,7 @@ The doctor command checks paths before you spend time on benchmarks:
 uv run --extra dev pilotbench doctor
 ```
 
-Default Windows workstation paths are:
+Default Windows workstation paths live in `pilotbench.toml`:
 
 - models: `G:\AI\models`
 - LM Studio GGUF models: `G:\AI\models\LM_Studio-gguf`
@@ -168,7 +187,32 @@ Default Windows workstation paths are:
 - `llama-cli`: `G:\AI\llamaCPP-server\_internal\runtime\llama.cpp\llama-cli.exe`
 - receipts: `runs\`
 
-For a different machine, pass your paths explicitly:
+For a different machine, edit `pilotbench.toml`, set environment variables, or pass paths
+explicitly. Precedence is:
+
+```text
+environment variables > CLI options > pilotbench.toml > built-in defaults
+```
+
+Useful environment variables:
+
+```text
+PILOTBENCH_MODEL_ROOTS
+PILOTBENCH_LLAMA_BENCH
+PILOTBENCH_LLAMA_CLI
+PILOTBENCH_LLAMA_SERVER
+PILOTBENCH_RUNS_ROOT
+PILOTBENCH_DEFAULT_PRESET
+PILOTBENCH_PARALLEL_MAX
+```
+
+To inspect the resolved paths as JSON:
+
+```powershell
+uv run --extra dev pilotbench doctor --json-out
+```
+
+To override paths for one command:
 
 ```powershell
 uv run --extra dev pilotbench doctor `
@@ -278,6 +322,8 @@ The TUI starts with plain-language presets:
 - `Overnight`: total campaign cap for longer research.
 
 The default useful-pilot target is: TTFT under 10 seconds, generation at least 20 tok/s, full GPU offload, no swap, stable JSON/tool behavior, and the best context that preserves quality.
+Autoresearch starts context probing at 4K, then climbs the ladder instead of
+using an implicit default context.
 
 ## Current Score
 
@@ -289,10 +335,28 @@ score =
 + prompt_tokens_per_second / 100
 + context_bonus
 + workflow_score
-- ttft_penalty
++ serving_tokens_per_second / 10
+- cold_serving_ttft_ms / 1000
 ```
 
 Failed attempts receive a large negative score. That keeps the optimizer honest: a flashy setting that crashes is not a champion.
+When real serving TTFT is missing, the score pays a 10-second TTFT penalty. That
+keeps old speed-only receipts from looking as strong as a measured local serving
+run.
+
+The serving probe now records both first-request and warmed-up latency:
+
+- `serving_ttft_ms`: cold first request after the server is ready
+- `serving_warm_ttft_ms`: average of later requests in the same server session
+- `serving_warmup_penalty_ms`: cold TTFT minus warm TTFT
+- `serving_server_ready_ms`: time for `llama-server` to become healthy after launch
+- `serving_cold_start_to_first_token_ms`: server launch plus first-token latency
+
+The serving probe always uses the same ordered agent question suite by context
+tier: 4K asks question 1, 8K asks questions 1-2, 16K asks questions 1-3, and
+32K+ asks all 5. Each question writes one row to `runs\serving-metrics.tsv` so
+cold TTFT, warm TTFT, token cache behavior, and serving speed can be charted
+over time.
 
 ## Project Status
 
@@ -310,19 +374,47 @@ Working now:
 - experiment-memory SQLite schema at `db\agentpilot.sqlite`
 - telemetry snapshots, GPU power, swap, disk counters, and failure classification
 - Markdown and JSON receipts
+- Karpathy-style append-only autoresearch ledger at `runs\autoresearch-results.tsv`
+- per-attempt Karpathy-style decision ledger at `runs\autoresearch-attempts.tsv`,
+  including current git branch/commit metadata
+- per-question serving metrics ledger at `runs\serving-metrics.tsv`
 - HTML results page at `runs\results.html`
-- Textual model picker with dark styling, preset panel, and run dashboard stub
+- Textual model picker with dark styling, preset panel, and run dashboard
 - latest champion reporting through `agent-autobench results`
 - deployment profile export through `agent-autobench export-profile`
 - small workflow evaluation path
 - path readiness checks through `doctor`
+- real `llama-server` streaming TTFT probe through `serve-probe` and autoresearch
+- executable benchmark-suite wrapper through `agent-autobench benchmark-suite`
+- installed benchmark harness base in the `bench` extra: `lm-eval` and `inspect-ai`
 - beginner startup through `START-HERE.bat`, `agent-autobench first-run`, and `agent-autobench --start`
 - optional command shim through `INSTALL-COMMAND.bat`
 - unit tests and a GitHub Actions CI workflow
 
+Required before "production-ready":
+
+- `docs\BENCHMARK-SUITE-PHASE.md` is now the required missing bench phase.
+- Phase 0 system viability is partly implemented: explicit 4K first, then 8K,
+  16K, 32K+, with fixed serving questions, TTFT, TPS, warmup penalty, cache
+  evidence, and `runs\serving-metrics.tsv`.
+- Phase 1 must add general-purpose benchmark evidence through an existing
+  harness such as EleutherAI `lm-evaluation-harness`, writing
+  `runs\benchmark-suite.tsv`.
+- Phase 2 must add agentic benchmark evidence through suites such as BFCL,
+  SWE-bench, tau2-bench/tau3-bench, and repo-local deterministic agent tasks,
+  writing `runs\agentic-suite.tsv`.
+- Phase 3 must make the autoresearch loop use Karpathy-style keep/discard/crash
+  decisions over a comparable `agent_bench_score`, using git history and TSV
+  receipts to preserve winners and reject losers.
+- Until those phases exist, current result labels are `slow`, `speed_only`,
+  `serving_measured`, `context_unproven`, `workflow_unproven`,
+  `workflow_weak`, and `workflow_smoke`, not production-ready.
+
 Planned next:
 
-- richer OpenAI-compatible `llama-server` endpoint tests
+- add ready-to-run local task plans for lm-eval, Inspect AI, BFCL, SWE-bench,
+  and tau2-bench
+- richer OpenAI-compatible `llama-server` endpoint compatibility tests
 - richer final report rendering inside the TUI itself
 - paired KV-cache quality comparisons
 - MTP efficiency receipts
@@ -337,10 +429,11 @@ Planned next:
 - [RULER long-context paper](https://arxiv.org/abs/2404.06654)
 - [Berkeley Function Calling Leaderboard](https://github.com/ShishirPatil/gorilla/tree/main/berkeley-function-call-leaderboard)
 - [Hermes Agent providers](https://hermes-agent.nousresearch.com/docs/integrations/providers)
+- [Karpathy autoresearch](https://github.com/karpathy/autoresearch)
 
 ## License
 
-MIT License. See the repository license file when present.
+MIT. See `LICENSE`.
 
 ## Tiny Glossary
 

@@ -41,6 +41,26 @@ def default_workflow_tasks() -> list[WorkflowTask]:
             ),
             allowed_actions=("make_plan",),
         ),
+        WorkflowTask(
+            name="json_repair",
+            prompt=(
+                "You are a local agent repair step. Return only JSON. "
+                'Choose action "repair_json" for this task: '
+                "A prior tool output is almost JSON but has extra Markdown fences. "
+                'Schema: {"action": string, "reason": string}. Keep reason under 8 words.'
+            ),
+            allowed_actions=("repair_json",),
+        ),
+        WorkflowTask(
+            name="command_safety",
+            prompt=(
+                "You are a Windows coding agent. Return only JSON. "
+                'Choose action "ask_before_delete" for this task: '
+                "The user asks to remove benchmark run folders. "
+                'Schema: {"action": string, "reason": string}. Keep reason under 8 words.'
+            ),
+            allowed_actions=("ask_before_delete",),
+        ),
     ]
 
 
@@ -49,11 +69,11 @@ class WorkflowEvaluator:
         self,
         llama_cli: Path,
         model: Path,
-    tasks: list[WorkflowTask] | None = None,
-    receipt_path: Path | None = None,
-    timeout_seconds: int = 120,
-    enable_mtp: bool = False,
-    mtp_draft_max: int = 16,
+        tasks: list[WorkflowTask] | None = None,
+        receipt_path: Path | None = None,
+        timeout_seconds: int = 120,
+        enable_mtp: bool = False,
+        mtp_draft_max: int = 16,
     ) -> None:
         self.llama_cli = llama_cli
         self.model = model
@@ -88,7 +108,9 @@ class WorkflowEvaluator:
                     returncode=completed.returncode,
                     stderr=completed.stderr,
                 )
-                if not result["passed"] and _should_retry_without_schema(completed.stdout, completed.stderr):
+                if not result["passed"] and _should_retry_without_schema(
+                    completed.stdout, completed.stderr
+                ):
                     retry_command = _without_json_schema(command)
                     completed = subprocess.run(
                         retry_command,
@@ -118,11 +140,14 @@ class WorkflowEvaluator:
 
         payload = {
             "score": sum(float(task["score"]) for task in task_results),
+            "evidence_level": "smoke",
             "tasks": task_results,
         }
         if self.receipt_path is not None:
             self.receipt_path.parent.mkdir(parents=True, exist_ok=True)
-            self.receipt_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
+            self.receipt_path.write_text(
+                json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8"
+            )
         return payload
 
 
@@ -212,7 +237,8 @@ def evaluate_workflow_output(
         "name": task.name,
         "passed": passed,
         "score": 1.0 if passed else 0.0,
-        "failure": "unknown" if passed else classify_failure(stderr + "\n" + stdout),
+        "failure": "none" if passed else classify_failure(stderr + "\n" + stdout),
+        "evidence_level": "smoke",
         "parsed": parsed,
         "stdout": stdout[-2000:],
         "stderr": stderr[-2000:],

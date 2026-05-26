@@ -3,7 +3,22 @@ import json
 from gguf_limit_bench.reports import build_leaderboard, write_leaderboard
 
 
-def _write_run(root, name, score, generation, failure="unknown", context=0):
+def _write_run(
+    root,
+    name,
+    score,
+    generation,
+    failure="none",
+    context=0,
+    workflow_score=0.0,
+    workflow_results=None,
+    serving_ttft_ms=None,
+    serving_warm_ttft_ms=None,
+    serving_warmup_penalty_ms=None,
+    serving_server_ready_ms=None,
+    serving_cold_start_to_first_token_ms=None,
+    serving_tokens_per_second=None,
+):
     run = root / name
     run.mkdir()
     (run / "best-settings.json").write_text(
@@ -20,7 +35,7 @@ def _write_run(root, name, score, generation, failure="unknown", context=0):
                     "kv_unified": True,
                 },
                 "result": {
-                    "ok": failure == "unknown",
+                    "ok": failure in {"none", "unknown"},
                     "generation_tokens_per_second": generation,
                     "prompt_tokens_per_second": 900.0,
                     "ttft_ms": None,
@@ -29,8 +44,14 @@ def _write_run(root, name, score, generation, failure="unknown", context=0):
                     "stdout": "",
                     "stderr": "",
                     "returncode": 0 if failure == "unknown" else 1,
-                    "workflow_score": 0.0,
-                    "workflow_results": [],
+                    "workflow_score": workflow_score,
+                    "workflow_results": workflow_results or [],
+                    "serving_ttft_ms": serving_ttft_ms,
+                    "serving_warm_ttft_ms": serving_warm_ttft_ms,
+                    "serving_warmup_penalty_ms": serving_warmup_penalty_ms,
+                    "serving_server_ready_ms": serving_server_ready_ms,
+                    "serving_cold_start_to_first_token_ms": serving_cold_start_to_first_token_ms,
+                    "serving_tokens_per_second": serving_tokens_per_second,
                 },
                 "score": score,
             }
@@ -48,9 +69,55 @@ def test_build_leaderboard_ranks_successes_and_explains_context_zero(tmp_path):
     leaderboard = build_leaderboard(tmp_path)
 
     assert leaderboard.entries[0].model_name == "fast.gguf"
-    assert leaderboard.entries[0].status == "PASS"
-    assert leaderboard.entries[0].context_label == "default/unset"
+    assert leaderboard.entries[0].status == "SPEED ONLY"
+    assert leaderboard.entries[0].context_label == "unset (speed-only)"
     assert leaderboard.entries[-1].status == "LOAD FAIL"
+
+
+def test_leaderboard_marks_serving_measured_when_ttft_exists_without_context(tmp_path):
+    _write_run(tmp_path, "served-no-context", 50.0, 40.0, serving_ttft_ms=250.0)
+
+    entry = build_leaderboard(tmp_path).entries[0]
+
+    assert entry.status == "SERVING MEASURED"
+
+
+def test_leaderboard_marks_context_and_workflow_evidence_separately(tmp_path):
+    _write_run(tmp_path, "speed-only", 90.0, 80.0, context=0)
+    _write_run(tmp_path, "context-only", 100.0, 80.0, context=65536)
+    _write_run(
+        tmp_path,
+        "workflow-weak",
+        110.0,
+        80.0,
+        context=65536,
+        workflow_score=2.0,
+        workflow_results=[
+            {"name": "tool_choice", "passed": True},
+            {"name": "safe_plan", "passed": True},
+        ],
+    )
+    _write_run(
+        tmp_path,
+        "workflow-smoke",
+        120.0,
+        80.0,
+        context=65536,
+        workflow_score=4.0,
+        workflow_results=[
+            {"name": "tool_choice", "passed": True},
+            {"name": "safe_plan", "passed": True},
+            {"name": "json_repair", "passed": True},
+            {"name": "command_safety", "passed": True},
+        ],
+    )
+
+    entries = {entry.run_id: entry for entry in build_leaderboard(tmp_path).entries}
+
+    assert entries["speed-only"].status == "SPEED ONLY"
+    assert entries["context-only"].status == "WORKFLOW UNPROVEN"
+    assert entries["workflow-weak"].status == "WORKFLOW WEAK"
+    assert entries["workflow-smoke"].status == "WORKFLOW SMOKE"
 
 
 def test_write_leaderboard_writes_markdown_and_champion_json(tmp_path):
@@ -67,7 +134,20 @@ def test_write_leaderboard_writes_markdown_and_champion_json(tmp_path):
 
 
 def test_results_html_is_actionable_and_beautiful_enough_to_open(tmp_path):
-    _write_run(tmp_path, "winner", 99.0, 90.0, context=135936)
+    _write_run(
+        tmp_path,
+        "winner",
+        99.0,
+        90.0,
+        context=135936,
+        workflow_score=4.0,
+        workflow_results=[
+            {"name": "tool_choice", "passed": True},
+            {"name": "safe_plan", "passed": True},
+            {"name": "json_repair", "passed": True},
+            {"name": "command_safety", "passed": True},
+        ],
+    )
     _write_run(tmp_path, "broken", -10000.0, 0.0, failure="model_load")
 
     write_leaderboard(tmp_path)
@@ -75,10 +155,12 @@ def test_results_html_is_actionable_and_beautiful_enough_to_open(tmp_path):
     html = (tmp_path / "results.html").read_text(encoding="utf-8")
     assert "<!doctype html>" in html
     assert "Agent Pilot Autobench Results" in html
+    assert "Plain-English takeaway" in html
     assert "winner.gguf" in html
     assert "What to do next" in html
     assert "agent-autobench export-profile" in html
     assert "LOAD FAIL" in html
+    assert "Evidence" in html
 
 
 def test_write_leaderboard_handles_missing_runs_folder(tmp_path):
@@ -88,3 +170,68 @@ def test_write_leaderboard_handles_missing_runs_folder(tmp_path):
 
     assert leaderboard.entries == []
     assert (runs_root / "leaderboard.md").exists()
+
+
+def test_leaderboard_markdown_starts_with_plain_english_takeaway(tmp_path):
+    _write_run(tmp_path, "winner", 99.0, 90.0)
+
+    write_leaderboard(tmp_path)
+
+    markdown = (tmp_path / "leaderboard.md").read_text(encoding="utf-8")
+    assert "## Plain-English Takeaway" in markdown
+    assert "Best measured model" in markdown
+
+
+def test_build_leaderboard_recomputes_stale_llama_bench_speed_from_raw_stdout(tmp_path):
+    inflated = _write_run(tmp_path, "inflated", 487.90, 475.03)
+    payload = json.loads((inflated / "best-settings.json").read_text(encoding="utf-8"))
+    payload["result"]["stdout"] = "\n".join(
+        [
+            json.dumps({"n_prompt": 512, "n_gen": 0, "avg_ts": 1286.674301}),
+            json.dumps({"n_prompt": 0, "n_gen": 128, "avg_ts": 128.792227}),
+            json.dumps({"n_prompt": 128, "n_gen": 32, "avg_ts": 475.030187}),
+        ]
+    )
+    (inflated / "best-settings.json").write_text(json.dumps(payload), encoding="utf-8")
+    _write_run(tmp_path, "steady", 200.0, 190.0)
+
+    leaderboard = build_leaderboard(tmp_path)
+
+    inflated_entry = next(entry for entry in leaderboard.entries if entry.run_id == "inflated")
+    assert inflated_entry.generation_tps == 128.792227
+    assert inflated_entry.score < 200.0
+    assert leaderboard.champion.model_name == "steady.gguf"
+
+
+def test_successful_unknown_failure_is_normalized_to_none(tmp_path):
+    _write_run(tmp_path, "legacy-success", 60.0, 40.0, failure="unknown")
+
+    entry = build_leaderboard(tmp_path).entries[0]
+
+    assert entry.failure == "none"
+
+
+def test_leaderboard_surfaces_real_serving_ttft_and_tps(tmp_path):
+    _write_run(
+        tmp_path,
+        "served",
+        60.0,
+        40.0,
+        serving_ttft_ms=750.0,
+        serving_warm_ttft_ms=250.0,
+        serving_warmup_penalty_ms=500.0,
+        serving_tokens_per_second=30.0,
+    )
+
+    leaderboard = write_leaderboard(tmp_path)
+    entry = leaderboard.entries[0]
+    markdown = (tmp_path / "leaderboard.md").read_text(encoding="utf-8")
+
+    assert entry.serving_ttft_ms == 750.0
+    assert entry.serving_warm_ttft_ms == 250.0
+    assert entry.serving_warmup_penalty_ms == 500.0
+    assert entry.serving_tps == 30.0
+    assert "750 ms" in markdown
+    assert "250 ms" in markdown
+    assert "500 ms" in markdown
+    assert "30.00 tok/s" in markdown

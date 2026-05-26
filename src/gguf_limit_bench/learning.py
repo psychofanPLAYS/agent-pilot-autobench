@@ -6,14 +6,16 @@ from pathlib import Path
 import re
 
 import optuna
+from optuna.trial import TrialState
 
 from gguf_limit_bench.autoresearch import AttemptResult, AutoresearchSettings
 
 
-CONTEXT_CHOICES = [0, 4096, 8192, 16384, 32768, 65536, 131072]
+CONTEXT_CHOICES = [4096, 8192, 16384, 32768, 65536, 131072]
 BATCH_CHOICES = [512, 1024, 2048, 4096]
 UBATCH_CHOICES = [128, 256, 512, 1024]
 GPU_LAYER_CHOICES = [99, 80, 60, 40]
+LEARNING_SCORE_VERSION = "score-v3-4k-serving-suite"
 
 
 @dataclass(frozen=True)
@@ -66,11 +68,16 @@ class OptunaSettingsLearner:
         self.study.tell(suggestion.trial_id, result.score())
 
     def best(self) -> dict | None:
-        if not self.study.trials:
+        complete_trials = [
+            trial
+            for trial in self.study.trials
+            if trial.state == TrialState.COMPLETE and trial.value is not None
+        ]
+        if not complete_trials:
             return None
         trial = self.study.best_trial
         settings = AutoresearchSettings(
-            context_size=int(trial.params.get("context_size", 0)),
+            context_size=int(trial.params.get("context_size", 4096)),
             parallel=int(trial.params.get("parallel", 1)),
             gpu_layers=int(trial.params.get("gpu_layers", 99)),
             batch_size=int(trial.params.get("batch_size", 2048)),
@@ -89,7 +96,7 @@ class OptunaSettingsLearner:
 def study_name_for_model(model: Path) -> str:
     stable = hashlib.sha1(str(model).lower().encode("utf-8")).hexdigest()[:12]
     slug = re.sub(r"[^a-zA-Z0-9_-]+", "-", model.stem).strip("-")[:60]
-    return f"gguf-{slug}-{stable}"
+    return f"gguf-{LEARNING_SCORE_VERSION}-{slug}-{stable}"
 
 
 def _sqlite_url(path: Path) -> str:

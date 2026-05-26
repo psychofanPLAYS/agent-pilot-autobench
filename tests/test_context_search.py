@@ -1,8 +1,14 @@
-from gguf_limit_bench.context_search import ContextLimitPlanner, context_ladder, refine_context_boundary
+from gguf_limit_bench.context_search import (
+    ContextLimitPlanner,
+    context_ladder,
+    refine_context_boundary,
+)
 
 
 def test_context_ladder_matches_qwen36_campaign_shape():
     assert context_ladder() == [
+        4_096,
+        8_192,
         16_384,
         32_768,
         65_536,

@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.13"]
+        python-version: ["3.11", "3.12", "3.13"]
 
     steps:
       - name: Check out repository
@@ -30,5 +30,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev --locked
 
+      - name: Check formatting
+        run: uv run --extra dev ruff format --check .
+
+      - name: Lint
+        run: uv run --extra dev ruff check .
+
       - name: Run tests
-        run: uv run pytest -q
+        run: uv run --extra dev pytest -q

@@ -26,5 +26,5 @@ def test_build_quick_llama_bench_command_uses_jsonl_and_safe_repetitions():
 def test_limit_profile_expands_context_depths_without_unbounded_values():
     profile = BenchProfile.limit(max_depth=32768)
 
-    assert profile.depths == [0, 4096, 8192, 16384, 32768]
+    assert profile.depths == [4096, 8192, 16384, 32768]
     assert max(profile.depths) == 32768

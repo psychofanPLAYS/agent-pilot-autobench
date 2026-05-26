@@ -61,3 +61,10 @@ def test_public_docs_do_not_use_personal_name():
 
     assert "David" not in public_text
     assert "David's" not in public_text
+
+
+def test_public_package_docstring_does_not_leak_private_workstation_name():
+    package_init = Path("src/gguf_limit_bench/__init__.py").read_text(encoding="utf-8")
+
+    assert "David" not in package_init
+    assert "XTREME" not in package_init

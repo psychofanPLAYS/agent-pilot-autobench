@@ -25,6 +25,11 @@ Tech stack: Python, Textual, Rich, Typer, pytest, psutil, nvidia-ml-py, Optuna, 
 - [ ] Read LM Studio logs/settings as read-only profile hints.
 - [x] Add a Karpathy-style loop: fixed budget, mutate one setting, measure, keep if score improves.
 - [x] Add plain-English docs and a command board.
+- [x] Add the required benchmark-suite ledgers and CLI wrapper before production-ready labeling.
+- [x] Integrate a command-based general-purpose benchmark wrapper for EleutherAI `lm-evaluation-harness`.
+- [x] Integrate a command-based agentic benchmark wrapper for Inspect AI tasks.
+- [ ] Add ready-to-run BFCL, SWE-bench-style, tau2/tau3-bench-style, and repo-local deterministic task plans.
+- [ ] Upgrade the autoresearch loop to Karpathy-style keep/discard/crash decisions over a comparable `agent_bench_score` backed by git history and TSV ledgers.
 - [ ] Run unit tests, smoke tests, and commit the project repo.
 
 ## Receipts
@@ -45,6 +50,10 @@ Each benchmark run writes:
 ## Autoresearch Rule
 
 The optimizer uses Karpathy's core pattern: fixed time budget, one metric, small setting changes, keep the change only when the recorded score improves. It now also persists Optuna trials under `runs/learning/optuna.sqlite3`, so later runs can reuse prior results instead of starting from scratch.
+This is not the full Karpathy contract until the required benchmark-suite phase
+exists. See `docs\BENCHMARK-SUITE-PHASE.md`.
+The context ladder starts at 4K, then climbs through 8K, 16K, 32K, and higher
+contexts. Do not use an implicit/default context as the first production signal.
 
 When learning is enabled, each new model study starts with the safe baseline settings, then Optuna proposes later trials from prior evidence. Failed trials are still useful because they teach the search to avoid unstable settings or models that fail to load.
 
@@ -55,6 +64,21 @@ For MTP-focused models, use `--mtp-only` plus `--workflow-eval`. The workflow ev
 Current implemented score:
 
 
-`score = generation_tokens_per_sec + prompt_tokens_per_sec / 100 + context_bonus - ttft_penalty`
+`score = generation_tokens_per_sec + prompt_tokens_per_sec / 100 + context_bonus + workflow_score + serving_tokens_per_sec / 10 - cold_serving_ttft_ms / 1000`
 
 Failed attempts receive a large negative score so Optuna learns to avoid settings that crash or OOM.
+When serving TTFT is missing, the score uses a 10-second penalty so old
+speed-only receipts cannot look as strong as measured `llama-server` evidence.
+The probe also records warm TTFT and warmup penalty so Qwen-style first-question
+latency can be separated from warmed-up serving behavior.
+The probe runs fixed questions in the same order every time: 1 at 4K, 2 at 8K,
+3 at 16K, and 5 at 32K and above. Per-question rows append to
+`runs/serving-metrics.tsv` for charting.
+
+Production-ready scoring still requires:
+
+- `runs\benchmark-suite.tsv` for general-purpose benchmark evidence.
+- `runs\agentic-suite.tsv` for agentic benchmark evidence.
+- `runs\agent-bench-score.tsv` for the combined benchmark-suite scalar.
+- keep/discard/crash decisions that preserve winning settings and reject losing
+  settings in the Karpathy-style loop.

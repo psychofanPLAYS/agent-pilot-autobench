@@ -15,7 +15,13 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "mypy>=1.19.0",
     "pytest>=8.0.0",
+    "ruff>=0.14.0",
+]
+bench = [
+    "inspect-ai>=0.3.226",
+    "lm-eval>=0.4.12",
 ]
 
 [project.scripts]

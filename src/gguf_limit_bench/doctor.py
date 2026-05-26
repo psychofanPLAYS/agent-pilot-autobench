@@ -36,12 +36,15 @@ def build_doctor_report(
     llama_bench: Path,
     llama_cli: Path,
     runs_root: Path,
+    llama_server: Path | None = None,
 ) -> DoctorReport:
     checks: list[DoctorCheck] = []
     for root in model_roots:
         checks.append(_path_check(name=f"model root: {root}", path=root, expected="directory"))
     checks.append(_path_check(name="llama-bench", path=llama_bench, expected="file"))
     checks.append(_path_check(name="llama-cli", path=llama_cli, expected="file"))
+    if llama_server is not None:
+        checks.append(_path_check(name="llama-server", path=llama_server, expected="file"))
     checks.append(_runs_root_check(runs_root))
     return DoctorReport(checks=checks)
 

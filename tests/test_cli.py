@@ -1,10 +1,12 @@
 import json
 from pathlib import Path
+import sys
 
 from typer.testing import CliRunner
 
 from gguf_limit_bench.autoresearch import AttemptResult
-from gguf_limit_bench.cli import DEFAULT_MODEL_ROOTS, app
+from gguf_limit_bench.cli import app
+from gguf_limit_bench.config import DEFAULT_MODEL_ROOTS
 from gguf_limit_bench.discovery import ModelInfo
 from gguf_limit_bench.doctor import DoctorCheck, DoctorReport
 
@@ -51,7 +53,9 @@ def test_autoresearch_command_writes_receipts(tmp_path, monkeypatch):
     )
 
     assert result.exit_code == 0
-    run_dirs = [path for path in (tmp_path / "runs").iterdir() if path.is_dir() and path.name != "learning"]
+    run_dirs = [
+        path for path in (tmp_path / "runs").iterdir() if path.is_dir() and path.name != "learning"
+    ]
     assert len(run_dirs) == 1
     assert json.loads((run_dirs[0] / "best-settings.json").read_text(encoding="utf-8"))
     assert (tmp_path / "runs" / "learning" / "optuna.sqlite3").exists()
@@ -80,7 +84,9 @@ def test_autoresearch_all_qwen_only_skips_non_qwen_models(tmp_path, monkeypatch)
     )
 
     assert result.exit_code == 0
-    run_dirs = [path for path in (tmp_path / "runs").iterdir() if path.is_dir() and path.name != "learning"]
+    run_dirs = [
+        path for path in (tmp_path / "runs").iterdir() if path.is_dir() and path.name != "learning"
+    ]
     assert len(run_dirs) == 1
     assert (tmp_path / "runs" / "learning" / "optuna.sqlite3").exists()
 
@@ -119,9 +125,14 @@ def test_autoresearch_all_qwen_35b_only_skips_27b_models(tmp_path, monkeypatch):
     )
 
     assert result.exit_code == 0
-    run_dirs = [path for path in (tmp_path / "runs").iterdir() if path.is_dir() and path.name != "learning"]
+    run_dirs = [
+        path for path in (tmp_path / "runs").iterdir() if path.is_dir() and path.name != "learning"
+    ]
     assert len(run_dirs) == 1
-    assert "35B" in json.loads((run_dirs[0] / "best-settings.json").read_text(encoding="utf-8"))["model"]
+    assert (
+        "35B"
+        in json.loads((run_dirs[0] / "best-settings.json").read_text(encoding="utf-8"))["model"]
+    )
 
 
 def test_default_model_roots_include_lm_studio_folder():
@@ -158,7 +169,9 @@ def test_autoresearch_all_honors_total_budget_and_finish_early(tmp_path, monkeyp
     )
 
     assert result.exit_code == 0
-    run_dirs = [path for path in (tmp_path / "runs").iterdir() if path.is_dir() and path.name != "learning"]
+    run_dirs = [
+        path for path in (tmp_path / "runs").iterdir() if path.is_dir() and path.name != "learning"
+    ]
     assert len(run_dirs) == 1
 
 
@@ -422,12 +435,18 @@ def test_first_run_command_checks_paths_and_prepares_local_state(tmp_path, monke
             str(db_path),
             "--runs-root",
             str(runs_root),
+            "--shim-dir",
+            str(tmp_path / "bin"),
+            "--skip-env-sync",
         ],
     )
 
     assert result.exit_code == 0
     assert db_path.exists()
     assert (runs_root / "leaderboard.md").exists()
+    assert (tmp_path / "bin" / "agent-autobench.bat").exists()
+    assert (tmp_path / "bin" / "apb.bat").exists()
+    assert "First-time installer" in result.output
     assert "First-time setup is ready" in result.output
     assert "agent-autobench --start" in result.output
 
@@ -457,6 +476,9 @@ def test_first_run_json_out_is_agent_friendly(tmp_path, monkeypatch):
             str(tmp_path / "db.sqlite"),
             "--runs-root",
             str(tmp_path / "runs"),
+            "--shim-dir",
+            str(tmp_path / "bin"),
+            "--skip-env-sync",
             "--json-out",
         ],
     )
@@ -465,7 +487,9 @@ def test_first_run_json_out_is_agent_friendly(tmp_path, monkeypatch):
     assert "\x1b[" not in result.output
     payload = json.loads(result.output)
     assert payload["ready"] is False
+    assert payload["install_ready"] is True
     assert payload["next_command"] == "agent-autobench doctor"
+    assert any(step["name"] == "agent-autobench command" for step in payload["install_steps"])
     assert payload["checks"][0]["name"] == "llama-bench"
 
 
@@ -498,9 +522,139 @@ def test_results_command_prints_latest_champion(tmp_path):
     assert "HTML report" in result.output
 
 
+def test_serve_probe_command_prints_real_serving_metrics(tmp_path, monkeypatch):
+    class FakeServingProbeResult:
+        ok = True
+        ttft_ms = 321.0
+        tokens_per_second = 27.5
+        warm_ttft_ms = 111.0
+        warm_tokens_per_second = 30.0
+        warmup_penalty_ms = 210.0
+        server_ready_ms = 1000.0
+        cold_start_to_first_token_ms = 1321.0
+        ttft_samples_ms = [321.0, 120.0, 102.0]
+        tokens_cached_samples = [0, 7, 7]
+        tokens_evaluated_samples = [7, 0, 0]
+        generated_tokens = 12
+        output_chars = 48
+        failure = "none"
+        stderr_tail = ""
+
+        def to_dict(self):
+            return {
+                "ok": self.ok,
+                "ttft_ms": self.ttft_ms,
+                "tokens_per_second": self.tokens_per_second,
+                "warm_ttft_ms": self.warm_ttft_ms,
+                "warmup_penalty_ms": self.warmup_penalty_ms,
+                "server_ready_ms": self.server_ready_ms,
+                "cold_start_to_first_token_ms": self.cold_start_to_first_token_ms,
+                "generated_tokens": self.generated_tokens,
+                "output_chars": self.output_chars,
+                "failure": self.failure,
+            }
+
+    calls: list[dict] = []
+
+    def fake_probe(**kwargs):
+        calls.append(kwargs)
+        return FakeServingProbeResult()
+
+    monkeypatch.setattr("gguf_limit_bench.cli.probe_llama_server_ttft", fake_probe)
+    model = tmp_path / "Qwen3-Test-Q4_K_M.gguf"
+    model.write_bytes(b"fake")
+
+    result = runner.invoke(app, ["serve-probe", "--model", str(model), "--context-size", "8192"])
+
+    assert result.exit_code == 0
+    assert calls[0]["model"] == model
+    assert calls[0]["settings"].context_size == 8192
+    assert calls[0]["samples"] == 0
+    assert calls[0]["cache_prompt"] is True
+    assert "Cold TTFT: 321 ms" in result.output
+    assert "Warm TTFT: 111 ms" in result.output
+    assert "Warmup penalty: 210 ms" in result.output
+    assert "Serving speed: 27.50 tok/s" in result.output
+
+
 def test_packs_command_lists_builtin_benchmark_packs():
     result = runner.invoke(app, ["packs"])
 
     assert result.exit_code == 0
     assert "hermes-pilot" in result.output
     assert "context-limit" in result.output
+
+
+def test_benchmark_suite_command_runs_plan_and_writes_ledgers(tmp_path):
+    plan_path = tmp_path / "suite.plan.json"
+    plan_path.write_text(
+        json.dumps(
+            {
+                "model": "qwen-local",
+                "context": 32768,
+                "tasks": [
+                    {
+                        "id": "general",
+                        "phase": "general",
+                        "harness": "lm-evaluation-harness",
+                        "command": [
+                            sys.executable,
+                            "-c",
+                            "import json; print(json.dumps({'score': 0.6}))",
+                        ],
+                    },
+                    {
+                        "id": "agentic",
+                        "phase": "agentic",
+                        "harness": "inspect-ai",
+                        "command": [
+                            sys.executable,
+                            "-c",
+                            "import json; print(json.dumps({'score': 0.8}))",
+                        ],
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "benchmark-suite",
+            "--plan",
+            str(plan_path),
+            "--runs-root",
+            str(tmp_path / "runs"),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "agent_bench_score: 0.700000" in result.output
+    assert (tmp_path / "runs" / "benchmark-suite.tsv").exists()
+    assert (tmp_path / "runs" / "agentic-suite.tsv").exists()
+
+
+def test_benchmark_suite_template_writes_real_harness_plan(tmp_path):
+    output = tmp_path / "benchmark-suite.plan.json"
+
+    result = runner.invoke(
+        app,
+        [
+            "benchmark-suite-template",
+            "--output",
+            str(output),
+            "--model",
+            "qwen-local",
+            "--base-url",
+            "http://127.0.0.1:8080/v1",
+        ],
+    )
+
+    payload = json.loads(output.read_text(encoding="utf-8"))
+
+    assert result.exit_code == 0
+    assert "Benchmark-suite plan written" in result.output
+    assert payload["tasks"][0]["command"][4:7] == ["lm-eval", "run", "--model"]
+    assert payload["tasks"][1]["command"][4:7] == ["inspect", "eval", "path/to/inspect_task.py"]

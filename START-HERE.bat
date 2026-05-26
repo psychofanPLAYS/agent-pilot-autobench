@@ -10,28 +10,39 @@ echo This opens the easy first-run flow.
 echo You can close this window any time.
 echo.
 
-where uv >nul 2>nul
-if errorlevel 1 (
-  echo I could not find uv on this computer.
-  echo.
-  echo Please install uv first:
-  echo https://docs.astral.sh/uv/getting-started/installation/
-  echo.
-  pause
-  exit /b 1
+set "LOCAL_AGENT=%CD%\.venv\Scripts\agent-autobench.exe"
+if exist "%LOCAL_AGENT%" (
+  set "AGENT_CMD="%LOCAL_AGENT%""
+) else (
+  where uv >nul 2>nul
+  if errorlevel 1 (
+    echo I could not find uv, and the local .venv command is not installed yet.
+    echo.
+    echo Please install uv first:
+    echo https://docs.astral.sh/uv/getting-started/installation/
+    echo.
+    pause
+    exit /b 1
+  )
+  set "AGENT_CMD=uv run --extra dev --extra bench agent-autobench"
 )
 
-uv run --extra dev agent-autobench --help >nul 2>nul
+call %AGENT_CMD% --help >nul 2>nul
 if "%ERRORLEVEL%"=="0" (
-  uv run --extra dev agent-autobench first-run
+  call %AGENT_CMD% first-run
   if not errorlevel 1 (
-    uv run --extra dev agent-autobench --start
+    call %AGENT_CMD% --start
   )
 ) else (
   echo The agent-autobench command is not available in this checkout.
-  echo Falling back to the older pilotbench startup command.
   echo.
-  uv run --extra dev pilotbench --start
+  if exist "%CD%\.venv\Scripts\pilotbench.exe" (
+    "%CD%\.venv\Scripts\pilotbench.exe" --start
+  ) else (
+    echo Falling back to the older pilotbench startup command through uv.
+    echo.
+    uv run --extra dev --extra bench pilotbench --start
+  )
 )
 set EXIT_CODE=%ERRORLEVEL%
 

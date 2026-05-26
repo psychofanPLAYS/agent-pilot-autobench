@@ -13,7 +13,7 @@ class BenchProfile:
     flash_attention: bool = True
     batch_size: int = 2048
     ubatch_size: int = 512
-    depths: list[int] = field(default_factory=lambda: [0])
+    depths: list[int] = field(default_factory=lambda: [4096])
     timeout_seconds: int = 300
 
     @classmethod
@@ -22,11 +22,11 @@ class BenchProfile:
 
     @classmethod
     def baseline(cls) -> "BenchProfile":
-        return cls(name="baseline", repetitions=3, depths=[0, 4096, 8192], timeout_seconds=900)
+        return cls(name="baseline", repetitions=3, depths=[4096, 8192, 16384], timeout_seconds=900)
 
     @classmethod
     def limit(cls, max_depth: int = 131072) -> "BenchProfile":
-        depths = [0]
+        depths = []
         value = 4096
         while value <= max_depth:
             depths.append(value)
@@ -63,4 +63,3 @@ def build_llama_bench_command(
     if active_depth:
         command.extend(["-d", str(active_depth)])
     return command
-

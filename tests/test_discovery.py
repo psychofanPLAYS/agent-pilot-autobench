@@ -15,6 +15,15 @@ def test_parse_model_name_detects_qwen_family_quant_and_moe():
     assert info.has_mtp is True
 
 
+def test_parse_model_name_does_not_mark_plain_qwen35_moe_as_mtp():
+    info = parse_model_name(Path("Qwen3.6-35B-A3B-Q4_K_M.gguf"))
+
+    assert info.family == "qwen"
+    assert info.parameters == "35B-A3B"
+    assert info.is_moe is True
+    assert info.has_mtp is False
+
+
 def test_discover_models_pairs_mmproj_with_weight(tmp_path):
     model_dir = tmp_path / "lmstudio-community" / "Qwen3.6-35B-A3B-GGUF"
     model_dir.mkdir(parents=True)

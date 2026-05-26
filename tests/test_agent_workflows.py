@@ -66,7 +66,7 @@ def test_workflow_eval_receipts_are_small_and_deterministic(tmp_path):
     }
     assert Path(best["model"]) == Path("G:/AI/models/Qwen3-Agent-Q4_K_M.gguf")
     assert best["settings"] == {
-        "context_size": 0,
+        "context_size": 4096,
         "parallel": 1,
         "gpu_layers": 99,
         "batch_size": 2048,
@@ -125,5 +125,7 @@ def test_bulk_autoresearch_supports_total_budget_and_finish_early(tmp_path, monk
     )
 
     assert result.exit_code == 0
-    run_dirs = [path for path in (tmp_path / "runs").iterdir() if path.is_dir() and path.name != "learning"]
+    run_dirs = [
+        path for path in (tmp_path / "runs").iterdir() if path.is_dir() and path.name != "learning"
+    ]
     assert len(run_dirs) == 1

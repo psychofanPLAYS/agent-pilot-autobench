@@ -1,7 +1,11 @@
 from pathlib import Path
 
 from gguf_limit_bench.autoresearch import AttemptResult, AutoresearchSettings
-from gguf_limit_bench.learning import OptunaSettingsLearner, study_name_for_model
+from gguf_limit_bench.learning import (
+    LEARNING_SCORE_VERSION,
+    OptunaSettingsLearner,
+    study_name_for_model,
+)
 
 
 def _good_result(settings: AutoresearchSettings, speed: float = 60.0) -> AttemptResult:
@@ -24,6 +28,7 @@ def test_study_name_for_model_is_stable_and_filesystem_safe():
 
     assert first == second
     assert first.startswith("gguf-")
+    assert LEARNING_SCORE_VERSION in first
     assert " " not in first
 
 
@@ -54,6 +59,16 @@ def test_optuna_learner_suggests_baseline_before_exploring(tmp_path):
     suggestion = learner.suggest()
 
     assert suggestion.settings == AutoresearchSettings()
+
+
+def test_optuna_learner_has_no_best_before_completed_trial(tmp_path):
+    learner = OptunaSettingsLearner(
+        storage_path=tmp_path / "learning.sqlite3",
+        model=Path("G:/AI/models/Qwen3-Test-Q4_K_M.gguf"),
+        parallel_max=4,
+    )
+
+    assert learner.best() is None
 
 
 def test_optuna_learner_records_failed_trials_as_bad_scores(tmp_path):

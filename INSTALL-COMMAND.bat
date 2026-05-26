@@ -22,15 +22,17 @@ echo No admin rights are needed.
 echo This script will ask before changing your user PATH.
 echo.
 
-where uv >nul 2>nul
-if errorlevel 1 (
-  echo I could not find uv on this computer.
-  echo.
-  echo Please install uv first:
-  echo https://docs.astral.sh/uv/getting-started/installation/
-  echo.
-  pause
-  exit /b 1
+if not exist "%REPO_DIR%\.venv\Scripts\agent-autobench.exe" (
+  where uv >nul 2>nul
+  if errorlevel 1 (
+    echo I could not find uv, and the local .venv command is not installed yet.
+    echo.
+    echo Please install uv first:
+    echo https://docs.astral.sh/uv/getting-started/installation/
+    echo.
+    pause
+    exit /b 1
+  )
 )
 
 if not exist "%SHIM_DIR%" mkdir "%SHIM_DIR%"
@@ -45,7 +47,11 @@ if errorlevel 1 (
 (
   echo @echo off
   echo cd /d "%REPO_DIR%"
-  echo uv run --extra dev agent-autobench %%*
+  echo if exist "%REPO_DIR%\.venv\Scripts\agent-autobench.exe" ^(
+  echo   "%REPO_DIR%\.venv\Scripts\agent-autobench.exe" %%*
+  echo ^) else ^(
+  echo   uv run --extra dev --extra bench agent-autobench %%*
+  echo ^)
 ) > "%SHIM_FILE%"
 if errorlevel 1 (
   echo Could not write:
@@ -58,7 +64,11 @@ if errorlevel 1 (
 (
   echo @echo off
   echo cd /d "%REPO_DIR%"
-  echo uv run --extra dev apb %%*
+  echo if exist "%REPO_DIR%\.venv\Scripts\apb.exe" ^(
+  echo   "%REPO_DIR%\.venv\Scripts\apb.exe" %%*
+  echo ^) else ^(
+  echo   uv run --extra dev --extra bench apb %%*
+  echo ^)
 ) > "%SHORT_SHIM_FILE%"
 if errorlevel 1 (
   echo Could not write:

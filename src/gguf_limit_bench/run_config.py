@@ -13,6 +13,13 @@ class RunStatus(StrEnum):
     REJECTED = "rejected"
     CANDIDATE = "candidate"
     CHAMPION_RETEST_NEEDED = "champion_retest_needed"
+    SLOW = "slow"
+    SPEED_ONLY = "speed_only"
+    SERVING_MEASURED = "serving_measured"
+    CONTEXT_UNPROVEN = "context_unproven"
+    WORKFLOW_UNPROVEN = "workflow_unproven"
+    WORKFLOW_WEAK = "workflow_weak"
+    WORKFLOW_SMOKE = "workflow_smoke"
 
 
 @dataclass(frozen=True)

@@ -33,29 +33,62 @@ That is the start button.
 It will:
 
 1. Open a black command window.
-2. Run the beginner startup check.
-3. Open the model picker when the checks are good.
+2. Use the local `.venv` command when it is already installed.
+3. Fall back to `uv` when the local command is not installed yet.
+4. Run the first-time installer.
+5. Create the command shortcuts under `G:\_codex_global\bin`.
+6. Open the model picker when the checks are good.
 
-If something is missing, it will tell you what is missing.
+If something is missing, it will tell you what is missing in normal language.
 
-## If You Already Know Terminals
+## Best First Command
 
-Open a terminal in this folder and run:
+Double-click this:
+
+```text
+START-HERE.bat
+```
+
+That is easier than typing commands by hand.
+
+For a terminal, run:
+
+```powershell
+.\.venv\Scripts\agent-autobench.exe first-run
+```
+
+If the local `.venv` is not installed yet, use:
 
 ```powershell
 uv run --extra dev agent-autobench first-run
 ```
 
-Check only, without opening the picker:
+## Check Only
+
+This checks the computer without opening the model picker:
+
+```powershell
+.\.venv\Scripts\agent-autobench.exe --start --check-only
+```
+
+Or through `uv`:
 
 ```powershell
 uv run --extra dev agent-autobench --start --check-only
 ```
 
+## If You Already Know Terminals
+
+The direct local command is:
+
+```powershell
+.\.venv\Scripts\agent-autobench.exe first-run
+```
+
 The older compatibility command also works:
 
 ```powershell
-uv run --extra dev pilotbench --start
+.\.venv\Scripts\pilotbench.exe --start
 ```
 
 ## Make The Command Work From Anywhere
@@ -73,8 +106,11 @@ G:\_codex_global\bin\agent-autobench.bat
 G:\_codex_global\bin\apb.bat
 ```
 
-The installer asks before it changes your user PATH. PATH is the Windows list of
-folders where commands can be found. If you say yes, open a new terminal and run:
+The `first-run` command already creates those files. The `.bat` installer is the
+double-click helper for adding that folder to your user PATH.
+
+PATH is the Windows list of folders where commands can be found. If you say yes,
+open a new terminal and run:
 
 ```powershell
 agent-autobench first-run
@@ -100,6 +136,7 @@ Those receipts are the proof of what happened.
 
 ## If It Says `uv` Is Missing
 
+That means the local `.venv` command is not installed yet either.
 Install `uv` first:
 
 ```text

@@ -54,6 +54,7 @@ def test_evaluate_workflow_output_scores_valid_agent_json():
     assert result["passed"] is True
     assert result["score"] > 0
     assert result["parsed"]["action"] == "inspect_receipts"
+    assert result["evidence_level"] == "smoke"
 
 
 def test_workflow_augmented_runner_adds_real_world_score_without_breaking_bench_result():
@@ -108,8 +109,10 @@ def test_workflow_evaluator_writes_small_json_receipt(tmp_path, monkeypatch):
     result = evaluator.run(AutoresearchSettings())
 
     assert result["score"] > 0
+    assert result["evidence_level"] == "smoke"
     payload = json.loads((tmp_path / "workflow-results.json").read_text(encoding="utf-8"))
     assert payload["tasks"][0]["passed"] is True
+    assert payload["evidence_level"] == "smoke"
 
 
 def test_workflow_evaluator_retries_without_schema_when_llama_grammar_fails(tmp_path, monkeypatch):

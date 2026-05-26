@@ -19,7 +19,9 @@ class BenchmarkRunner:
         for depth in profile.depths:
             command = build_llama_bench_command(self.llama_bench, model, profile, depth=depth)
             receipt.mark_recovery(step=f"depth:{depth}", status="running")
-            receipt.event("command_started", {"args": command, "telemetry": sample_telemetry().to_dict()})
+            receipt.event(
+                "command_started", {"args": command, "telemetry": sample_telemetry().to_dict()}
+            )
             completed = subprocess.run(
                 command,
                 capture_output=True,
@@ -41,10 +43,11 @@ class BenchmarkRunner:
                 receipt.mark_recovery(step=f"depth:{depth}", status="failed")
                 break
         receipt.mark_recovery(step="benchmark", status="finished")
-        receipt.write_summary([f"# {model.name}", "", f"Profile: `{profile.name}`", "", "See `events.jsonl`."])
+        receipt.write_summary(
+            [f"# {model.name}", "", f"Profile: `{profile.name}`", "", "See `events.jsonl`."]
+        )
         return receipt
 
 
 def _safe_slug(value: str) -> str:
     return "".join(char if char.isalnum() or char in "-_" else "-" for char in value)[:80]
-

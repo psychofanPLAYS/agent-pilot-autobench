@@ -20,3 +20,23 @@ def test_run_receipt_writes_jsonl_events_and_recovery_file(tmp_path):
     assert recovery["step"] == "benchmark"
     assert recovery["status"] == "running"
 
+
+def test_run_receipt_create_avoids_same_second_folder_collisions(tmp_path, monkeypatch):
+    class FakeDateTime:
+        @classmethod
+        def now(cls):
+            return cls()
+
+        def strftime(self, _format: str) -> str:
+            return "20260526-120000"
+
+        def isoformat(self, timespec: str = "seconds") -> str:
+            return "2026-05-26T12:00:00"
+
+    monkeypatch.setattr("gguf_limit_bench.receipts.datetime", FakeDateTime)
+
+    first = RunReceipt.create(tmp_path, slug="qwen-test")
+    second = RunReceipt.create(tmp_path, slug="qwen-test")
+
+    assert first.path.name == "20260526-120000-qwen-test"
+    assert second.path.name == "20260526-120000-qwen-test-2"
