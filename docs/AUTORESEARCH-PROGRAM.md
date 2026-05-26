@@ -152,10 +152,10 @@ is intentionally explicit but not passing evidence until those external harnesse
 are installed and configured.
 
 The plan calls real harness commands, currently expected to start with
-`lm-eval run` for general-purpose scores and `inspect eval` for agentic scores.
-Missing harnesses, crashes, and scoreless runs are written as failed evidence.
-Two-step harnesses such as BFCL can use sequential `commands` so generation and
-evaluation stay in one scored task receipt.
+`uvx --from lm-eval lm-eval run` for general-purpose scores and `inspect eval`
+for agentic scores. Missing harnesses, crashes, and scoreless runs are written
+as failed evidence. Two-step harnesses such as BFCL can use sequential
+`commands` so generation and evaluation stay in one scored task receipt.
 
 To make autoresearch optimize settings by the suite result, pass the same plan
 into the loop:

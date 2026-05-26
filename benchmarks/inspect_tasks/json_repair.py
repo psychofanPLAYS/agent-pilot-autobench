@@ -9,10 +9,7 @@ def json_repair():
     return Task(
         dataset=[
             Sample(
-                input=(
-                    "Return exactly this JSON object and no prose: "
-                    '{"ok":true,"items":[1,2,3]}'
-                ),
+                input=('Return exactly this JSON object and no prose: {"ok":true,"items":[1,2,3]}'),
                 target='{"ok":true,"items":[1,2,3]}',
             ),
             Sample(

@@ -68,7 +68,9 @@ def _is_number(value: Any) -> bool:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Extract a numeric benchmark score from JSON files.")
+    parser = argparse.ArgumentParser(
+        description="Extract a numeric benchmark score from JSON files."
+    )
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument(

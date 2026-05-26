@@ -176,7 +176,7 @@ def test_benchmark_suite_task_expands_environment_without_leaking_secret(tmp_pat
         runs_root=tmp_path / "runs",
     )
     command_receipt = json.loads(
-        ((tmp_path / "runs" / suite_run.run_id / "env_task" / "command-1.json")).read_text(
+        (tmp_path / "runs" / suite_run.run_id / "env_task" / "command-1.json").read_text(
             encoding="utf-8"
         )
     )

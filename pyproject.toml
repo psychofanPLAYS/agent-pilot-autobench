@@ -21,7 +21,6 @@ dev = [
 ]
 bench = [
     "inspect-ai>=0.3.226",
-    "lm-eval>=0.4.12",
     "openai>=1.0.0",
 ]
 

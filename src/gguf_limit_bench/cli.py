@@ -475,10 +475,9 @@ def benchmark_suite_template(
                 "env": {"PYTHONIOENCODING": "utf-8"},
                 "commands": [
                     [
-                        "uv",
-                        "run",
-                        "--extra",
-                        "bench",
+                        "uvx",
+                        "--from",
+                        "lm-eval",
                         "lm-eval",
                         "run",
                         "--model",

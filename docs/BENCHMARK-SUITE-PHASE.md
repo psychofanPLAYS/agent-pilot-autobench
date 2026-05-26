@@ -48,7 +48,7 @@ Executable wrapper now exists:
 - `agent-autobench benchmark-suite --plan benchmark-suite.plan.json`
 - `agent-autobench autoresearch --model MODEL --benchmark-suite-plan benchmark-suite.plan.json`
 - bundled plan files under `benchmarks\plans\`
-- installed optional dependency: `lm-eval`
+- external harness command: `uvx --from lm-eval lm-eval`
 
 Primary harness:
 
@@ -94,10 +94,10 @@ Candidate suites:
 
 Bundled plans:
 
-- `benchmarks\plans\local-openai-smoke.plan.json`: installed `lm-eval` plus
-  repo-local Inspect JSON repair.
-- `benchmarks\plans\local-bfcl-smoke.plan.json`: installed `lm-eval` plus
-  isolated BFCL `simple_python`.
+- `benchmarks\plans\local-openai-smoke.plan.json`: external `lm-eval` via
+  `uvx` plus repo-local Inspect JSON repair.
+- `benchmarks\plans\local-bfcl-smoke.plan.json`: external `lm-eval` via `uvx`
+  plus isolated BFCL `simple_python`.
 - `benchmarks\plans\external-agentic-heavy.plan.json`: explicit SWE-bench and
   tau2-bench integration plan. It should be treated as incomplete until those
   external harnesses and their Docker/API requirements are installed and a real

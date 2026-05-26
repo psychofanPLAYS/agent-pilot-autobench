@@ -17,10 +17,9 @@
       },
       "commands": [
         [
-          "uv",
-          "run",
-          "--extra",
-          "bench",
+          "uvx",
+          "--from",
+          "lm-eval",
           "lm-eval",
           "run",
           "--model",

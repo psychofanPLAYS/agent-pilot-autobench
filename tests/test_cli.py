@@ -797,7 +797,14 @@ def test_benchmark_suite_template_writes_real_harness_plan(tmp_path):
 
     assert result.exit_code == 0
     assert "Benchmark-suite plan written" in result.output
-    assert payload["tasks"][0]["commands"][0][4:7] == ["lm-eval", "run", "--model"]
+    assert payload["tasks"][0]["commands"][0][:5] == [
+        "uvx",
+        "--from",
+        "lm-eval",
+        "lm-eval",
+        "run",
+    ]
+    assert payload["tasks"][0]["commands"][0][5:7] == ["--model", "local-chat-completions"]
     assert payload["tasks"][0]["commands"][1][4:8] == [
         "python",
         "-m",

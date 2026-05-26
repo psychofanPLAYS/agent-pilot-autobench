@@ -85,6 +85,7 @@ From the repo root:
 
 ```powershell
 uv sync --extra dev --extra bench
+uvx --from lm-eval lm-eval --help
 ```
 
 Run the tests:
@@ -409,7 +410,9 @@ Working now:
 - real `llama-server` streaming TTFT probe through `serve-probe` and autoresearch
 - executable benchmark-suite wrapper through `agent-autobench benchmark-suite`
 - bundled benchmark-suite plans under `benchmarks\plans\`
-- installed benchmark harness base in the `bench` extra: `lm-eval` and `inspect-ai`
+- installed benchmark harness base: `inspect-ai` in the `bench` extra, with
+  EleutherAI `lm-eval` invoked through `uvx --from lm-eval` so its transitive
+  cache dependencies stay out of the committed project lockfile
 - isolated BFCL CLI venv at `.venv-bfcl` for Python 3.11, verified with
   `.venv-bfcl\Scripts\bfcl.exe --help`
 - autoresearch can consume a `--benchmark-suite-plan` and make
