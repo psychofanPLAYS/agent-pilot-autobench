@@ -26,6 +26,12 @@ class LeaderboardEntry:
     serving_cold_start_to_first_token_ms: float | None
     serving_tps: float | None
     serving_failure: str | None
+    agent_bench_score: float | None
+    benchmark_suite_general_score: float | None
+    benchmark_suite_agentic_score: float | None
+    benchmark_suite_status: str
+    benchmark_suite_receipt: str | None
+    benchmark_suite_failure: str | None
     failure: str
     settings: dict
     receipt_path: str
@@ -53,6 +59,10 @@ def build_leaderboard(runs_root: Path) -> Leaderboard:
         score = _normalized_score(payload, result)
         if failure == "model_load":
             status = "LOAD FAIL"
+        elif result.get("benchmark_suite_ok") is True:
+            status = "BENCHMARK SUITE"
+        elif result.get("benchmark_suite_ok") is False:
+            status = "SUITE FAILED"
         else:
             status = display_status(
                 evidence_status(
@@ -110,12 +120,38 @@ def build_leaderboard(runs_root: Path) -> Leaderboard:
                     else None
                 ),
                 serving_failure=result.get("serving_failure"),
+                agent_bench_score=_float_or_none(result.get("agent_bench_score")),
+                benchmark_suite_general_score=_float_or_none(
+                    result.get("benchmark_suite_general_score")
+                ),
+                benchmark_suite_agentic_score=_float_or_none(
+                    result.get("benchmark_suite_agentic_score")
+                ),
+                benchmark_suite_status=_benchmark_suite_status(result),
+                benchmark_suite_receipt=result.get("benchmark_suite_receipt"),
+                benchmark_suite_failure=result.get("benchmark_suite_failure"),
                 failure=failure,
                 settings=settings,
                 receipt_path=str(best_path.parent),
             )
         )
-    return Leaderboard(entries=sorted(entries, key=lambda entry: entry.score, reverse=True))
+    return Leaderboard(entries=sorted(entries, key=_leaderboard_rank_key, reverse=True))
+
+
+def _leaderboard_rank_key(entry: LeaderboardEntry) -> tuple[int, float]:
+    evidence_rank = {
+        "BENCHMARK SUITE": 700,
+        "WORKFLOW SMOKE": 600,
+        "WORKFLOW WEAK": 500,
+        "WORKFLOW UNPROVEN": 400,
+        "CONTEXT UNPROVEN": 300,
+        "SERVING MEASURED": 250,
+        "SPEED ONLY": 200,
+        "SLOW": 100,
+        "SUITE FAILED": 50,
+        "LOAD FAIL": 0,
+    }.get(entry.status, 0)
+    return evidence_rank, entry.score
 
 
 def _normalized_result(payload: dict) -> dict:
@@ -148,6 +184,8 @@ def _normalized_result(payload: dict) -> dict:
 def _normalized_score(payload: dict, result: dict) -> float:
     if not result.get("ok", False):
         return -10_000.0
+    if result.get("agent_bench_score") is not None:
+        return float(result["agent_bench_score"])
     context_size = int(
         result.get("context_size") or payload.get("settings", {}).get("context_size") or 0
     )
@@ -165,6 +203,18 @@ def _normalized_score(payload: dict, result: dict) -> float:
         + serving_speed_bonus
         - ttft_penalty
     )
+
+
+def _float_or_none(value) -> float | None:
+    return None if value is None else float(value)
+
+
+def _benchmark_suite_status(result: dict) -> str:
+    if result.get("benchmark_suite_ok") is True:
+        return "pass"
+    if result.get("benchmark_suite_ok") is False:
+        return "fail"
+    return "not_run"
 
 
 def write_leaderboard(runs_root: Path) -> Leaderboard:
@@ -211,16 +261,21 @@ def _leaderboard_markdown(leaderboard: Leaderboard) -> str:
         f"- Server ready: `{_format_ms(champion.serving_server_ready_ms)}`",
         f"- Server start to first token: `{_format_ms(champion.serving_cold_start_to_first_token_ms)}`",
         f"- Serving generation: `{_format_tps(champion.serving_tps)}`",
+        f"- Agent bench score: `{_format_score(champion.agent_bench_score)}`",
+        f"- Benchmark suite: `{champion.benchmark_suite_status}`",
+        f"- Benchmark suite general: `{_format_score(champion.benchmark_suite_general_score)}`",
+        f"- Benchmark suite agentic: `{_format_score(champion.benchmark_suite_agentic_score)}`",
         f"- Evidence: `{champion.status}`",
         "",
         "## Runs",
         "",
-        "| Rank | Status | Score | Bench gen tok/s | Prompt tok/s | Cold TTFT | Warm TTFT | Warmup | Serve tok/s | Context | Model |",
-        "|---:|---|---:|---:|---:|---:|---:|---:|---:|---|---|",
+        "| Rank | Status | Score | Agent bench | Suite | Bench gen tok/s | Prompt tok/s | Cold TTFT | Warm TTFT | Warmup | Serve tok/s | Context | Model |",
+        "|---:|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---|---|",
     ]
     for rank, entry in enumerate(leaderboard.entries, start=1):
         lines.append(
             f"| {rank} | {entry.status} | {entry.score:.2f} | "
+            f"{_format_score(entry.agent_bench_score)} | {entry.benchmark_suite_status} | "
             f"{entry.generation_tps:.2f} | {entry.prompt_tps:.2f} | "
             f"{_format_ms(entry.serving_ttft_ms)} | {_format_ms(entry.serving_warm_ttft_ms)} | "
             f"{_format_ms(entry.serving_warmup_penalty_ms)} | {_format_tps(entry.serving_tps)} | "
@@ -291,6 +346,8 @@ def _leaderboard_html(leaderboard: Leaderboard) -> str:
         <div><span>Server Ready</span><strong>{escape(_format_ms(champion.serving_server_ready_ms))}</strong></div>
         <div><span>Start To First Token</span><strong>{escape(_format_ms(champion.serving_cold_start_to_first_token_ms))}</strong></div>
         <div><span>Serving</span><strong>{escape(_format_tps(champion.serving_tps))}</strong></div>
+        <div><span>Agent Bench</span><strong>{escape(_format_score(champion.agent_bench_score))}</strong></div>
+        <div><span>Suite</span><strong>{escape(champion.benchmark_suite_status)}</strong></div>
       </div>
     </section>
     <section class="panel">
@@ -323,7 +380,7 @@ def _leaderboard_html(leaderboard: Leaderboard) -> str:
         <thead>
           <tr>
             <th>Rank</th><th>Status</th><th>Score</th><th>Generation</th>
-            <th>Prompt</th><th>Cold TTFT</th><th>Warm TTFT</th><th>Warmup</th><th>Serving</th><th>Context</th><th>Model</th>
+            <th>Agent Bench</th><th>Suite</th><th>Prompt</th><th>Cold TTFT</th><th>Warm TTFT</th><th>Warmup</th><th>Serving</th><th>Context</th><th>Model</th>
           </tr>
         </thead>
         <tbody>
@@ -338,13 +395,15 @@ def _leaderboard_html(leaderboard: Leaderboard) -> str:
 
 
 def _html_row(rank: int, entry: LeaderboardEntry) -> str:
-    status_class = "pass" if entry.status == "WORKFLOW SMOKE" else "fail"
+    status_class = "pass" if entry.status in {"WORKFLOW SMOKE", "BENCHMARK SUITE"} else "fail"
     return (
         f'<tr class="{status_class}">'
         f"<td>{rank}</td>"
         f"<td>{escape(entry.status)}</td>"
         f"<td>{entry.score:.2f}</td>"
         f"<td>{entry.generation_tps:.2f}</td>"
+        f"<td>{escape(_format_score(entry.agent_bench_score))}</td>"
+        f"<td>{escape(entry.benchmark_suite_status)}</td>"
         f"<td>{entry.prompt_tps:.2f}</td>"
         f"<td>{escape(_format_ms(entry.serving_ttft_ms))}</td>"
         f"<td>{escape(_format_ms(entry.serving_warm_ttft_ms))}</td>"
@@ -357,6 +416,17 @@ def _html_row(rank: int, entry: LeaderboardEntry) -> str:
 
 
 def _plain_english_status(entry: LeaderboardEntry) -> str:
+    if entry.status == "BENCHMARK SUITE":
+        return (
+            f"{entry.model_name} is the current suite-backed candidate. "
+            f"Its comparable agent_bench_score is {_format_score(entry.agent_bench_score)} "
+            "from the required general and agentic benchmark-suite phase."
+        )
+    if entry.status == "SUITE FAILED":
+        return (
+            f"{entry.model_name} loaded, but its required benchmark suite failed. "
+            "Keep the receipt for debugging, but do not treat it as production-ready."
+        )
     if entry.status == "WORKFLOW SMOKE":
         return (
             f"{entry.model_name} is the current best workflow-smoke candidate. "
@@ -401,6 +471,10 @@ def _format_ms(value: float | None) -> str:
 
 def _format_tps(value: float | None) -> str:
     return "unmeasured" if value is None else f"{value:.2f} tok/s"
+
+
+def _format_score(value: float | None) -> str:
+    return "unmeasured" if value is None else f"{value:.4f}"
 
 
 def _html_css() -> str:

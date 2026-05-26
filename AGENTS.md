@@ -35,8 +35,23 @@ Use `G:\_codex_global\docs\sidecar-catalogue.md` for the full catalogue.
 - Start `/goal` for large benchmark campaigns, multi-session changes, or work that needs master/subagent coordination.
 - Use Research -> Plan -> Implement for medium or larger changes.
 - Keep raw benchmark logs out of the main context. Summarize the command, model, settings, evidence path, and result.
+- Keep long sessions token-efficient: use targeted `rg`/path-specific reads, avoid dumping long server logs into chat, and keep sidecar prompts/results compact.
 - Recycle sidecars around roughly 75% context use or when logs/research get noisy.
 - Require receipts before closing workers: assigned task, files inspected/changed, commands run, findings, verification, blockers, and recommended next action.
+
+## Runtime And Dependency Policy
+
+- Use the newest Python version that makes sense for the main app, after confirming the repo dependencies support it.
+- Isolate compatibility-only benchmark harnesses in their own venv when newer Python breaks upstream wheels or native builds.
+- Document any older compatibility lane. Example: BFCL may use `.venv-bfcl` on Python 3.11 when newer Python tries to build `tree-sitter` locally.
+- Install first-party tooling only when a current failing check proves it is needed; record why it was installed and where it writes data.
+
+## Git Hygiene
+
+- Before ending substantial work, make git reviewable: fetch, inspect status/diff, run the narrow verification checks, stage the intended scope, commit, push, and open a draft PR when David asked for a publish flow.
+- If the branch is `main`, create a `codex/...` branch before committing new work unless David explicitly wants direct commits on `main`.
+- Prove local/remote state after push with `git rev-list --left-right --count <branch>...origin/<branch>` and `git status --short --branch`.
+- Keep generated benchmark receipts, model files, databases, and caches out of commits unless David explicitly asks to publish a specific receipt artifact.
 
 ## Project Constraints
 

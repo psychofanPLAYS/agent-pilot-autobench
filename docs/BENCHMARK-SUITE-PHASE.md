@@ -46,6 +46,8 @@ Executable wrapper now exists:
 
 - `agent-autobench benchmark-suite-template`
 - `agent-autobench benchmark-suite --plan benchmark-suite.plan.json`
+- `agent-autobench autoresearch --model MODEL --benchmark-suite-plan benchmark-suite.plan.json`
+- bundled plan files under `benchmarks\plans\`
 - installed optional dependency: `lm-eval`
 
 Primary harness:
@@ -76,7 +78,10 @@ knowledge.
 Executable wrapper now exists:
 
 - command-based `agentic` plan tasks
+- repo-local Inspect task: `benchmarks\inspect_tasks\json_repair.py`
+- Inspect score extractor: `python -m gguf_limit_bench.inspect_score`
 - installed optional dependency: `inspect-ai`
+- isolated BFCL CLI venv: `.venv-bfcl\Scripts\bfcl.exe`
 - output ledger: `runs\agentic-suite.tsv`
 
 Candidate suites:
@@ -87,6 +92,17 @@ Candidate suites:
 - repo-local deterministic tasks for command safety, receipt inspection,
   JSON repair, tool selection, and multi-step planning
 
+Bundled plans:
+
+- `benchmarks\plans\local-openai-smoke.plan.json`: installed `lm-eval` plus
+  repo-local Inspect JSON repair.
+- `benchmarks\plans\local-bfcl-smoke.plan.json`: installed `lm-eval` plus
+  isolated BFCL `simple_python`.
+- `benchmarks\plans\external-agentic-heavy.plan.json`: explicit SWE-bench and
+  tau2-bench integration plan. It should be treated as incomplete until those
+  external harnesses and their Docker/API requirements are installed and a real
+  receipt passes.
+
 Output requirement:
 
 - `runs\agentic-suite.tsv`
@@ -96,10 +112,12 @@ Output requirement:
 
 ### Phase 3: Autoresearch Keep/Discard Loop
 
-Only after Phase 1 and Phase 2 exist should the optimizer call a setting a real
-candidate.
+Only autoresearch runs with `--benchmark-suite-plan` should call a setting a real
+production-readiness candidate. Without that option, the loop remains a system
+viability scout.
 
-The keep/discard score should combine:
+The keep/discard score is `agent_bench_score` when a benchmark-suite plan is
+provided. The suite score combines:
 
 - system viability: TTFT, TPS, context, stability
 - general benchmark score
@@ -113,6 +131,16 @@ The current executable benchmark-suite runner writes the combined scalar to:
 runs\agent-bench-score.tsv
 ```
 
+Autoresearch also copies the suite outcome into:
+
+```text
+runs\autoresearch-attempts.tsv
+runs\autoresearch-results.tsv
+```
+
+Those rows include `agent_bench_score`, general score, agentic score, suite
+status, suite receipt, and suite failure.
+
 The project should use git history the same way Karpathy's loop does:
 
 - experiment branch per campaign
@@ -123,7 +151,7 @@ The project should use git history the same way Karpathy's loop does:
 
 ## Non-Negotiable Labeling
 
-Until this benchmark suite phase exists:
+Until a run uses this benchmark suite phase:
 
 - A run may be `slow`.
 - A run may be `speed_only`.

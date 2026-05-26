@@ -84,7 +84,7 @@ flowchart LR
 From the repo root:
 
 ```powershell
-uv sync --extra dev
+uv sync --extra dev --extra bench
 ```
 
 Run the tests:
@@ -249,6 +249,13 @@ Open the terminal model picker:
 uv run --extra dev pilotbench start
 ```
 
+Open the picker for suite-backed production-readiness runs:
+
+```powershell
+uv run --extra dev --extra bench pilotbench start `
+  --benchmark-suite-plan benchmarks\plans\local-openai-smoke.plan.json
+```
+
 Show the current champion after a run:
 
 ```powershell
@@ -283,6 +290,21 @@ uv run --extra dev pilotbench autoresearch `
   --budget-minutes 5 `
   --parallel-max 4
 ```
+
+Run the production-readiness loop with the benchmark suite deciding the winner:
+
+```powershell
+uv run --extra dev --extra bench pilotbench autoresearch `
+  --model "G:\AI\models\path\to\model.gguf" `
+  --budget-minutes 20 `
+  --parallel-max 4 `
+  --benchmark-suite-plan benchmark-suite.plan.json
+```
+
+With `--benchmark-suite-plan`, every successful speed/TTFT attempt also runs the
+general and agentic benchmark suite. The loop then optimizes by
+`agent_bench_score`; raw tokens/sec is recorded, but it does not decide the
+winner.
 
 Run a focused Qwen 35B campaign:
 
@@ -386,7 +408,12 @@ Working now:
 - path readiness checks through `doctor`
 - real `llama-server` streaming TTFT probe through `serve-probe` and autoresearch
 - executable benchmark-suite wrapper through `agent-autobench benchmark-suite`
+- bundled benchmark-suite plans under `benchmarks\plans\`
 - installed benchmark harness base in the `bench` extra: `lm-eval` and `inspect-ai`
+- isolated BFCL CLI venv at `.venv-bfcl` for Python 3.11, verified with
+  `.venv-bfcl\Scripts\bfcl.exe --help`
+- autoresearch can consume a `--benchmark-suite-plan` and make
+  keep/discard/crash decisions over `agent_bench_score`
 - beginner startup through `START-HERE.bat`, `agent-autobench first-run`, and `agent-autobench --start`
 - optional command shim through `INSTALL-COMMAND.bat`
 - unit tests and a GitHub Actions CI workflow
@@ -397,23 +424,34 @@ Required before "production-ready":
 - Phase 0 system viability is partly implemented: explicit 4K first, then 8K,
   16K, 32K+, with fixed serving questions, TTFT, TPS, warmup penalty, cache
   evidence, and `runs\serving-metrics.tsv`.
-- Phase 1 must add general-purpose benchmark evidence through an existing
-  harness such as EleutherAI `lm-evaluation-harness`, writing
+- Phase 1 now has a command-based wrapper for general-purpose benchmark evidence
+  through existing harnesses such as EleutherAI `lm-evaluation-harness`, writing
   `runs\benchmark-suite.tsv`.
-- Phase 2 must add agentic benchmark evidence through suites such as BFCL,
-  SWE-bench, tau2-bench/tau3-bench, and repo-local deterministic agent tasks,
-  writing `runs\agentic-suite.tsv`.
-- Phase 3 must make the autoresearch loop use Karpathy-style keep/discard/crash
-  decisions over a comparable `agent_bench_score`, using git history and TSV
-  receipts to preserve winners and reject losers.
-- Until those phases exist, current result labels are `slow`, `speed_only`,
+- Phase 2 now has a command-based wrapper for agentic benchmark evidence through
+  Inspect AI and future BFCL, SWE-bench, tau2-bench/tau3-bench, and repo-local
+  deterministic agent tasks, writing `runs\agentic-suite.tsv`.
+- Phase 3 now makes the autoresearch loop use Karpathy-style keep/discard/crash
+  decisions over a comparable `agent_bench_score` when
+  `--benchmark-suite-plan` is provided.
+- A run without `--benchmark-suite-plan` is not production-ready. It remains
+  system-viability evidence with labels such as `slow`, `speed_only`,
   `serving_measured`, `context_unproven`, `workflow_unproven`,
   `workflow_weak`, and `workflow_smoke`, not production-ready.
 
+Current local smoke receipt:
+
+- `runs\20260526-185157-benchmark-suite` is the first corrected live local
+  suite receipt after the scorer fix. It failed honestly with `0.000000`, so it
+  is not production-ready evidence.
+
 Planned next:
 
-- add ready-to-run local task plans for lm-eval, Inspect AI, BFCL, SWE-bench,
-  and tau2-bench
+- improve the model prompt/settings or model choice until
+  `benchmarks\plans\local-openai-smoke.plan.json` produces a passing live
+  receipt
+- install and verify heavier SWE-bench / tau2-bench dependencies before treating
+  `benchmarks\plans\external-agentic-heavy.plan.json` as more than a
+  receipt-producing integration plan
 - richer OpenAI-compatible `llama-server` endpoint compatibility tests
 - richer final report rendering inside the TUI itself
 - paired KV-cache quality comparisons

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 import json
+import os
 from pathlib import Path
 import subprocess
 import time
@@ -28,7 +29,8 @@ class BenchmarkSuiteTask:
     id: str
     phase: str
     harness: str
-    command: tuple[str, ...]
+    commands: tuple[tuple[str, ...], ...]
+    env: dict[str, str] = field(default_factory=dict)
     timeout_seconds: int = 600
     min_score: float | None = None
     score_file: str | None = None
@@ -72,7 +74,7 @@ class BenchmarkSuiteResult:
     receipt_path: str
     stdout_tail: str
     stderr_tail: str
-    command: tuple[str, ...]
+    commands: tuple[tuple[str, ...], ...]
     tool_validity: str = "not_applicable"
 
 
@@ -115,8 +117,13 @@ def benchmark_suite_run_to_dict(run: BenchmarkSuiteRun) -> dict[str, Any]:
     }
 
 
-def run_benchmark_suite(plan: BenchmarkSuitePlan, runs_root: Path) -> BenchmarkSuiteRun:
+def run_benchmark_suite(
+    plan: BenchmarkSuitePlan,
+    runs_root: Path,
+    timeout_seconds: float | None = None,
+) -> BenchmarkSuiteRun:
     runs_root.mkdir(parents=True, exist_ok=True)
+    deadline = None if timeout_seconds is None else time.monotonic() + max(0.0, timeout_seconds)
     receipt_path = _new_receipt_dir(runs_root)
     receipt_path.mkdir(parents=True, exist_ok=False)
     (receipt_path / "suite-plan.json").write_text(
@@ -135,7 +142,13 @@ def run_benchmark_suite(plan: BenchmarkSuitePlan, runs_root: Path) -> BenchmarkS
 
     results: list[BenchmarkSuiteResult] = []
     for task in plan.tasks:
-        result = _run_task(task, plan=plan, runs_root=runs_root, receipt_path=receipt_path)
+        result = _run_task(
+            task,
+            plan=plan,
+            runs_root=runs_root,
+            receipt_path=receipt_path,
+            deadline=deadline,
+        )
         results.append(result)
         _append_phase_ledger(runs_root, plan, result)
 
@@ -159,18 +172,34 @@ def run_benchmark_suite(plan: BenchmarkSuitePlan, runs_root: Path) -> BenchmarkS
 
 
 def _task_from_dict(payload: dict[str, Any]) -> BenchmarkSuiteTask:
-    command = payload.get("command")
-    if not isinstance(command, list) or not command:
-        raise ValueError("Benchmark suite task command must be a non-empty list.")
+    commands = _commands_from_payload(payload)
     return BenchmarkSuiteTask(
         id=str(payload["id"]),
         phase=str(payload["phase"]),
         harness=str(payload.get("harness", payload["phase"])),
-        command=tuple(str(part) for part in command),
+        commands=commands,
+        env={str(key): str(value) for key, value in dict(payload.get("env", {})).items()},
         timeout_seconds=int(payload.get("timeout_seconds", 600)),
         min_score=(None if payload.get("min_score") is None else float(payload.get("min_score"))),
         score_file=None if payload.get("score_file") is None else str(payload.get("score_file")),
     )
+
+
+def _commands_from_payload(payload: dict[str, Any]) -> tuple[tuple[str, ...], ...]:
+    if "commands" in payload:
+        commands = payload["commands"]
+        if not isinstance(commands, list) or not commands:
+            raise ValueError("Benchmark suite task commands must be a non-empty list.")
+        parsed: list[tuple[str, ...]] = []
+        for command in commands:
+            if not isinstance(command, list) or not command:
+                raise ValueError("Each benchmark suite command must be a non-empty list.")
+            parsed.append(tuple(str(part) for part in command))
+        return tuple(parsed)
+    command = payload.get("command")
+    if not isinstance(command, list) or not command:
+        raise ValueError("Benchmark suite task command must be a non-empty list.")
+    return (tuple(str(part) for part in command),)
 
 
 def _run_task(
@@ -179,32 +208,68 @@ def _run_task(
     plan: BenchmarkSuitePlan,
     runs_root: Path,
     receipt_path: Path,
+    deadline: float | None = None,
 ) -> BenchmarkSuiteResult:
     task_dir = receipt_path / _safe_id(task.id)
     task_dir.mkdir(parents=True, exist_ok=False)
-    command = tuple(
-        _expand_token(
-            part,
+    commands = tuple(
+        tuple(
+            _expand_token(
+                part,
+                plan=plan,
+                runs_root=runs_root,
+                receipt_path=receipt_path,
+                task_dir=task_dir,
+            )
+            for part in command
+        )
+        for command in task.commands
+    )
+    task_env = {
+        key: _expand_token(
+            value,
             plan=plan,
             runs_root=runs_root,
             receipt_path=receipt_path,
             task_dir=task_dir,
         )
-        for part in task.command
-    )
+        for key, value in task.env.items()
+    }
     started = time.monotonic()
+    stdout_parts: list[str] = []
+    stderr_parts: list[str] = []
+    returncode = 0
     try:
-        completed = subprocess.run(
-            list(command),
-            capture_output=True,
-            check=False,
-            text=True,
-            timeout=task.timeout_seconds,
-        )
+        for command_index, command in enumerate(commands, start=1):
+            command_timeout = _remaining_timeout(deadline, task.timeout_seconds)
+            completed = subprocess.run(
+                list(command),
+                capture_output=True,
+                check=False,
+                text=True,
+                timeout=command_timeout,
+                env={**os.environ, **task_env} if task_env else None,
+            )
+            stdout_parts.append(completed.stdout or "")
+            stderr_parts.append(completed.stderr or "")
+            returncode = completed.returncode
+            (task_dir / f"command-{command_index}.json").write_text(
+                json.dumps(
+                    {
+                        "command": list(command),
+                        "env": _redacted_env(task_env),
+                        "returncode": returncode,
+                    },
+                    ensure_ascii=True,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            if returncode != 0:
+                break
         runtime = time.monotonic() - started
-        stdout = completed.stdout or ""
-        stderr = completed.stderr or ""
-        returncode = completed.returncode
+        stdout = "\n".join(stdout_parts)
+        stderr = "\n".join(stderr_parts)
         score = _score_from_task_output(task, stdout=stdout, task_dir=task_dir)
         ok = returncode == 0 and score is not None
         pass_fail = "pass" if ok and _passes_threshold(score, task.min_score) else "fail"
@@ -235,7 +300,13 @@ def _run_task(
 
     (task_dir / "command.json").write_text(
         json.dumps(
-            {"command": list(command), "returncode": returncode}, ensure_ascii=True, indent=2
+            {
+                "commands": [list(command) for command in commands],
+                "env": _redacted_env(task_env),
+                "returncode": returncode,
+            },
+            ensure_ascii=True,
+            indent=2,
         ),
         encoding="utf-8",
     )
@@ -253,7 +324,7 @@ def _run_task(
         receipt_path=str(task_dir),
         stdout_tail=stdout[-2000:],
         stderr_tail=stderr[-2000:],
-        command=command,
+        commands=commands,
         tool_validity="pass"
         if task.phase == "agentic" and ok and pass_fail == "pass"
         else "not_applicable",
@@ -263,6 +334,15 @@ def _run_task(
         encoding="utf-8",
     )
     return result
+
+
+def _remaining_timeout(deadline: float | None, task_timeout_seconds: int) -> float:
+    if deadline is None:
+        return float(task_timeout_seconds)
+    remaining = deadline - time.monotonic()
+    if remaining <= 0.0:
+        raise subprocess.TimeoutExpired(cmd="<benchmark-suite-budget>", timeout=0)
+    return max(0.001, min(float(task_timeout_seconds), remaining))
 
 
 def _score_from_task_output(
@@ -294,6 +374,16 @@ def _score_from_task_output(
     return _score_from_json_text(stdout)
 
 
+def _redacted_env(env: dict[str, str]) -> dict[str, str]:
+    redacted: dict[str, str] = {}
+    for key, value in env.items():
+        if any(secret in key.upper() for secret in ("KEY", "TOKEN", "SECRET", "PASSWORD")):
+            redacted[key] = "<redacted>"
+        else:
+            redacted[key] = value
+    return redacted
+
+
 def _score_from_json_text(text: str) -> float | None:
     try:
         payload = json.loads(text)
@@ -306,7 +396,7 @@ def _find_score(payload: Any) -> float | None:
     if isinstance(payload, dict):
         for key in SCORE_KEYS:
             value = payload.get(key)
-            if isinstance(value, int | float):
+            if _is_number(value):
                 return float(value)
         for value in payload.values():
             score = _find_score(value)
@@ -317,6 +407,10 @@ def _find_score(payload: Any) -> float | None:
         if scores:
             return sum(scores) / len(scores)
     return None
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
 
 
 def _passes_threshold(score: float, min_score: float | None) -> bool:

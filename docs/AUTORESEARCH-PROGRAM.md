@@ -29,9 +29,9 @@ Karpathy's original metric is `val_bpb`, where lower is better. This repo's
 metric is `agent_bench_score`, where higher is better, but the control idea is
 the same: fixed budget, one comparable number, durable receipts.
 
-This is not the full Karpathy contract until the benchmark-suite phase exists.
-The required missing phase is documented in `docs\BENCHMARK-SUITE-PHASE.md`.
-Until that phase is implemented, this repo has a system-viability loop, not a
+This is only the full Karpathy-style contract when the run includes the
+benchmark-suite phase from `docs\BENCHMARK-SUITE-PHASE.md`. Without
+`--benchmark-suite-plan`, the repo is running a system-viability loop, not a
 production-ready autoresearch loop.
 
 ## In-Scope Files
@@ -88,7 +88,7 @@ runs\autoresearch-results.tsv
 Columns:
 
 ```text
-run_id	model	score	status	context	generation_tps	prompt_tps	serving_ttft_ms	serving_warm_ttft_ms	serving_warmup_penalty_ms	serving_server_ready_ms	serving_cold_start_to_first_token_ms	serving_tps	receipt	description
+run_id	model	score	status	context	generation_tps	prompt_tps	serving_ttft_ms	serving_warm_ttft_ms	serving_warmup_penalty_ms	serving_server_ready_ms	serving_cold_start_to_first_token_ms	serving_tps	agent_bench_score	benchmark_suite_general_score	benchmark_suite_agentic_score	benchmark_suite_status	benchmark_suite_receipt	benchmark_suite_failure	receipt	description
 ```
 
 This is the local GGUF equivalent of Karpathy's `results.tsv`: compact,
@@ -114,7 +114,7 @@ receipt. It writes one row for every attempted setting with `decision` equal to
 `keep`, `discard`, or `crash`, plus the evidence status, comparable score,
 git branch/commit metadata, settings JSON, and receipt path.
 
-The benchmark-suite phase must add two more ledgers before a run can be called
+The benchmark-suite phase writes these ledgers before a run can be called
 production-ready:
 
 ```text
@@ -139,9 +139,35 @@ The command runner for these ledgers is:
 agent-autobench benchmark-suite --plan benchmark-suite.plan.json
 ```
 
+Bundled plans live under:
+
+```text
+benchmarks\plans\
+```
+
+Use `benchmarks\plans\local-openai-smoke.plan.json` for the first real local
+OpenAI-compatible endpoint proof. Use `benchmarks\plans\local-bfcl-smoke.plan.json`
+when BFCL function-calling evidence is required. The heavy SWE-bench/tau2 plan
+is intentionally explicit but not passing evidence until those external harnesses
+are installed and configured.
+
 The plan calls real harness commands, currently expected to start with
 `lm-eval run` for general-purpose scores and `inspect eval` for agentic scores.
 Missing harnesses, crashes, and scoreless runs are written as failed evidence.
+Two-step harnesses such as BFCL can use sequential `commands` so generation and
+evaluation stay in one scored task receipt.
+
+To make autoresearch optimize settings by the suite result, pass the same plan
+into the loop:
+
+```text
+agent-autobench autoresearch --model G:\AI\models\path\to\model.gguf --benchmark-suite-plan benchmark-suite.plan.json
+```
+
+With that option enabled, every successful speed/TTFT attempt runs the general
+and agentic suite. The attempt's `agent_bench_score` becomes the comparable
+score used for `keep`, `discard`, and `crash` decisions. Raw tokens/sec stays in
+the receipt, but it no longer decides the winner.
 
 ## Loop
 

@@ -6,7 +6,12 @@ from typer.testing import CliRunner
 
 from gguf_limit_bench.autoresearch import AttemptResult
 from gguf_limit_bench.cli import app
-from gguf_limit_bench.config import DEFAULT_MODEL_ROOTS
+from gguf_limit_bench.config import (
+    BenchmarkSettings,
+    DEFAULT_MODEL_ROOTS,
+    PathSettings,
+    PilotbenchConfig,
+)
 from gguf_limit_bench.discovery import ModelInfo
 from gguf_limit_bench.doctor import DoctorCheck, DoctorReport
 
@@ -59,6 +64,78 @@ def test_autoresearch_command_writes_receipts(tmp_path, monkeypatch):
     assert len(run_dirs) == 1
     assert json.loads((run_dirs[0] / "best-settings.json").read_text(encoding="utf-8"))
     assert (tmp_path / "runs" / "learning" / "optuna.sqlite3").exists()
+
+
+def test_autoresearch_command_accepts_benchmark_suite_plan(tmp_path, monkeypatch):
+    monkeypatch.setattr("gguf_limit_bench.cli.LlamaBenchAttemptRunner", FakeAttemptRunner)
+    model = tmp_path / "Qwen3-Test-Q4_K_M.gguf"
+    model.write_bytes(b"fake")
+    plan_path = tmp_path / "suite.plan.json"
+    plan_path.write_text(
+        json.dumps(
+            {
+                "model": "qwen-local",
+                "context": 4096,
+                "tasks": [
+                    {
+                        "id": "general",
+                        "phase": "general",
+                        "harness": "fake-general",
+                        "command": [
+                            sys.executable,
+                            "-c",
+                            "import json; print(json.dumps({'score': 0.6}))",
+                        ],
+                    },
+                    {
+                        "id": "agentic",
+                        "phase": "agentic",
+                        "harness": "fake-agentic",
+                        "command": [
+                            sys.executable,
+                            "-c",
+                            "import json; print(json.dumps({'score': 0.8}))",
+                        ],
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "autoresearch",
+            "--model",
+            str(model),
+            "--runs-root",
+            str(tmp_path / "runs"),
+            "--budget-minutes",
+            "1",
+            "--max-attempts",
+            "1",
+            "--no-learning",
+            "--no-ttft-probe",
+            "--benchmark-suite-plan",
+            str(plan_path),
+        ],
+    )
+
+    run_dirs = [
+        path
+        for path in (tmp_path / "runs").iterdir()
+        if path.is_dir() and path.name != "learning" and "benchmark-suite" not in path.name
+    ]
+    best = json.loads((run_dirs[0] / "best-settings.json").read_text(encoding="utf-8"))
+
+    assert result.exit_code == 0
+    assert best["score"] == 0.7
+    assert best["result"]["agent_bench_score"] == 0.7
+    assert (tmp_path / "runs" / "agent-bench-score.tsv").exists()
+    assert "agent_bench_score" in (tmp_path / "runs" / "autoresearch-attempts.tsv").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_autoresearch_all_qwen_only_skips_non_qwen_models(tmp_path, monkeypatch):
@@ -253,6 +330,19 @@ def test_start_command_runs_selected_models_from_tui(tmp_path, monkeypatch):
         parameters="35B-A3B",
         has_mtp=True,
     )
+    plan_path = tmp_path / "suite.plan.json"
+    plan_path.write_text(
+        json.dumps(
+            {
+                "model": "local-model",
+                "tasks": [
+                    {"id": "general", "phase": "general", "command": [sys.executable, "-V"]},
+                    {"id": "agentic", "phase": "agentic", "command": [sys.executable, "-V"]},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
     runs: list[dict] = []
 
     class FakeBenchTui:
@@ -283,6 +373,8 @@ def test_start_command_runs_selected_models_from_tui(tmp_path, monkeypatch):
             "1",
             "--max-attempts",
             "1",
+            "--benchmark-suite-plan",
+            str(plan_path),
         ],
     )
 
@@ -290,6 +382,7 @@ def test_start_command_runs_selected_models_from_tui(tmp_path, monkeypatch):
     assert "Starting research loop for 1 selected model" in result.output
     assert runs[0]["model"] == selected.path
     assert runs[0]["enable_mtp"] is True
+    assert runs[0]["benchmark_suite_plan"] == plan_path
 
 
 def test_start_command_uses_preset_budget_when_budget_not_overridden(tmp_path, monkeypatch):
@@ -449,6 +542,54 @@ def test_first_run_command_checks_paths_and_prepares_local_state(tmp_path, monke
     assert "First-time installer" in result.output
     assert "First-time setup is ready" in result.output
     assert "agent-autobench --start" in result.output
+
+
+def test_first_run_command_uses_resolved_runs_root_when_not_overridden(tmp_path, monkeypatch):
+    expected_runs_root = tmp_path / "resolved-runs"
+
+    monkeypatch.setattr(
+        "gguf_limit_bench.cli.load_config",
+        lambda: PilotbenchConfig(
+            paths=PathSettings(
+                model_roots=(tmp_path,),
+                llama_bench=tmp_path / "llama-bench.exe",
+                llama_cli=tmp_path / "llama-cli.exe",
+                llama_server=tmp_path / "llama-server.exe",
+                runs_root=expected_runs_root,
+            ),
+            benchmark=BenchmarkSettings(parallel_max=1, default_preset="quick"),
+        ),
+    )
+    monkeypatch.setattr(
+        "gguf_limit_bench.cli.build_doctor_report",
+        lambda **kwargs: DoctorReport(
+            checks=[
+                DoctorCheck(
+                    name="model root",
+                    status="ok",
+                    path=str(tmp_path),
+                    detail="directory exists",
+                )
+            ]
+        ),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "first-run",
+            "--db-path",
+            str(tmp_path / "db.sqlite"),
+            "--shim-dir",
+            str(tmp_path / "bin"),
+            "--skip-env-sync",
+            "--json-out",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert (expected_runs_root / "leaderboard.md").exists()
+    assert json.loads(result.output)["runs_root"] == str(expected_runs_root)
 
 
 def test_first_run_json_out_is_agent_friendly(tmp_path, monkeypatch):
@@ -656,5 +797,30 @@ def test_benchmark_suite_template_writes_real_harness_plan(tmp_path):
 
     assert result.exit_code == 0
     assert "Benchmark-suite plan written" in result.output
-    assert payload["tasks"][0]["command"][4:7] == ["lm-eval", "run", "--model"]
-    assert payload["tasks"][1]["command"][4:7] == ["inspect", "eval", "path/to/inspect_task.py"]
+    assert payload["tasks"][0]["commands"][0][4:7] == ["lm-eval", "run", "--model"]
+    assert payload["tasks"][0]["commands"][1][4:8] == [
+        "python",
+        "-m",
+        "gguf_limit_bench.score_extract",
+        "--root",
+    ]
+    assert payload["tasks"][1]["commands"][0][4:7] == [
+        "inspect",
+        "eval",
+        "benchmarks/inspect_tasks/json_repair.py",
+    ]
+    assert payload["tasks"][1]["commands"][1][4:8] == [
+        "python",
+        "-m",
+        "gguf_limit_bench.inspect_score",
+        "--log-dir",
+    ]
+
+
+def test_benchmark_suite_plans_lists_bundled_plans():
+    result = runner.invoke(app, ["benchmark-suite-plans", "--json-out"])
+
+    assert result.exit_code == 0
+    plans = json.loads(result.output)
+    assert any(path.endswith("benchmarks\\plans\\local-openai-smoke.plan.json") for path in plans)
+    assert any(path.endswith("benchmarks\\plans\\local-bfcl-smoke.plan.json") for path in plans)

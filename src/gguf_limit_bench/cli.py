@@ -99,6 +99,11 @@ def start(
     learning: bool = True,
     workflow_eval: bool = False,
     ttft_probe: bool = True,
+    benchmark_suite_plan: Path | None = typer.Option(
+        None,
+        "--benchmark-suite-plan",
+        help="Run a benchmark-suite plan for selected models and optimize by agent_bench_score.",
+    ),
     preset: str | None = None,
 ) -> None:
     """Beginner start button: check paths, then open the model picker."""
@@ -125,6 +130,7 @@ def start(
         learning=learning,
         workflow_eval=workflow_eval,
         ttft_probe=ttft_probe,
+        benchmark_suite_plan=benchmark_suite_plan,
         preset=config.benchmark.default_preset,
     )
 
@@ -142,6 +148,7 @@ def _start_app(
     learning: bool = True,
     workflow_eval: bool = False,
     ttft_probe: bool = True,
+    benchmark_suite_plan: Path | None = None,
     preset: str = "quick",
 ) -> None:
     report = build_doctor_report(
@@ -179,6 +186,7 @@ def _start_app(
                 learning=learning,
                 workflow_eval=workflow_eval,
                 ttft_probe=ttft_probe,
+                benchmark_suite_plan=benchmark_suite_plan,
                 enable_mtp=model.has_mtp,
             ).path
         ),
@@ -205,6 +213,7 @@ def _start_app(
             learning=learning,
             workflow_eval=workflow_eval,
             ttft_probe=ttft_probe,
+            benchmark_suite_plan=benchmark_suite_plan,
         )
 
 
@@ -305,7 +314,7 @@ def first_run(
         runs_root=config.paths.runs_root,
     )
     init_state_db(db_path)
-    write_leaderboard(runs_root)
+    write_leaderboard(config.paths.runs_root)
     payload = {
         **report.to_dict(),
         "install_ready": all(step.ok for step in install_steps if step.required),
@@ -460,49 +469,102 @@ def benchmark_suite_template(
         "settings": {"base_url": base_url, "score_contract": "agent_bench_score"},
         "tasks": [
             {
-                "id": "arc_easy_smoke",
+                "id": "gsm8k_cot_zeroshot_smoke",
                 "phase": "general",
                 "harness": "lm-evaluation-harness",
-                "command": [
-                    "uv",
-                    "run",
-                    "--extra",
-                    "bench",
-                    "lm-eval",
-                    "run",
-                    "--model",
-                    "local-chat-completions",
-                    "--model_args",
-                    f"model={{model}},base_url={base_url}/chat/completions",
-                    "--tasks",
-                    "arc_easy",
-                    "--num_fewshot",
-                    "0",
-                    "--output_path",
-                    "{task_dir}",
-                    "--log_samples",
+                "env": {"PYTHONIOENCODING": "utf-8"},
+                "commands": [
+                    [
+                        "uv",
+                        "run",
+                        "--extra",
+                        "bench",
+                        "lm-eval",
+                        "run",
+                        "--model",
+                        "local-chat-completions",
+                        "--model_args",
+                        f"model={{model}},base_url={base_url}/chat/completions,eos_string=<|im_end|>",
+                        "--tasks",
+                        "gsm8k_cot_zeroshot",
+                        "--apply_chat_template",
+                        "--limit",
+                        "10",
+                        "--output_path",
+                        "{task_dir}",
+                        "--log_samples",
+                    ],
+                    [
+                        "uv",
+                        "run",
+                        "--extra",
+                        "bench",
+                        "python",
+                        "-m",
+                        "gguf_limit_bench.score_extract",
+                        "--root",
+                        "{task_dir}",
+                        "--out",
+                        "{task_dir}/score.json",
+                        "--keys",
+                        "exact_match,accuracy,score",
+                    ],
                 ],
+                "score_file": "{task_dir}/score.json",
+                "min_score": 0.01,
                 "timeout_seconds": 1800,
             },
             {
                 "id": "inspect_agentic_smoke",
                 "phase": "agentic",
                 "harness": "inspect-ai",
-                "command": [
-                    "uv",
-                    "run",
-                    "--extra",
-                    "bench",
-                    "inspect",
-                    "eval",
-                    "path/to/inspect_task.py",
-                    "--model",
-                    "openai-api/{model}",
-                    "--log-dir",
-                    "{task_dir}",
-                    "--log-format",
-                    "json",
+                "env": {
+                    "LOCAL_API_KEY": "local-no-key",
+                    "LOCAL_BASE_URL": base_url,
+                    "PYTHONIOENCODING": "utf-8",
+                },
+                "commands": [
+                    [
+                        "uv",
+                        "run",
+                        "--extra",
+                        "bench",
+                        "inspect",
+                        "eval",
+                        "benchmarks/inspect_tasks/json_repair.py",
+                        "--model",
+                        "openai-api/local/{model}",
+                        "--model-base-url",
+                        base_url,
+                        "--log-dir",
+                        "{task_dir}",
+                        "--log-format",
+                        "json",
+                        "--display",
+                        "none",
+                        "--max-connections",
+                        "1",
+                        "--max-tokens",
+                        "128",
+                        "--temperature",
+                        "0",
+                    ],
+                    [
+                        "uv",
+                        "run",
+                        "--extra",
+                        "bench",
+                        "python",
+                        "-m",
+                        "gguf_limit_bench.inspect_score",
+                        "--log-dir",
+                        "{task_dir}",
+                        "--out",
+                        "{task_dir}/score.json",
+                    ],
                 ],
+                "score_file": "{task_dir}/score.json",
+                "min_score": 0.01,
                 "timeout_seconds": 1800,
             },
         ],
@@ -547,6 +609,36 @@ def benchmark_suite(
         )
     if not suite_run.ok and not allow_partial:
         raise typer.Exit(1)
+
+
+@app.command("benchmark-suite-plans")
+def benchmark_suite_plans(json_out: bool = False) -> None:
+    """List bundled benchmark-suite plan files."""
+    plans_dir = project_root() / "benchmarks" / "plans"
+    plans = sorted(plans_dir.glob("*.plan.json"))
+    if json_out:
+        _print_json([str(path) for path in plans])
+        return
+    if not plans:
+        console.print("No bundled benchmark-suite plans found.")
+        return
+    table = Table(title="Benchmark Suite Plans")
+    table.add_column("Plan")
+    table.add_column("Kind")
+    table.add_column("Requires")
+    for path in plans:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            table.add_row(str(path), "invalid", "could not read JSON")
+            continue
+        settings = dict(payload.get("settings", {}))
+        table.add_row(
+            str(path.relative_to(project_root())),
+            str(settings.get("plan_kind", "unknown")),
+            str(settings.get("requires", "")),
+        )
+    console.print(table)
 
 
 @app.command("init-db")
@@ -674,6 +766,14 @@ def autoresearch(
     learning: bool = True,
     workflow_eval: bool = False,
     ttft_probe: bool = True,
+    benchmark_suite_plan: Path | None = typer.Option(
+        None,
+        "--benchmark-suite-plan",
+        help=(
+            "Run this benchmark-suite plan for each successful attempt and optimize "
+            "by agent_bench_score."
+        ),
+    ),
 ) -> None:
     config = with_cli_overrides(
         load_config(),
@@ -695,6 +795,7 @@ def autoresearch(
         learning=learning,
         workflow_eval=workflow_eval,
         ttft_probe=ttft_probe,
+        benchmark_suite_plan=benchmark_suite_plan,
         enable_mtp=_is_mtp_model(model),
     )
     console.print(f"Receipt: {receipt.path}")
@@ -717,6 +818,14 @@ def autoresearch_all(
     learning: bool = True,
     workflow_eval: bool = False,
     ttft_probe: bool = True,
+    benchmark_suite_plan: Path | None = typer.Option(
+        None,
+        "--benchmark-suite-plan",
+        help=(
+            "Run this benchmark-suite plan for each successful attempt and optimize "
+            "by agent_bench_score."
+        ),
+    ),
     finish_early_on: bool = False,
     target_score: float = 100.0,
 ) -> None:
@@ -756,6 +865,7 @@ def autoresearch_all(
             learning=learning,
             workflow_eval=workflow_eval,
             ttft_probe=ttft_probe,
+            benchmark_suite_plan=benchmark_suite_plan,
             enable_mtp=model.has_mtp,
         )
         console.print(f"{model.name}: {receipt.path}")
@@ -784,6 +894,11 @@ def tui(
     learning: bool = True,
     workflow_eval: bool = False,
     ttft_probe: bool = True,
+    benchmark_suite_plan: Path | None = typer.Option(
+        None,
+        "--benchmark-suite-plan",
+        help="Run a benchmark-suite plan for selected models and optimize by agent_bench_score.",
+    ),
 ) -> None:
     config = with_cli_overrides(
         load_config(),
@@ -809,6 +924,7 @@ def tui(
                 learning=learning,
                 workflow_eval=workflow_eval,
                 ttft_probe=ttft_probe,
+                benchmark_suite_plan=benchmark_suite_plan,
                 enable_mtp=model.has_mtp,
             ).path
         ),
@@ -834,6 +950,7 @@ def tui(
             learning=learning,
             workflow_eval=workflow_eval,
             ttft_probe=ttft_probe,
+            benchmark_suite_plan=benchmark_suite_plan,
         )
 
 
@@ -864,6 +981,7 @@ def _run_one_autoresearch(
     learning: bool,
     workflow_eval: bool,
     ttft_probe: bool,
+    benchmark_suite_plan: Path | None = None,
     enable_mtp: bool = False,
 ):
     attempt_runner = LlamaBenchAttemptRunner(
@@ -918,6 +1036,11 @@ def _run_one_autoresearch(
         parallel_max=parallel_max,
         max_attempts=max_attempts,
         learner=_build_learner(learning, runs_root, model, parallel_max),
+        benchmark_suite_plan=(
+            BenchmarkSuitePlan.from_path(benchmark_suite_plan)
+            if benchmark_suite_plan is not None
+            else None
+        ),
     )
     return loop.run()
 
@@ -934,6 +1057,7 @@ def _run_tui_selection(
     learning: bool,
     workflow_eval: bool,
     ttft_probe: bool,
+    benchmark_suite_plan: Path | None = None,
 ) -> None:
     if not selected_models:
         console.print("No models selected. Nothing was started.")
@@ -953,6 +1077,7 @@ def _run_tui_selection(
             learning=learning,
             workflow_eval=workflow_eval,
             ttft_probe=ttft_probe,
+            benchmark_suite_plan=benchmark_suite_plan,
             enable_mtp=model.has_mtp,
         )
         console.print(f"Receipt: {receipt.path}")

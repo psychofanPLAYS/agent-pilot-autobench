@@ -28,8 +28,9 @@ Tech stack: Python, Textual, Rich, Typer, pytest, psutil, nvidia-ml-py, Optuna, 
 - [x] Add the required benchmark-suite ledgers and CLI wrapper before production-ready labeling.
 - [x] Integrate a command-based general-purpose benchmark wrapper for EleutherAI `lm-evaluation-harness`.
 - [x] Integrate a command-based agentic benchmark wrapper for Inspect AI tasks.
-- [ ] Add ready-to-run BFCL, SWE-bench-style, tau2/tau3-bench-style, and repo-local deterministic task plans.
-- [ ] Upgrade the autoresearch loop to Karpathy-style keep/discard/crash decisions over a comparable `agent_bench_score` backed by git history and TSV ledgers.
+- [x] Add bundled local smoke, BFCL smoke, SWE-bench-style, tau2/tau3-bench-style, and repo-local deterministic task plans.
+- [ ] Install and verify the heavier SWE-bench and tau2/tau3-bench harnesses before treating the heavy external plan as passing evidence.
+- [x] Upgrade the autoresearch loop to Karpathy-style keep/discard/crash decisions over a comparable `agent_bench_score` backed by git history and TSV ledgers when `--benchmark-suite-plan` is provided.
 - [ ] Run unit tests, smoke tests, and commit the project repo.
 
 ## Receipts
@@ -50,8 +51,9 @@ Each benchmark run writes:
 ## Autoresearch Rule
 
 The optimizer uses Karpathy's core pattern: fixed time budget, one metric, small setting changes, keep the change only when the recorded score improves. It now also persists Optuna trials under `runs/learning/optuna.sqlite3`, so later runs can reuse prior results instead of starting from scratch.
-This is not the full Karpathy contract until the required benchmark-suite phase
-exists. See `docs\BENCHMARK-SUITE-PHASE.md`.
+This is the full Karpathy-style contract only when `--benchmark-suite-plan`
+is provided. Without that plan, the loop is a system-viability scout. See
+`docs\BENCHMARK-SUITE-PHASE.md`.
 The context ladder starts at 4K, then climbs through 8K, 16K, 32K, and higher
 contexts. Do not use an implicit/default context as the first production signal.
 
@@ -80,5 +82,5 @@ Production-ready scoring still requires:
 - `runs\benchmark-suite.tsv` for general-purpose benchmark evidence.
 - `runs\agentic-suite.tsv` for agentic benchmark evidence.
 - `runs\agent-bench-score.tsv` for the combined benchmark-suite scalar.
-- keep/discard/crash decisions that preserve winning settings and reject losing
-  settings in the Karpathy-style loop.
+- `--benchmark-suite-plan` on autoresearch, so keep/discard/crash decisions
+  preserve winning settings and reject losing settings by `agent_bench_score`.

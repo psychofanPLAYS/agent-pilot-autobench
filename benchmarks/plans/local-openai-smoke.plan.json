@@ -1,0 +1,113 @@
+{
+  "model": "local-model",
+  "context": 4096,
+  "settings": {
+    "base_url": "http://127.0.0.1:8080/v1",
+    "score_contract": "agent_bench_score",
+    "plan_kind": "local_openai_smoke",
+    "requires": "A local OpenAI-compatible llama-server endpoint already serving the model under test."
+  },
+  "tasks": [
+    {
+      "id": "gsm8k_cot_zeroshot_10",
+      "phase": "general",
+      "harness": "lm-evaluation-harness",
+      "env": {
+        "PYTHONIOENCODING": "utf-8"
+      },
+      "commands": [
+        [
+          "uv",
+          "run",
+          "--extra",
+          "bench",
+          "lm-eval",
+          "run",
+          "--model",
+          "local-chat-completions",
+          "--model_args",
+          "model={model},base_url=http://127.0.0.1:8080/v1/chat/completions,eos_string=<|im_end|>",
+          "--tasks",
+          "gsm8k_cot_zeroshot",
+          "--apply_chat_template",
+          "--limit",
+          "10",
+          "--output_path",
+          "{task_dir}",
+          "--log_samples"
+        ],
+        [
+          "uv",
+          "run",
+          "--extra",
+          "bench",
+          "python",
+          "-m",
+          "gguf_limit_bench.score_extract",
+          "--root",
+          "{task_dir}",
+          "--out",
+          "{task_dir}/score.json",
+          "--keys",
+          "exact_match,accuracy,score"
+        ]
+      ],
+      "score_file": "{task_dir}/score.json",
+      "min_score": 0.01,
+      "timeout_seconds": 1800
+    },
+    {
+      "id": "json_repair",
+      "phase": "agentic",
+      "harness": "inspect-ai",
+      "env": {
+        "LOCAL_API_KEY": "local-no-key",
+        "LOCAL_BASE_URL": "http://127.0.0.1:8080/v1",
+        "PYTHONIOENCODING": "utf-8"
+      },
+      "commands": [
+        [
+          "uv",
+          "run",
+          "--extra",
+          "bench",
+          "inspect",
+          "eval",
+          "benchmarks/inspect_tasks/json_repair.py",
+          "--model",
+          "openai-api/local/{model}",
+          "--model-base-url",
+          "http://127.0.0.1:8080/v1",
+          "--log-dir",
+          "{task_dir}",
+          "--log-format",
+          "json",
+          "--display",
+          "none",
+          "--max-connections",
+          "1",
+          "--max-tokens",
+          "128",
+          "--temperature",
+          "0"
+        ],
+        [
+          "uv",
+          "run",
+          "--extra",
+          "bench",
+          "python",
+          "-m",
+          "gguf_limit_bench.inspect_score",
+          "--log-dir",
+          "{task_dir}",
+          "--out",
+          "{task_dir}/score.json"
+        ]
+      ],
+      "score_file": "{task_dir}/score.json",
+      "min_score": 0.01,
+      "timeout_seconds": 900
+    }
+  ]
+}

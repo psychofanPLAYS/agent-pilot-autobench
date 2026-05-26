@@ -113,6 +113,12 @@ Open the model picker TUI:
 agent-autobench --start
 ```
 
+Open the picker for suite-backed production-readiness runs:
+
+```powershell
+agent-autobench start --benchmark-suite-plan benchmarks\plans\local-openai-smoke.plan.json
+```
+
 Show the latest champion and write `runs\leaderboard.md` plus `runs\champion.json`:
 
 ```powershell
@@ -198,6 +204,21 @@ Autoresearch starts context at 4K. As successful settings climb the context
 ladder, the serving probe asks progressively more ordered questions: 1 at 4K,
 2 at 8K, 3 at 16K, and 5 at 32K and above.
 
+Run the real Karpathy-style loop with the benchmark suite as the score:
+
+```powershell
+uv run --extra dev --extra bench pilotbench autoresearch `
+  --model "G:\AI\models\path\to\model.gguf" `
+  --budget-minutes 20 `
+  --parallel-max 4 `
+  --benchmark-suite-plan benchmark-suite.plan.json
+```
+
+When `--benchmark-suite-plan` is present, each successful attempt runs the
+general and agentic suite and the loop uses `agent_bench_score` for
+`keep`/`discard`/`crash`. This is the production-readiness path; raw speed-only
+runs are still useful scouting, but they are not production-ready evidence.
+
 Learning is on by default. To do a one-off run without updating the learning database:
 
 ```powershell
@@ -279,9 +300,9 @@ The loop follows the Karpathy-style autoresearch shape:
 - Record failures such as GPU OOM, model-load failure, crash, and timeout, then keep going.
 - Keep unified KV cache marked as mandatory target metadata for Hermes deployment.
 
-Missing required phase before production-ready:
+Required production-ready gate:
 
-- Add the benchmark-suite phase from `docs\BENCHMARK-SUITE-PHASE.md`.
+- Use the benchmark-suite phase from `docs\BENCHMARK-SUITE-PHASE.md`.
 - General-purpose benchmarks should use an existing harness first, starting with
   EleutherAI `lm-evaluation-harness`, and append rows to
   `runs\benchmark-suite.tsv`.
@@ -290,7 +311,7 @@ Missing required phase before production-ready:
   completion, and repo-local deterministic tasks for JSON repair, command
   safety, receipt inspection, and planning. Append rows to
   `runs\agentic-suite.tsv`.
-- Only after those ledgers exist should the loop make Karpathy-style
+- Pass `--benchmark-suite-plan` to make autoresearch use Karpathy-style
   keep/discard/crash decisions over a real `agent_bench_score`.
 
 ## Benchmark Suite Phase
@@ -306,6 +327,7 @@ The installed base harness commands are:
 ```powershell
 uv run --extra bench lm-eval --help
 uv run --extra bench inspect --help
+.venv-bfcl\Scripts\bfcl.exe --help
 ```
 
 Write an editable external-harness plan:
@@ -314,10 +336,39 @@ Write an editable external-harness plan:
 agent-autobench benchmark-suite-template --output benchmark-suite.plan.json --model "qwen-local"
 ```
 
+List bundled plans:
+
+```powershell
+agent-autobench benchmark-suite-plans
+```
+
+Useful bundled plans:
+
+- `benchmarks\plans\local-openai-smoke.plan.json`: `lm-eval` GSM8K CoT
+  zero-shot smoke plus repo-local Inspect JSON repair, for a local
+  OpenAI-compatible endpoint.
+- `benchmarks\plans\local-bfcl-smoke.plan.json`: GSM8K CoT zero-shot plus BFCL
+  `simple_python`, using `.venv-bfcl`.
+- `benchmarks\plans\external-agentic-heavy.plan.json`: SWE-bench and tau2
+  integration plan. It is expected to fail honestly until those external
+  harnesses are installed and configured.
+
 Run the plan:
 
 ```powershell
-agent-autobench benchmark-suite --plan benchmark-suite.plan.json
+agent-autobench benchmark-suite --plan benchmarks\plans\local-openai-smoke.plan.json
+```
+
+Run autoresearch with the plan as the actual optimizer target:
+
+```powershell
+agent-autobench autoresearch --model "G:\AI\models\path\to\model.gguf" --benchmark-suite-plan benchmarks\plans\local-openai-smoke.plan.json
+```
+
+The easy picker also accepts the same plan:
+
+```powershell
+agent-autobench start --benchmark-suite-plan benchmarks\plans\local-openai-smoke.plan.json
 ```
 
 The plan format is deliberately command-based. Each task calls a real external
@@ -325,6 +376,15 @@ harness such as `lm-eval run` or `inspect eval`, then PilotBENCHY captures the
 receipt, extracts a numeric score from JSON output, and appends the phase TSVs.
 If a harness is missing, crashes, or does not produce a score, the suite writes
 failed evidence instead of pretending the run is useful.
+
+Tasks may use either one `command` or a sequence of `commands`. The sequence form
+is for harnesses such as BFCL that generate model responses first and evaluate
+them second.
+
+BFCL is installed in an isolated Python 3.11 venv because Python 3.13 tries to
+build `tree-sitter` locally. Use `.venv-bfcl\Scripts\bfcl.exe generate ...`
+and `.venv-bfcl\Scripts\bfcl.exe evaluate ...` inside a suite task's `commands`
+when adding the BFCL task group.
 
 ## Beginner Presets
 

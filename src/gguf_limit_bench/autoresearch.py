@@ -7,6 +7,11 @@ import subprocess
 import time
 from typing import Any, Callable
 
+from gguf_limit_bench.benchmark_suite import (
+    BenchmarkSuitePlan,
+    BenchmarkSuiteRun,
+    run_benchmark_suite,
+)
 from gguf_limit_bench.evidence import evidence_status, normalize_success_failure
 from gguf_limit_bench.receipts import RunReceipt
 from gguf_limit_bench.telemetry import classify_failure, sample_telemetry
@@ -47,10 +52,18 @@ class AttemptResult:
     serving_cold_start_to_first_token_ms: float | None = None
     serving_question_results: list[dict] = field(default_factory=list)
     serving_failure: str | None = None
+    agent_bench_score: float | None = None
+    benchmark_suite_general_score: float | None = None
+    benchmark_suite_agentic_score: float | None = None
+    benchmark_suite_ok: bool | None = None
+    benchmark_suite_receipt: str | None = None
+    benchmark_suite_failure: str | None = None
 
     def score(self) -> float:
         if not self.ok:
             return -10_000.0
+        if self.agent_bench_score is not None:
+            return self.agent_bench_score
         context_bonus = min(self.context_size, 131_072) / 4096.0
         measured_ttft = self.serving_ttft_ms if self.serving_ttft_ms is not None else self.ttft_ms
         ttft_penalty = (measured_ttft if measured_ttft is not None else 10_000.0) / 1000.0
@@ -123,6 +136,7 @@ class AutoresearchLoop:
         parallel_max: int = 4,
         max_attempts: int | None = None,
         learner: Any | None = None,
+        benchmark_suite_plan: BenchmarkSuitePlan | None = None,
     ) -> None:
         self.model = model
         self.runs_root = runs_root
@@ -131,6 +145,7 @@ class AutoresearchLoop:
         self.parallel_max = parallel_max
         self.max_attempts = max_attempts
         self.learner = learner
+        self.benchmark_suite_plan = benchmark_suite_plan
 
     def run(self) -> RunReceipt:
         receipt = RunReceipt.create(self.runs_root, slug=_safe_slug(self.model.stem))
@@ -173,6 +188,9 @@ class AutoresearchLoop:
                 },
             )
             result = self.attempt_runner(settings)
+            if result.ok and self.benchmark_suite_plan is not None:
+                remaining_seconds = self.budget_seconds - (time.monotonic() - started)
+                result = self._with_benchmark_suite(result, settings, remaining_seconds)
             last_result = result
             if suggestion is not None:
                 self.learner.tell(suggestion, result)
@@ -290,6 +308,47 @@ class AutoresearchLoop:
             )
         return replace(best, ubatch_size=max(128, best.ubatch_size // 2), kv_unified=True)
 
+    def _with_benchmark_suite(
+        self,
+        result: AttemptResult,
+        settings: AutoresearchSettings,
+        timeout_seconds: float,
+    ) -> AttemptResult:
+        assert self.benchmark_suite_plan is not None
+        plan = BenchmarkSuitePlan(
+            model=self.benchmark_suite_plan.model,
+            context=settings.context_size,
+            settings={
+                **self.benchmark_suite_plan.settings,
+                **settings.to_dict(),
+                "gguf_model_path": str(self.model),
+                "score_contract": "agent_bench_score",
+            },
+            tasks=self.benchmark_suite_plan.tasks,
+        )
+        suite_run = run_benchmark_suite(plan, self.runs_root, timeout_seconds=timeout_seconds)
+        if not suite_run.ok:
+            return replace(
+                result,
+                ok=False,
+                failure="benchmark_suite_failed",
+                agent_bench_score=suite_run.agent_bench_score,
+                benchmark_suite_general_score=suite_run.general_score,
+                benchmark_suite_agentic_score=suite_run.agentic_score,
+                benchmark_suite_ok=False,
+                benchmark_suite_receipt=suite_run.receipt_path,
+                benchmark_suite_failure=_benchmark_suite_failure(suite_run),
+            )
+        return replace(
+            result,
+            agent_bench_score=suite_run.agent_bench_score,
+            benchmark_suite_general_score=suite_run.general_score,
+            benchmark_suite_agentic_score=suite_run.agentic_score,
+            benchmark_suite_ok=True,
+            benchmark_suite_receipt=suite_run.receipt_path,
+            benchmark_suite_failure=None,
+        )
+
 
 def build_autoresearch_llama_bench_command(
     llama_bench: Path,
@@ -391,6 +450,12 @@ def _summary_lines(
         f"- Generation tokens/sec: `{result.generation_tokens_per_second}`",
         f"- Prompt tokens/sec: `{result.prompt_tokens_per_second}`",
         f"- Workflow score: `{result.workflow_score}`",
+        f"- Agent bench score: `{result.agent_bench_score}`",
+        f"- Benchmark suite general score: `{result.benchmark_suite_general_score}`",
+        f"- Benchmark suite agentic score: `{result.benchmark_suite_agentic_score}`",
+        f"- Benchmark suite status: `{_benchmark_suite_status(result)}`",
+        f"- Benchmark suite receipt: `{result.benchmark_suite_receipt or 'none'}`",
+        f"- Benchmark suite failure: `{result.benchmark_suite_failure or 'none'}`",
         f"- Serving cold TTFT ms: `{result.serving_ttft_ms}`",
         f"- Serving warm TTFT ms: `{result.serving_warm_ttft_ms}`",
         f"- Serving warmup penalty ms: `{result.serving_warmup_penalty_ms}`",
@@ -422,6 +487,11 @@ def _summary_lines(
 
 def _plain_english_takeaway(result: AttemptResult) -> str:
     if not result.ok:
+        if result.benchmark_suite_ok is False:
+            return (
+                "The speed probe loaded, but the required benchmark suite failed. "
+                "Do not treat this as production-ready evidence."
+            )
         if result.failure == "gpu_oom":
             return (
                 "This setting ran out of GPU memory. Try a smaller context, "
@@ -451,6 +521,11 @@ def _plain_english_takeaway(result: AttemptResult) -> str:
             return (
                 "This has real serving TTFT plus speed evidence, but no useful agent "
                 "context target was proven."
+            )
+        if result.benchmark_suite_ok:
+            return (
+                "This setting has speed evidence plus a passing general and agentic "
+                "benchmark suite. Compare it by agent_bench_score, not raw tokens/sec alone."
             )
         if result.workflow_score <= 0:
             return "This is context and speed evidence, but workflow usefulness is still unproven."
@@ -488,6 +563,23 @@ def _decision_for_attempt(
     return "keep" if result.score() > previous_best.score() else "discard"
 
 
+def _benchmark_suite_status(result: AttemptResult) -> str:
+    if result.benchmark_suite_ok is True:
+        return "pass"
+    if result.benchmark_suite_ok is False:
+        return "fail"
+    return "not_run"
+
+
+def _benchmark_suite_failure(suite_run: BenchmarkSuiteRun) -> str:
+    failures = [
+        f"{item.id}:{item.failure_class}"
+        for item in suite_run.results
+        if not item.ok or item.failure_class != "none"
+    ]
+    return ";".join(failures) if failures else "benchmark_suite_failed"
+
+
 def _append_attempts_tsv(
     runs_root: Path,
     receipt_path: Path,
@@ -504,7 +596,10 @@ def _append_attempts_tsv(
                 "run_id\tattempt\tbranch\tcommit\tdirty\tmodel\tdecision\tscore\t"
                 "evidence_status\tcontext\t"
                 "generation_tps\tprompt_tps\tserving_ttft_ms\tserving_warm_ttft_ms\t"
-                "serving_tps\tsettings_json\treceipt\tdescription\n"
+                "serving_tps\tagent_bench_score\tbenchmark_suite_general_score\t"
+                "benchmark_suite_agentic_score\tbenchmark_suite_status\t"
+                "benchmark_suite_receipt\tbenchmark_suite_failure\tsettings_json\t"
+                "receipt\tdescription\n"
             ),
             encoding="utf-8",
         )
@@ -532,6 +627,12 @@ def _append_attempts_tsv(
                 if result.serving_tokens_per_second is None
                 else f"{result.serving_tokens_per_second:.6f}"
             ),
+            _tsv_float(result.agent_bench_score),
+            _tsv_float(result.benchmark_suite_general_score),
+            _tsv_float(result.benchmark_suite_agentic_score),
+            _benchmark_suite_status(result),
+            result.benchmark_suite_receipt or "",
+            result.benchmark_suite_failure or "",
             settings_json,
             str(receipt_path),
             description,
@@ -592,7 +693,9 @@ def _append_results_tsv(
                 "run_id\tmodel\tscore\tstatus\tcontext\tgeneration_tps\tprompt_tps\t"
                 "serving_ttft_ms\tserving_warm_ttft_ms\tserving_warmup_penalty_ms\t"
                 "serving_server_ready_ms\tserving_cold_start_to_first_token_ms\t"
-                "serving_tps\treceipt\tdescription\n"
+                "serving_tps\tagent_bench_score\tbenchmark_suite_general_score\t"
+                "benchmark_suite_agentic_score\tbenchmark_suite_status\t"
+                "benchmark_suite_receipt\tbenchmark_suite_failure\treceipt\tdescription\n"
             ),
             encoding="utf-8",
         )
@@ -629,6 +732,12 @@ def _append_results_tsv(
                 if result.serving_tokens_per_second is None
                 else f"{result.serving_tokens_per_second:.6f}"
             ),
+            _tsv_float(result.agent_bench_score),
+            _tsv_float(result.benchmark_suite_general_score),
+            _tsv_float(result.benchmark_suite_agentic_score),
+            _benchmark_suite_status(result),
+            result.benchmark_suite_receipt or "",
+            result.benchmark_suite_failure or "",
             str(receipt_path),
             description,
         ]

@@ -1,0 +1,155 @@
+{
+  "model": "local-model",
+  "context": 32768,
+  "settings": {
+    "base_url": "http://127.0.0.1:8080/v1",
+    "score_contract": "agent_bench_score",
+    "plan_kind": "external_agentic_heavy",
+    "requires": "Extra external harness setup for inspect-evals SWE-bench and tau2-bench. This plan is intentionally allowed to fail with receipt evidence when those tools are missing."
+  },
+  "tasks": [
+    {
+      "id": "gsm8k_cot_zeroshot_10",
+      "phase": "general",
+      "harness": "lm-evaluation-harness",
+      "env": {
+        "PYTHONIOENCODING": "utf-8"
+      },
+      "commands": [
+        [
+          "uv",
+          "run",
+          "--extra",
+          "bench",
+          "lm-eval",
+          "run",
+          "--model",
+          "local-chat-completions",
+          "--model_args",
+          "model={model},base_url=http://127.0.0.1:8080/v1/chat/completions,eos_string=<|im_end|>",
+          "--tasks",
+          "gsm8k_cot_zeroshot",
+          "--apply_chat_template",
+          "--limit",
+          "10",
+          "--output_path",
+          "{task_dir}",
+          "--log_samples"
+        ],
+        [
+          "uv",
+          "run",
+          "--extra",
+          "bench",
+          "python",
+          "-m",
+          "gguf_limit_bench.score_extract",
+          "--root",
+          "{task_dir}",
+          "--out",
+          "{task_dir}/score.json",
+          "--keys",
+          "exact_match,accuracy,score"
+        ]
+      ],
+      "score_file": "{task_dir}/score.json",
+      "min_score": 0.01,
+      "timeout_seconds": 1800
+    },
+    {
+      "id": "swe_bench_verified_mini",
+      "phase": "agentic",
+      "harness": "inspect-evals-swe-bench",
+      "env": {
+        "LOCAL_API_KEY": "local-no-key",
+        "LOCAL_BASE_URL": "http://127.0.0.1:8080/v1",
+        "PYTHONIOENCODING": "utf-8"
+      },
+      "commands": [
+        [
+          "uv",
+          "run",
+          "--extra",
+          "bench",
+          "inspect",
+          "eval",
+          "inspect_evals/swe_bench_verified_mini",
+          "--model",
+          "openai-api/local/{model}",
+          "--model-base-url",
+          "http://127.0.0.1:8080/v1",
+          "--limit",
+          "1",
+          "--log-dir",
+          "{task_dir}",
+          "--log-format",
+          "json",
+          "--display",
+          "none"
+        ],
+        [
+          "uv",
+          "run",
+          "--extra",
+          "bench",
+          "python",
+          "-m",
+          "gguf_limit_bench.score_extract",
+          "--root",
+          "{task_dir}",
+          "--out",
+          "{task_dir}/score.json",
+          "--keys",
+          "accuracy,score,pass_rate"
+        ]
+      ],
+      "score_file": "{task_dir}/score.json",
+      "min_score": 0.01,
+      "timeout_seconds": 7200
+    },
+    {
+      "id": "tau2_retail_one_task",
+      "phase": "agentic",
+      "harness": "tau2-bench",
+      "env": {
+        "OPENAI_API_KEY": "local-no-key",
+        "LOCAL_API_KEY": "local-no-key",
+        "LOCAL_BASE_URL": "http://127.0.0.1:8080/v1",
+        "PYTHONIOENCODING": "utf-8"
+      },
+      "commands": [
+        [
+          "tau2",
+          "run",
+          "--domain",
+          "retail",
+          "--agent",
+          "llm_agent",
+          "--agent-llm",
+          "openai/{model}",
+          "--num-tasks",
+          "1",
+          "--verbose-logs"
+        ],
+        [
+          "uv",
+          "run",
+          "--extra",
+          "bench",
+          "python",
+          "-m",
+          "gguf_limit_bench.score_extract",
+          "--root",
+          "{task_dir}",
+          "--out",
+          "{task_dir}/score.json",
+          "--keys",
+          "reward,success,accuracy,score,pass_rate"
+        ]
+      ],
+      "score_file": "{task_dir}/score.json",
+      "min_score": 0.01,
+      "timeout_seconds": 7200
+    }
+  ]
+}

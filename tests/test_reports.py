@@ -18,6 +18,12 @@ def _write_run(
     serving_server_ready_ms=None,
     serving_cold_start_to_first_token_ms=None,
     serving_tokens_per_second=None,
+    agent_bench_score=None,
+    benchmark_suite_ok=None,
+    benchmark_suite_general_score=None,
+    benchmark_suite_agentic_score=None,
+    benchmark_suite_receipt=None,
+    benchmark_suite_failure=None,
 ):
     run = root / name
     run.mkdir()
@@ -52,6 +58,12 @@ def _write_run(
                     "serving_server_ready_ms": serving_server_ready_ms,
                     "serving_cold_start_to_first_token_ms": serving_cold_start_to_first_token_ms,
                     "serving_tokens_per_second": serving_tokens_per_second,
+                    "agent_bench_score": agent_bench_score,
+                    "benchmark_suite_ok": benchmark_suite_ok,
+                    "benchmark_suite_general_score": benchmark_suite_general_score,
+                    "benchmark_suite_agentic_score": benchmark_suite_agentic_score,
+                    "benchmark_suite_receipt": benchmark_suite_receipt,
+                    "benchmark_suite_failure": benchmark_suite_failure,
                 },
                 "score": score,
             }
@@ -118,6 +130,36 @@ def test_leaderboard_marks_context_and_workflow_evidence_separately(tmp_path):
     assert entries["context-only"].status == "WORKFLOW UNPROVEN"
     assert entries["workflow-weak"].status == "WORKFLOW WEAK"
     assert entries["workflow-smoke"].status == "WORKFLOW SMOKE"
+
+
+def test_suite_backed_leaderboard_uses_agent_bench_score_and_status(tmp_path):
+    _write_run(tmp_path, "speedy-scout", 500.0, 500.0)
+    _write_run(
+        tmp_path,
+        "suite-backed",
+        0.7,
+        20.0,
+        context=32768,
+        agent_bench_score=0.7,
+        benchmark_suite_ok=True,
+        benchmark_suite_general_score=0.6,
+        benchmark_suite_agentic_score=0.8,
+        benchmark_suite_receipt="runs/suite-receipt",
+    )
+
+    leaderboard = write_leaderboard(tmp_path)
+    champion = leaderboard.champion
+    markdown = (tmp_path / "leaderboard.md").read_text(encoding="utf-8")
+
+    assert champion.model_name == "suite-backed.gguf"
+    assert champion.score == 0.7
+    suite_entry = next(entry for entry in leaderboard.entries if entry.run_id == "suite-backed")
+    assert suite_entry.score == 0.7
+    assert suite_entry.status == "BENCHMARK SUITE"
+    assert suite_entry.agent_bench_score == 0.7
+    assert suite_entry.benchmark_suite_status == "pass"
+    assert "Agent bench score" in markdown
+    assert "BENCHMARK SUITE" in markdown
 
 
 def test_write_leaderboard_writes_markdown_and_champion_json(tmp_path):

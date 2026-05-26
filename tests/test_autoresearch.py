@@ -1,5 +1,7 @@
 import json
 from pathlib import Path
+import sys
+import time
 
 from gguf_limit_bench.autoresearch import (
     AttemptResult,
@@ -8,6 +10,7 @@ from gguf_limit_bench.autoresearch import (
     build_autoresearch_llama_bench_command,
     parse_llama_bench_jsonl,
 )
+from gguf_limit_bench.benchmark_suite import BenchmarkSuitePlan
 
 
 def test_parse_llama_bench_jsonl_extracts_generation_speed_and_context():
@@ -112,7 +115,9 @@ def test_autoresearch_loop_keeps_only_better_setting_and_writes_receipts(tmp_pat
         "run_id\tmodel\tscore\tstatus\tcontext\tgeneration_tps\tprompt_tps\t"
         "serving_ttft_ms\tserving_warm_ttft_ms\tserving_warmup_penalty_ms\t"
         "serving_server_ready_ms\tserving_cold_start_to_first_token_ms\t"
-        "serving_tps\treceipt\tdescription"
+        "serving_tps\tagent_bench_score\tbenchmark_suite_general_score\t"
+        "benchmark_suite_agentic_score\tbenchmark_suite_status\t"
+        "benchmark_suite_receipt\tbenchmark_suite_failure\treceipt\tdescription"
     ) in ledger.read_text(encoding="utf-8")
     attempts_ledger = tmp_path / "autoresearch-attempts.tsv"
     assert attempts_ledger.exists()
@@ -120,6 +125,153 @@ def test_autoresearch_loop_keeps_only_better_setting_and_writes_receipts(tmp_pat
     assert "run_id\tattempt\tbranch\tcommit\tdirty\tmodel\tdecision\tscore" in attempts_text
     assert "\tkeep\t" in attempts_text
     assert "\tdiscard\t" in attempts_text
+
+
+def test_autoresearch_loop_uses_agent_bench_score_when_suite_plan_is_provided(tmp_path):
+    seen: list[AutoresearchSettings] = []
+
+    def fake_runner(settings: AutoresearchSettings) -> AttemptResult:
+        seen.append(settings)
+        speed = 100.0 if settings.context_size == 4096 else 10.0
+        return AttemptResult(
+            ok=True,
+            generation_tokens_per_second=speed,
+            prompt_tokens_per_second=800.0,
+            ttft_ms=100.0,
+            context_size=settings.context_size,
+            failure="none",
+            stdout="{}",
+            stderr="",
+            returncode=0,
+        )
+
+    score_command = [
+        sys.executable,
+        "-c",
+        (
+            "import json; "
+            "score=0.4 if int('{context}') == 4096 else 0.9; "
+            "print(json.dumps({'score': score}))"
+        ),
+    ]
+    plan_path = tmp_path / "suite.plan.json"
+    plan_path.write_text(
+        json.dumps(
+            {
+                "model": "will-be-overridden",
+                "context": 0,
+                "tasks": [
+                    {
+                        "id": "general_score",
+                        "phase": "general",
+                        "harness": "fake-general",
+                        "command": score_command,
+                    },
+                    {
+                        "id": "agentic_score",
+                        "phase": "agentic",
+                        "harness": "fake-agentic",
+                        "command": score_command,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loop = AutoresearchLoop(
+        model=Path("G:/AI/models/Qwen3-Test-Q4_K_M.gguf"),
+        runs_root=tmp_path,
+        attempt_runner=fake_runner,
+        budget_seconds=60,
+        max_attempts=2,
+        benchmark_suite_plan=BenchmarkSuitePlan.from_path(plan_path),
+    )
+
+    receipt = loop.run()
+    best = json.loads((receipt.path / "best-settings.json").read_text(encoding="utf-8"))
+    attempts_text = (tmp_path / "autoresearch-attempts.tsv").read_text(encoding="utf-8")
+    results_text = (tmp_path / "autoresearch-results.tsv").read_text(encoding="utf-8")
+    suite_dirs = sorted(
+        path for path in tmp_path.iterdir() if path.is_dir() and "benchmark-suite" in path.name
+    )
+    suite_plan = json.loads((suite_dirs[-1] / "suite-plan.json").read_text(encoding="utf-8"))
+
+    assert [settings.context_size for settings in seen] == [4096, 8192]
+    assert best["settings"]["context_size"] == 8192
+    assert best["score"] == 0.9
+    assert best["result"]["agent_bench_score"] == 0.9
+    assert best["result"]["benchmark_suite_ok"] is True
+    assert suite_plan["model"] == "will-be-overridden"
+    assert suite_plan["settings"]["gguf_model_path"].endswith("Qwen3-Test-Q4_K_M.gguf")
+    assert "agent_bench_score" in attempts_text
+    assert "\t0.400000\t0.400000\t0.400000\tpass\t" in attempts_text
+    assert "\t0.900000\t0.900000\t0.900000\tpass\t" in results_text
+
+
+def test_autoresearch_loop_caps_benchmark_suite_to_remaining_budget(tmp_path):
+    def fake_runner(settings: AutoresearchSettings) -> AttemptResult:
+        return AttemptResult(
+            ok=True,
+            generation_tokens_per_second=50.0,
+            prompt_tokens_per_second=800.0,
+            ttft_ms=100.0,
+            context_size=settings.context_size,
+            failure="none",
+            stdout="{}",
+            stderr="",
+            returncode=0,
+        )
+
+    slow_command = [
+        sys.executable,
+        "-c",
+        "import json, time; time.sleep(5); print(json.dumps({'score': 1.0}))",
+    ]
+    plan_path = tmp_path / "slow-suite.plan.json"
+    plan_path.write_text(
+        json.dumps(
+            {
+                "model": "local-model",
+                "context": 4096,
+                "tasks": [
+                    {
+                        "id": "slow_general",
+                        "phase": "general",
+                        "harness": "fake-general",
+                        "command": slow_command,
+                        "timeout_seconds": 30,
+                    },
+                    {
+                        "id": "slow_agentic",
+                        "phase": "agentic",
+                        "harness": "fake-agentic",
+                        "command": slow_command,
+                        "timeout_seconds": 30,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loop = AutoresearchLoop(
+        model=Path("G:/AI/models/Qwen3-Test-Q4_K_M.gguf"),
+        runs_root=tmp_path,
+        attempt_runner=fake_runner,
+        budget_seconds=1,
+        max_attempts=1,
+        benchmark_suite_plan=BenchmarkSuitePlan.from_path(plan_path),
+    )
+
+    started = time.monotonic()
+    receipt = loop.run()
+    elapsed = time.monotonic() - started
+    best = json.loads((receipt.path / "best-settings.json").read_text(encoding="utf-8"))
+
+    assert elapsed < 3.0
+    assert best["result"]["benchmark_suite_ok"] is False
+    assert "slow_general:timeout" in best["result"]["benchmark_suite_failure"]
 
 
 def test_autoresearch_attempt_ledger_records_crash_decision(tmp_path):
