@@ -32,3 +32,18 @@ def test_docs_use_only_new_public_command_name():
     assert "pilotbench" in docs
     assert "gguf-limit-bench" not in docs
     assert "Legacy command" not in docs
+
+
+def test_public_docs_do_not_use_personal_name():
+    public_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in [
+            Path("README.md"),
+            Path("docs/COMMAND-BOARD.md"),
+            Path("docs/START-FOR-NORMAL-PEOPLE.md"),
+            Path("docs/IMPLEMENTATION-PLAN.md"),
+        ]
+    )
+
+    assert "David" not in public_text
+    assert "David's" not in public_text

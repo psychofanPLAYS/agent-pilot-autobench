@@ -10,9 +10,14 @@ import psutil
 class TelemetrySnapshot:
     ram_available_mb: int
     ram_used_percent: float
+    cpu_used_percent: float = 0.0
+    swap_used_percent: float = 0.0
+    disk_read_mb: float = 0.0
+    disk_write_mb: float = 0.0
     gpu_used_mb: int | None = None
     gpu_total_mb: int | None = None
     gpu_util_percent: int | None = None
+    gpu_power_watts: float | None = None
 
     def to_dict(self) -> dict[str, int | float | None]:
         return asdict(self)
@@ -42,18 +47,25 @@ def classify_failure(text: str) -> str:
 
 def sample_telemetry() -> TelemetrySnapshot:
     memory = psutil.virtual_memory()
+    swap = psutil.swap_memory()
+    disk = psutil.disk_io_counters()
     gpu = _sample_gpu_with_nvidia_smi()
     return TelemetrySnapshot(
         ram_available_mb=int(memory.available / 1024 / 1024),
         ram_used_percent=float(memory.percent),
+        cpu_used_percent=float(psutil.cpu_percent(interval=None)),
+        swap_used_percent=float(swap.percent),
+        disk_read_mb=float((disk.read_bytes if disk else 0) / 1024 / 1024),
+        disk_write_mb=float((disk.write_bytes if disk else 0) / 1024 / 1024),
         gpu_used_mb=gpu.get("used"),
         gpu_total_mb=gpu.get("total"),
         gpu_util_percent=gpu.get("util"),
+        gpu_power_watts=gpu.get("power"),
     )
 
 
 def _sample_gpu_with_nvidia_smi() -> dict[str, int | None]:
-    query = "memory.used,memory.total,utilization.gpu"
+    query = "memory.used,memory.total,utilization.gpu,power.draw"
     try:
         completed = subprocess.run(
             [
@@ -71,6 +83,11 @@ def _sample_gpu_with_nvidia_smi() -> dict[str, int | None]:
     if completed.returncode != 0 or not completed.stdout.strip():
         return {"used": None, "total": None, "util": None}
     parts = [part.strip() for part in completed.stdout.splitlines()[0].split(",")]
-    if len(parts) != 3:
-        return {"used": None, "total": None, "util": None}
-    return {"used": int(parts[0]), "total": int(parts[1]), "util": int(parts[2])}
+    if len(parts) != 4:
+        return {"used": None, "total": None, "util": None, "power": None}
+    return {
+        "used": int(float(parts[0])),
+        "total": int(float(parts[1])),
+        "util": int(float(parts[2])),
+        "power": float(parts[3]) if parts[3] not in {"[N/A]", "N/A"} else None,
+    }

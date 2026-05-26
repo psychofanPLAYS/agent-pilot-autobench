@@ -42,7 +42,7 @@ List Qwen-family GGUF models:
 uv run --extra dev pilotbench survey --qwen-only
 ```
 
-List only the Qwen 35B models David cares about:
+List only Qwen 35B models:
 
 ```powershell
 uv run --extra dev pilotbench survey --qwen-35b-only
@@ -54,7 +54,7 @@ List only Qwen 35B MTP models:
 uv run --extra dev pilotbench survey --qwen-35b-only --mtp-only
 ```
 
-Default discovery should cover David's normal G-drive model roots:
+Default discovery should cover common G-drive model roots:
 
 - `G:\AI\models`
 - `G:\AI\models\LM_Studio-gguf`
@@ -64,6 +64,32 @@ Open the model picker TUI:
 ```powershell
 uv run --extra dev pilotbench start
 ```
+
+Show the latest champion and write `runs\leaderboard.md` plus `runs\champion.json`:
+
+```powershell
+uv run --extra dev pilotbench results
+```
+
+Create the local SQLite experiment memory:
+
+```powershell
+uv run --extra dev pilotbench init-db
+```
+
+List benchmark packs:
+
+```powershell
+uv run --extra dev pilotbench packs
+```
+
+Export the latest champion as deployment files:
+
+```powershell
+uv run --extra dev pilotbench export-profile
+```
+
+Exported server profiles bind to `127.0.0.1` by default. Change that only when you intentionally want LAN or Tailscale access.
 
 Run the basic autoresearch loop for one model:
 
@@ -110,6 +136,8 @@ Each autoresearch run writes a folder under `runs/<timestamp>-<model>`:
 - `best-settings.json`: machine-readable best settings and score.
 - `learning.json`: best learned settings when learning is enabled.
 - `recovery.json`: latest recovery status.
+- `leaderboard.md`: ranked cross-run summary written under `runs\`.
+- `champion.json`: latest champion written under `runs\`.
 
 Receipts should stay small and deterministic. They should contain the settings, scores, failure class, and short command output needed for debugging, but not huge raw logs or machine-specific noise. This makes them friendly for Codex, Git diffs, and quick human review.
 
@@ -138,6 +166,17 @@ The loop follows the Karpathy-style autoresearch shape:
 - Use Optuna's persistent suggestions when learning is on, while still accepting only measured score improvements.
 - Record failures such as GPU OOM, model-load failure, crash, and timeout, then keep going.
 - Keep unified KV cache marked as mandatory target metadata for Hermes deployment.
+
+## Beginner Presets
+
+The TUI presents simple presets first:
+
+- `Quick Scout`: load and speed sanity check.
+- `Normal`: good default run.
+- `Deep Pilot`: serious agent-pilot run, up to 20 minutes per model.
+- `Overnight`: longer campaign controlled by a total time cap.
+
+Advanced settings should expose the real llama.cpp knobs in plain groups: context, KV cache, MTP, batch, ubatch, threads, parallel slots, flash attention, and deployment targets.
 
 ## MTP Notes
 

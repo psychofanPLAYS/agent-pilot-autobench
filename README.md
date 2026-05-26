@@ -117,7 +117,7 @@ The doctor command checks paths before you spend time on benchmarks:
 uv run --extra dev pilotbench doctor
 ```
 
-On David's machine the defaults are:
+Default Windows workstation paths are:
 
 - models: `G:\AI\models`
 - LM Studio GGUF models: `G:\AI\models\LM_Studio-gguf`
@@ -162,6 +162,32 @@ Open the terminal model picker:
 uv run --extra dev pilotbench start
 ```
 
+Show the current champion after a run:
+
+```powershell
+uv run --extra dev pilotbench results
+```
+
+Create the local experiment memory database:
+
+```powershell
+uv run --extra dev pilotbench init-db
+```
+
+List benchmark packs:
+
+```powershell
+uv run --extra dev pilotbench packs
+```
+
+Export a ready-to-edit champion deployment profile:
+
+```powershell
+uv run --extra dev pilotbench export-profile
+```
+
+Generated server profiles bind to `127.0.0.1` by default. Edit the generated PowerShell only if you intentionally want LAN or Tailscale access.
+
 Run one autoresearch loop:
 
 ```powershell
@@ -194,8 +220,21 @@ Important files:
 - `learning.json`: best Optuna result when learning is enabled
 - `workflow-results.json`: optional small agent-style task scores
 - `recovery.json`: latest status for resuming or debugging
+- `runs\leaderboard.md`: ranked cross-run champion board
+- `runs\champion.json`: latest machine-readable champion
 
 The receipt folder is the source of truth. If a model fails, that failure is still useful because the next run can avoid wasting time in the same zone.
+
+## Beginner Presets
+
+The TUI starts with plain-language presets:
+
+- `Quick Scout`: does it load and look fast?
+- `Normal`: good default test.
+- `Deep Pilot`: serious agent pilot test, up to 20 minutes per model.
+- `Overnight`: total campaign cap for longer research.
+
+The default useful-pilot target is: TTFT under 10 seconds, generation at least 20 tok/s, full GPU offload, no swap, stable JSON/tool behavior, and the best context that preserves quality.
 
 ## Current Score
 
@@ -217,13 +256,20 @@ Failed attempts receive a large negative score. That keeps the optimizer honest:
 Working now:
 
 - GGUF discovery and filtering
+- heaviest-to-lightest model sorting with on-disk GB
 - Qwen / parameter / quant / MTP name parsing
 - llama.cpp benchmark command planning
 - local autoresearch loop with budget and attempt limits
+- beginner presets for quick/normal/deep/overnight runs
+- benchmark pack registry with built-in pack metadata
+- context-limit ladder and boundary refinement planner
 - persistent Optuna learning in SQLite
-- telemetry snapshots and failure classification
+- experiment-memory SQLite schema at `db\agentpilot.sqlite`
+- telemetry snapshots, GPU power, swap, disk counters, and failure classification
 - Markdown and JSON receipts
-- Textual model picker
+- Textual model picker with dark styling, preset panel, and run dashboard stub
+- latest champion reporting through `pilotbench results`
+- deployment profile export through `pilotbench export-profile`
 - small workflow evaluation path
 - path readiness checks through `doctor`
 - beginner startup through `START-HERE.bat` and `pilotbench start`

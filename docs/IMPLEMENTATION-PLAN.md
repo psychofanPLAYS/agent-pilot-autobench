@@ -1,6 +1,6 @@
 # Agent Pilot Autobench Implementation Plan
 
-Goal: build a repeatable TUI benchmark cockpit for David's local GGUF collection, starting with Qwen-family models and the XTREME RTX 4090.
+Goal: build a repeatable TUI benchmark cockpit for a local GGUF collection, starting with Qwen-family models and RTX 4090-style Windows workstations.
 
 Architecture: keep this project in one folder, use ready-made tools for heavy work, and store searchable receipts for every run. The app wraps `llama-bench`, LM Studio `lms`, NVML telemetry, Optuna learning, and small benchmark prompts; it does not reinvent inference.
 
@@ -24,7 +24,7 @@ Tech stack: Python, Textual, Rich, Typer, pytest, psutil, nvidia-ml-py, Optuna, 
 - [x] Wire a quick 5-minute per-model benchmark runner.
 - [ ] Read LM Studio logs/settings as read-only profile hints.
 - [x] Add a Karpathy-style loop: fixed budget, mutate one setting, measure, keep if score improves.
-- [x] Add plain-English docs and a command board for David.
+- [x] Add plain-English docs and a command board.
 - [ ] Run unit tests, smoke tests, and commit the project repo.
 
 ## Receipts
@@ -48,7 +48,7 @@ The optimizer uses Karpathy's core pattern: fixed time budget, one metric, small
 
 When learning is enabled, each new model study starts with the safe baseline settings, then Optuna proposes later trials from prior evidence. Failed trials are still useful because they teach the search to avoid unstable settings or models that fail to load.
 
-For David's current Qwen focus, use `--qwen-35b-only`; 27B and 9B models are available for smoke tests, but they are not the target queue.
+For the current Qwen focus, use `--qwen-35b-only`; 27B and 9B models are available for smoke tests, but they are not the target queue.
 
 For MTP-focused models, use `--mtp-only` plus `--workflow-eval`. The workflow evaluator uses `llama-cli` and adds a low-burn MTP draft probe (`--draft-max 16`) when the filename indicates MTP.
 

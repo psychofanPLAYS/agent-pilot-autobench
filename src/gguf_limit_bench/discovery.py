@@ -16,6 +16,7 @@ class ModelInfo:
     family: str = "unknown"
     parameters: str = "unknown"
     quant: str = "unknown"
+    size_bytes: int = 0
     is_moe: bool = False
     has_mtp: bool = False
     vision_mmproj: Path | None = None
@@ -23,6 +24,10 @@ class ModelInfo:
     @property
     def has_vision(self) -> bool:
         return self.vision_mmproj is not None
+
+    @property
+    def size_gb(self) -> float:
+        return self.size_bytes / (1024**3)
 
 
 def parse_model_name(path: Path) -> ModelInfo:
@@ -67,12 +72,13 @@ def discover_models(roots: list[Path]) -> list[ModelInfo]:
                     family=info.family,
                     parameters=info.parameters,
                     quant=info.quant,
+                    size_bytes=path.stat().st_size,
                     is_moe=info.is_moe,
                     has_mtp=info.has_mtp,
                     vision_mmproj=mmproj,
                 )
             )
-    return models
+    return sorted(models, key=lambda model: (-model.size_bytes, str(model.path).lower()))
 
 
 def _find_mmproj(folder: Path) -> Path | None:

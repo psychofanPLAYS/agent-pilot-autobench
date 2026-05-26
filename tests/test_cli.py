@@ -51,7 +51,7 @@ def test_autoresearch_command_writes_receipts(tmp_path, monkeypatch):
     )
 
     assert result.exit_code == 0
-    run_dirs = [path for path in (tmp_path / "runs").iterdir() if path.name != "learning"]
+    run_dirs = [path for path in (tmp_path / "runs").iterdir() if path.is_dir() and path.name != "learning"]
     assert len(run_dirs) == 1
     assert json.loads((run_dirs[0] / "best-settings.json").read_text(encoding="utf-8"))
     assert (tmp_path / "runs" / "learning" / "optuna.sqlite3").exists()
@@ -80,7 +80,7 @@ def test_autoresearch_all_qwen_only_skips_non_qwen_models(tmp_path, monkeypatch)
     )
 
     assert result.exit_code == 0
-    run_dirs = [path for path in (tmp_path / "runs").iterdir() if path.name != "learning"]
+    run_dirs = [path for path in (tmp_path / "runs").iterdir() if path.is_dir() and path.name != "learning"]
     assert len(run_dirs) == 1
     assert (tmp_path / "runs" / "learning" / "optuna.sqlite3").exists()
 
@@ -119,7 +119,7 @@ def test_autoresearch_all_qwen_35b_only_skips_27b_models(tmp_path, monkeypatch):
     )
 
     assert result.exit_code == 0
-    run_dirs = [path for path in (tmp_path / "runs").iterdir() if path.name != "learning"]
+    run_dirs = [path for path in (tmp_path / "runs").iterdir() if path.is_dir() and path.name != "learning"]
     assert len(run_dirs) == 1
     assert "35B" in json.loads((run_dirs[0] / "best-settings.json").read_text(encoding="utf-8"))["model"]
 
@@ -158,7 +158,7 @@ def test_autoresearch_all_honors_total_budget_and_finish_early(tmp_path, monkeyp
     )
 
     assert result.exit_code == 0
-    run_dirs = [path for path in (tmp_path / "runs").iterdir() if path.name != "learning"]
+    run_dirs = [path for path in (tmp_path / "runs").iterdir() if path.is_dir() and path.name != "learning"]
     assert len(run_dirs) == 1
 
 
@@ -201,7 +201,9 @@ def test_start_command_opens_tui_after_ready_check(tmp_path, monkeypatch):
     )
 
     class FakeBenchTui:
-        def __init__(self, root: Path) -> None:
+        models_to_run: list[ModelInfo] = []
+
+        def __init__(self, root: Path, **kwargs) -> None:
             opened_roots.append(root)
 
         def run(self) -> None:
@@ -214,6 +216,106 @@ def test_start_command_opens_tui_after_ready_check(tmp_path, monkeypatch):
     assert result.exit_code == 0
     assert opened_roots == [tmp_path]
     assert "Opening the model picker" in result.output
+    assert "No models selected" in result.output
+
+
+def test_start_command_runs_selected_models_from_tui(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "gguf_limit_bench.cli.build_doctor_report",
+        lambda **kwargs: DoctorReport(
+            checks=[
+                DoctorCheck(
+                    name="model root",
+                    status="ok",
+                    path=str(tmp_path),
+                    detail="directory exists",
+                )
+            ]
+        ),
+    )
+    selected = ModelInfo(
+        path=tmp_path / "Qwen3.6-35B-A3B-MTP-Q4_K_M.gguf",
+        name="Qwen3.6-35B-A3B-MTP-Q4_K_M.gguf",
+        family="qwen",
+        parameters="35B-A3B",
+        has_mtp=True,
+    )
+    runs: list[dict] = []
+
+    class FakeBenchTui:
+        def __init__(self, root: Path, **kwargs) -> None:
+            self.models_to_run = [selected]
+
+        def run(self) -> None:
+            pass
+
+    def fake_run_one_autoresearch(**kwargs):
+        runs.append(kwargs)
+        receipt = tmp_path / "runs" / "fake"
+        receipt.mkdir(parents=True)
+        return type("Receipt", (), {"path": receipt})()
+
+    monkeypatch.setattr("gguf_limit_bench.cli.BenchTui", FakeBenchTui)
+    monkeypatch.setattr("gguf_limit_bench.cli._run_one_autoresearch", fake_run_one_autoresearch)
+
+    result = runner.invoke(
+        app,
+        [
+            "start",
+            "--root",
+            str(tmp_path),
+            "--runs-root",
+            str(tmp_path / "runs"),
+            "--budget-minutes",
+            "1",
+            "--max-attempts",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Starting research loop for 1 selected model" in result.output
+    assert runs[0]["model"] == selected.path
+    assert runs[0]["enable_mtp"] is True
+
+
+def test_start_command_uses_preset_budget_when_budget_not_overridden(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "gguf_limit_bench.cli.build_doctor_report",
+        lambda **kwargs: DoctorReport(
+            checks=[
+                DoctorCheck(
+                    name="model root",
+                    status="ok",
+                    path=str(tmp_path),
+                    detail="directory exists",
+                )
+            ]
+        ),
+    )
+    selected = ModelInfo(path=tmp_path / "Qwen3.gguf", name="Qwen3.gguf", family="qwen")
+    runs: list[dict] = []
+
+    class FakeBenchTui:
+        def __init__(self, root: Path, **kwargs) -> None:
+            self.models_to_run = [selected]
+
+        def run(self) -> None:
+            pass
+
+    def fake_run_one_autoresearch(**kwargs):
+        runs.append(kwargs)
+        receipt = tmp_path / "runs" / "fake"
+        receipt.mkdir(parents=True)
+        return type("Receipt", (), {"path": receipt})()
+
+    monkeypatch.setattr("gguf_limit_bench.cli.BenchTui", FakeBenchTui)
+    monkeypatch.setattr("gguf_limit_bench.cli._run_one_autoresearch", fake_run_one_autoresearch)
+
+    result = runner.invoke(app, ["start", "--root", str(tmp_path), "--preset", "deep"])
+
+    assert result.exit_code == 0
+    assert runs[0]["budget_seconds"] == 20 * 60
 
 
 def test_start_command_exits_when_required_check_is_missing(tmp_path, monkeypatch):
@@ -277,7 +379,9 @@ def test_global_start_flag_opens_tui(monkeypatch):
     )
 
     class FakeBenchTui:
-        def __init__(self, root: Path) -> None:
+        models_to_run: list[ModelInfo] = []
+
+        def __init__(self, root: Path, **kwargs) -> None:
             opened_roots.append(root)
 
         def run(self) -> None:
@@ -289,3 +393,38 @@ def test_global_start_flag_opens_tui(monkeypatch):
 
     assert result.exit_code == 0
     assert opened_roots == [Path("G:/AI/models")]
+
+
+def test_results_command_prints_latest_champion(tmp_path):
+    run = tmp_path / "runs" / "20260526-test"
+    run.mkdir(parents=True)
+    (run / "best-settings.json").write_text(
+        json.dumps(
+            {
+                "model": "G:/AI/models/Winner.gguf",
+                "settings": {"context_size": 0, "parallel": 1, "gpu_layers": 99},
+                "result": {
+                    "generation_tokens_per_second": 42.0,
+                    "prompt_tokens_per_second": 900.0,
+                    "failure": "unknown",
+                },
+                "score": 51.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["results", "--runs-root", str(tmp_path / "runs")])
+
+    assert result.exit_code == 0
+    assert "Champion: Winner.gguf" in result.output
+    assert (tmp_path / "runs" / "leaderboard.md").exists()
+    assert (tmp_path / "runs" / "champion.json").exists()
+
+
+def test_packs_command_lists_builtin_benchmark_packs():
+    result = runner.invoke(app, ["packs"])
+
+    assert result.exit_code == 0
+    assert "hermes-pilot" in result.output
+    assert "context-limit" in result.output

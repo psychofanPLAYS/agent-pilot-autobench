@@ -8,6 +8,7 @@ import time
 from typing import Any, Callable
 
 from gguf_limit_bench.receipts import RunReceipt
+from gguf_limit_bench.run_config import RunStatus
 from gguf_limit_bench.telemetry import classify_failure, sample_telemetry
 
 
@@ -211,6 +212,7 @@ class AutoresearchLoop:
                 "settings": best_settings.to_dict(),
                 "result": best_result.to_dict(),
                 "score": best_result.score(),
+                "status": _status_for_result(best_result),
                 "learner_best": self.learner.best() if self.learner is not None else None,
             },
         )
@@ -343,6 +345,7 @@ def _summary_lines(
         f"- Prompt tokens/sec: `{result.prompt_tokens_per_second}`",
         f"- Workflow score: `{result.workflow_score}`",
         f"- Failure class: `{result.failure}`",
+        f"- Status: `{_status_for_result(result)}`",
         "",
         "## Recovery",
         "",
@@ -364,3 +367,13 @@ def _summary_lines(
 
 def _safe_slug(value: str) -> str:
     return "".join(char if char.isalnum() or char in "-_" else "-" for char in value)[:80]
+
+
+def _status_for_result(result: AttemptResult) -> str:
+    if not result.ok:
+        if result.failure in {"model_load", "gpu_oom", "memory_allocation", "crash"}:
+            return RunStatus.FAILED.value
+        return RunStatus.PARTIAL.value
+    if result.generation_tokens_per_second < 20.0:
+        return RunStatus.CHAMPION_RETEST_NEEDED.value
+    return RunStatus.CANDIDATE.value

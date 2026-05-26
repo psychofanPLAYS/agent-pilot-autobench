@@ -31,6 +31,21 @@ def test_discover_models_pairs_mmproj_with_weight(tmp_path):
     assert models[0].has_vision is True
 
 
+def test_discover_models_records_size_and_sorts_heaviest_first(tmp_path):
+    model_dir = tmp_path / "models"
+    model_dir.mkdir()
+    small = model_dir / "Qwen3.6-7B-Q4_K_M.gguf"
+    large = model_dir / "Qwen3.6-35B-A3B-Q4_K_M.gguf"
+    small.write_bytes(b"1" * 10)
+    large.write_bytes(b"1" * 30)
+
+    models = discover_models([model_dir])
+
+    assert [model.path for model in models] == [large, small]
+    assert [model.size_bytes for model in models] == [30, 10]
+    assert models[0].size_gb > models[1].size_gb
+
+
 def test_discover_models_skips_mmproj_anywhere_in_name_and_deduplicates_nested_roots(tmp_path):
     root = tmp_path / "models"
     lmstudio = root / "LM_Studio-gguf" / "repo"

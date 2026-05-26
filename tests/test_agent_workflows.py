@@ -125,5 +125,5 @@ def test_bulk_autoresearch_supports_total_budget_and_finish_early(tmp_path, monk
     )
 
     assert result.exit_code == 0
-    run_dirs = [path for path in (tmp_path / "runs").iterdir() if path.name != "learning"]
+    run_dirs = [path for path in (tmp_path / "runs").iterdir() if path.is_dir() and path.name != "learning"]
     assert len(run_dirs) == 1

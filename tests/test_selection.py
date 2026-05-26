@@ -20,3 +20,18 @@ def test_selection_state_toggles_one_model_and_selects_all():
     state.clear()
     assert state.selected_paths() == []
 
+
+def test_selection_state_keeps_selected_paths_when_models_are_reordered():
+    models = [
+        ModelInfo(path=Path("small.gguf"), name="small", size_bytes=10),
+        ModelInfo(path=Path("large.gguf"), name="large", size_bytes=30),
+    ]
+    state = SelectionState(models)
+    state.toggle(0)
+
+    reordered = list(reversed(models))
+    state.replace_models(reordered)
+
+    assert state.selected_paths() == [Path("small.gguf")]
+    assert state.is_selected(1) is True
+    assert state.is_selected(0) is False
