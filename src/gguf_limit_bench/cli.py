@@ -186,11 +186,46 @@ def doctor(
         runs_root=runs_root,
     )
     if json_out:
-        console.print_json(json.dumps(report.to_dict()))
+        _print_json(report.to_dict())
     else:
         _print_doctor_report(report)
     if strict and not report.ready:
         typer.echo("Required checks failed.", err=True)
+        raise typer.Exit(1)
+
+
+@app.command("first-run")
+def first_run(
+    root: Path = typer.Option(
+        DEFAULT_MODEL_ROOT,
+        help="Folder where your GGUF models live.",
+    ),
+    llama_bench: Path = DEFAULT_LLAMA_BENCH,
+    llama_cli: Path = DEFAULT_LLAMA_CLI,
+    runs_root: Path = DEFAULT_RUNS_ROOT,
+    db_path: Path = DEFAULT_DB_PATH,
+    json_out: bool = False,
+) -> None:
+    """Prepare local state and tell a first-time user exactly what to run next."""
+    report = build_doctor_report(
+        model_roots=[root],
+        llama_bench=llama_bench,
+        llama_cli=llama_cli,
+        runs_root=runs_root,
+    )
+    init_state_db(db_path)
+    write_leaderboard(runs_root)
+    payload = {
+        **report.to_dict(),
+        "db_path": str(db_path),
+        "runs_root": str(runs_root),
+        "next_command": "agent-autobench --start" if report.ready else "agent-autobench doctor",
+    }
+    if json_out:
+        _print_json(payload)
+    else:
+        _print_first_run_report(report=report, db_path=db_path, runs_root=runs_root)
+    if not report.ready:
         raise typer.Exit(1)
 
 
@@ -206,22 +241,20 @@ def survey(
     models = discover_models(roots)
     models = _filter_models(models, qwen_only=qwen_only, qwen_35b_only=qwen_35b_only, mtp_only=mtp_only)
     if json_out:
-        console.print_json(
-            json.dumps(
-                [
-                    {
-                        "path": str(model.path),
-                        "family": model.family,
-                        "parameters": model.parameters,
-                        "quant": model.quant,
-                        "size_bytes": model.size_bytes,
-                        "size_gb": round(model.size_gb, 3),
-                        "has_mtp": model.has_mtp,
-                        "has_vision": model.has_vision,
-                    }
-                    for model in models
-                ]
-            )
+        _print_json(
+            [
+                {
+                    "path": str(model.path),
+                    "family": model.family,
+                    "parameters": model.parameters,
+                    "quant": model.quant,
+                    "size_bytes": model.size_bytes,
+                    "size_gb": round(model.size_gb, 3),
+                    "has_mtp": model.has_mtp,
+                    "has_vision": model.has_vision,
+                }
+                for model in models
+            ]
         )
         return
     table = Table(title=f"Discovered GGUF models under {', '.join(str(path) for path in roots)}")
@@ -258,7 +291,7 @@ def results(
         console.print("No benchmark receipts found yet.")
         return
     if json_out:
-        console.print_json((runs_root / "champion.json").read_text(encoding="utf-8"))
+        typer.echo((runs_root / "champion.json").read_text(encoding="utf-8"))
         return
     champion = leaderboard.champion
     console.print(f"Champion: {champion.model_name}")
@@ -270,6 +303,7 @@ def results(
     console.print(f"Context: {champion.context_label}")
     console.print(f"Receipt: {champion.receipt_path}")
     console.print(f"Leaderboard written: {runs_root / 'leaderboard.md'}")
+    console.print(f"HTML report: {runs_root / 'results.html'}")
 
 
 @app.command()
@@ -277,19 +311,17 @@ def packs(plugin_dir: Path = Path("plugins/benchmarks"), json_out: bool = False)
     """List built-in and local benchmark packs."""
     available = load_benchmark_packs(plugin_dir)
     if json_out:
-        console.print_json(
-            json.dumps(
-                {
-                    pack_id: {
-                        "version": pack.version,
-                        "description": pack.description,
-                        "tasks": list(pack.tasks),
-                        "scoring_categories": list(pack.scoring_categories),
-                        "safety_policy": pack.safety_policy,
-                    }
-                    for pack_id, pack in sorted(available.items())
+        _print_json(
+            {
+                pack_id: {
+                    "version": pack.version,
+                    "description": pack.description,
+                    "tasks": list(pack.tasks),
+                    "scoring_categories": list(pack.scoring_categories),
+                    "safety_policy": pack.safety_policy,
                 }
-            )
+                for pack_id, pack in sorted(available.items())
+            }
         )
         return
     table = Table(title="Benchmark Packs")
@@ -615,6 +647,23 @@ def _print_doctor_report(report: DoctorReport) -> None:
         console.print("Ready for benchmark runs.")
     else:
         console.print("Some required paths are missing. Use --strict in scripts to fail fast.")
+
+
+def _print_first_run_report(report: DoctorReport, db_path: Path, runs_root: Path) -> None:
+    console.print("First-time setup check")
+    _print_doctor_report(report)
+    console.print(f"Experiment memory: {db_path}")
+    console.print(f"Results folder: {runs_root}")
+    if report.ready:
+        console.print("First-time setup is ready.")
+        console.print("Next command: agent-autobench --start")
+    else:
+        console.print("First-time setup needs one or more missing paths fixed.")
+        console.print("Next command: agent-autobench doctor")
+
+
+def _print_json(payload) -> None:
+    typer.echo(json.dumps(payload, ensure_ascii=True, indent=2))
 
 
 def _is_mtp_model(model: Path) -> bool:

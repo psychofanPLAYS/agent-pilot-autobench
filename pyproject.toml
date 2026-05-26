@@ -19,6 +19,7 @@ dev = [
 ]
 
 [project.scripts]
+agent-autobench = "gguf_limit_bench.cli:app"
 pilotbench = "gguf_limit_bench.cli:app"
 
 [build-system]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from html import escape
 import json
 from pathlib import Path
 
@@ -61,8 +62,10 @@ def write_leaderboard(runs_root: Path) -> Leaderboard:
     leaderboard = build_leaderboard(runs_root)
     if not leaderboard.entries:
         (runs_root / "leaderboard.md").write_text("# Agent Pilot Autobench Leaderboard\n\nNo runs found.\n", encoding="utf-8")
+        (runs_root / "results.html").write_text(_empty_html(), encoding="utf-8")
         return leaderboard
     (runs_root / "leaderboard.md").write_text(_leaderboard_markdown(leaderboard), encoding="utf-8")
+    (runs_root / "results.html").write_text(_leaderboard_html(leaderboard), encoding="utf-8")
     (runs_root / "champion.json").write_text(
         json.dumps(asdict(leaderboard.champion), ensure_ascii=True, indent=2),
         encoding="utf-8",
@@ -105,3 +108,206 @@ def _leaderboard_markdown(leaderboard: Leaderboard) -> str:
         )
     lines.append("")
     return "\n".join(lines)
+
+
+def _empty_html() -> str:
+    return "\n".join(
+        [
+            "<!doctype html>",
+            '<html lang="en">',
+            "<head>",
+            '  <meta charset="utf-8">',
+            "  <title>Agent Pilot Autobench Results</title>",
+            "  <style>",
+            _html_css(),
+            "  </style>",
+            "</head>",
+            "<body>",
+            '  <main class="shell">',
+            "    <section class=\"hero\">",
+            "      <p class=\"eyebrow\">No runs yet</p>",
+            "      <h1>Agent Pilot Autobench Results</h1>",
+            "      <p>Run a benchmark first, then refresh this report.</p>",
+            "    </section>",
+            "  </main>",
+            "</body>",
+            "</html>",
+        ]
+    )
+
+
+def _leaderboard_html(leaderboard: Leaderboard) -> str:
+    champion = leaderboard.champion
+    rows = "\n".join(_html_row(rank, entry) for rank, entry in enumerate(leaderboard.entries, start=1))
+    settings = "\n".join(
+        f"<li><span>{escape(str(key))}</span><strong>{escape(str(value))}</strong></li>"
+        for key, value in sorted(champion.settings.items())
+    )
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Agent Pilot Autobench Results</title>
+  <style>
+{_html_css()}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <p class="eyebrow">Current champion</p>
+      <h1>Agent Pilot Autobench Results</h1>
+      <p class="lede">{escape(champion.model_name)} is the current measured winner.</p>
+      <div class="score-grid">
+        <div><span>Score</span><strong>{champion.score:.2f}</strong></div>
+        <div><span>Status</span><strong>{escape(champion.status)}</strong></div>
+        <div><span>Generation</span><strong>{champion.generation_tps:.2f} tok/s</strong></div>
+        <div><span>Prompt</span><strong>{champion.prompt_tps:.2f} tok/s</strong></div>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>What to do next</h2>
+      <ol>
+        <li>Open <code>runs\\leaderboard.md</code> when you want the compact Markdown version.</li>
+        <li>Run <code>agent-autobench export-profile</code> to create a localhost-safe server profile.</li>
+        <li>Use the receipt path below when an AI agent needs to inspect the proof.</li>
+      </ol>
+      <p class="receipt">Receipt: <code>{escape(champion.receipt_path)}</code></p>
+    </section>
+    <section class="panel">
+      <h2>Winning settings</h2>
+      <ul class="settings">
+        {settings}
+      </ul>
+    </section>
+    <section class="panel">
+      <h2>All runs</h2>
+      <table>
+        <thead>
+          <tr><th>Rank</th><th>Status</th><th>Score</th><th>Generation</th><th>Prompt</th><th>Context</th><th>Model</th></tr>
+        </thead>
+        <tbody>
+          {rows}
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>
+"""
+
+
+def _html_row(rank: int, entry: LeaderboardEntry) -> str:
+    status_class = "pass" if entry.status == "PASS" else "fail"
+    return (
+        f'<tr class="{status_class}">'
+        f"<td>{rank}</td>"
+        f"<td>{escape(entry.status)}</td>"
+        f"<td>{entry.score:.2f}</td>"
+        f"<td>{entry.generation_tps:.2f}</td>"
+        f"<td>{entry.prompt_tps:.2f}</td>"
+        f"<td>{escape(entry.context_label)}</td>"
+        f"<td><code>{escape(entry.model_name)}</code></td>"
+        "</tr>"
+    )
+
+
+def _html_css() -> str:
+    return """
+    :root {
+      color-scheme: dark;
+      --bg: #0d1117;
+      --panel: #151b23;
+      --panel-strong: #1f2937;
+      --text: #f5f7fb;
+      --muted: #a7b0c0;
+      --line: #303846;
+      --green: #3ddc84;
+      --red: #ff6b6b;
+      --gold: #f2c94c;
+      --blue: #65b7ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font: 16px/1.5 "Segoe UI", system-ui, sans-serif;
+    }
+    .shell {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 32px 0 48px;
+    }
+    .hero, .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 24px;
+      margin-bottom: 16px;
+    }
+    .hero {
+      background: linear-gradient(135deg, #151b23 0%, #192235 55%, #20271e 100%);
+    }
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--gold);
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      font-size: 0.78rem;
+    }
+    h1, h2 { margin: 0 0 12px; line-height: 1.15; }
+    h1 { font-size: 2.4rem; }
+    h2 { font-size: 1.25rem; }
+    .lede, .receipt, li { color: var(--muted); }
+    code {
+      color: var(--text);
+      background: #0b0f14;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 2px 6px;
+    }
+    .score-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px;
+      margin-top: 20px;
+    }
+    .score-grid div, .settings li {
+      background: var(--panel-strong);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    span { display: block; color: var(--muted); font-size: 0.86rem; }
+    strong { display: block; margin-top: 4px; color: var(--text); font-size: 1.15rem; }
+    .settings {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 10px;
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow-wrap: anywhere;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 10px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { color: var(--muted); font-size: 0.84rem; }
+    tr.pass td:first-child { color: var(--green); }
+    tr.fail td:first-child { color: var(--red); }
+    @media (max-width: 720px) {
+      h1 { font-size: 1.8rem; }
+      .hero, .panel { padding: 18px; }
+      table { font-size: 0.88rem; }
+    }
+    """

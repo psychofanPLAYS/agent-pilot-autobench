@@ -2,7 +2,22 @@
 
 This project is a local-first pilot tester for finding practical Hermes-agent GGUF settings without loading models one by one in LM Studio.
 
-Primary command: `pilotbench`
+Hero command after install: `agent-autobench`
+
+Beginner command before install:
+
+```powershell
+uv run --extra dev agent-autobench first-run
+```
+
+Beginner command after install:
+
+```powershell
+agent-autobench first-run
+```
+
+`first-run` is the friendly startup check. It checks the machine, prepares local
+state, explains missing tools or folders, and tells the user what to run next.
 
 ## Safe First Commands
 
@@ -12,16 +27,34 @@ For complete beginners on Windows:
 Double-click START-HERE.bat
 ```
 
+To make `agent-autobench` work from any terminal folder:
+
+```text
+Double-click INSTALL-COMMAND.bat
+```
+
+Prepare the app for the first time before installing the command:
+
+```powershell
+uv run --extra dev agent-autobench first-run
+```
+
+Prepare the app for the first time after installing the command:
+
+```powershell
+agent-autobench first-run
+```
+
 Open the easy model picker from a terminal:
 
 ```powershell
-uv run --extra dev pilotbench --start
+agent-autobench --start
 ```
 
 Check only, without opening the picker:
 
 ```powershell
-uv run --extra dev pilotbench --start --check-only
+agent-autobench --start --check-only
 ```
 
 Check whether the local folders and llama.cpp tools are ready:
@@ -62,7 +95,7 @@ Default discovery should cover common G-drive model roots:
 Open the model picker TUI:
 
 ```powershell
-uv run --extra dev pilotbench start
+agent-autobench --start
 ```
 
 Show the latest champion and write `runs\leaderboard.md` plus `runs\champion.json`:
@@ -90,6 +123,29 @@ uv run --extra dev pilotbench export-profile
 ```
 
 Exported server profiles bind to `127.0.0.1` by default. Change that only when you intentionally want LAN or Tailscale access.
+
+## Install The Windows Command
+
+Use this when a beginner wants to type `agent-autobench` from any terminal
+folder:
+
+```text
+Double-click INSTALL-COMMAND.bat
+```
+
+What it does:
+
+- Creates `G:\_codex_global\bin\agent-autobench.bat`.
+- Points that shim back to this repo.
+- Asks before adding `G:\_codex_global\bin` to the user PATH.
+- Does not touch the system PATH.
+- Does not need admin rights.
+
+After adding PATH, close and reopen the terminal, then run:
+
+```powershell
+agent-autobench first-run
+```
 
 Run the basic autoresearch loop for one model:
 

@@ -60,9 +60,25 @@ def test_write_leaderboard_writes_markdown_and_champion_json(tmp_path):
 
     assert (tmp_path / "leaderboard.md").exists()
     assert (tmp_path / "champion.json").exists()
+    assert (tmp_path / "results.html").exists()
     champion = json.loads((tmp_path / "champion.json").read_text(encoding="utf-8"))
     assert champion["model_name"] == "winner.gguf"
     assert leaderboard.champion.model_name == "winner.gguf"
+
+
+def test_results_html_is_actionable_and_beautiful_enough_to_open(tmp_path):
+    _write_run(tmp_path, "winner", 99.0, 90.0, context=135936)
+    _write_run(tmp_path, "broken", -10000.0, 0.0, failure="model_load")
+
+    write_leaderboard(tmp_path)
+
+    html = (tmp_path / "results.html").read_text(encoding="utf-8")
+    assert "<!doctype html>" in html
+    assert "Agent Pilot Autobench Results" in html
+    assert "winner.gguf" in html
+    assert "What to do next" in html
+    assert "agent-autobench export-profile" in html
+    assert "LOAD FAIL" in html
 
 
 def test_write_leaderboard_handles_missing_runs_folder(tmp_path):

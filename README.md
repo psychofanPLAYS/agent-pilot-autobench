@@ -7,7 +7,16 @@ Local-first autobenchmarking for LLLMs: Local Large Language Models.
 Agent Pilot Autobench is a small, practical lab for answering a simple question with evidence instead of vibes: 
 ### Which local model and runtime settings are actually useful for agent work?
 
-This repo is the public-facing home for that workflow. The short command is `pilotbench`.
+This repo is the public-facing home for that workflow.
+
+Hero command:
+
+```powershell
+agent-autobench first-run
+```
+
+That command is the intended beginner entry point. The older `pilotbench`
+command remains as a compatibility alias.
 
 ## What It Does
 
@@ -77,6 +86,20 @@ uv run --extra dev pytest -q
 
 ## First Run
 
+The beginner command is:
+
+```powershell
+agent-autobench first-run
+```
+
+In plain English, `first-run` means:
+
+1. Check that the needed tools are installed.
+2. Check the model and llama.cpp paths.
+3. Create the local experiment database.
+4. Prepare the results folder and report files.
+5. Tell you the next command instead of failing silently.
+
 ### Easiest Windows Path
 
 Double-click:
@@ -85,19 +108,33 @@ Double-click:
 START-HERE.bat
 ```
 
-That is the start button. It checks the computer and opens the model picker.
+That is the start button. It runs `agent-autobench first-run`, then opens the
+model picker when the checks pass.
 
 More detail is in [docs/START-FOR-NORMAL-PEOPLE.md](docs/START-FOR-NORMAL-PEOPLE.md).
+
+### Install The Windows Command
+
+If you want `agent-autobench` to work from any terminal folder on Windows,
+double-click:
+
+```text
+INSTALL-COMMAND.bat
+```
+
+That script creates a small command shim at `G:\_codex_global\bin\agent-autobench.bat`.
+It will ask before adding that folder to your user PATH. It does not change the
+system PATH silently.
 
 ### Easy Terminal Path
 
 If you already know how to open a terminal in this folder, run:
 
 ```powershell
-uv run --extra dev pilotbench --start
+uv run --extra dev agent-autobench first-run
 ```
 
-This also works:
+The older compatibility command also works:
 
 ```powershell
 uv run --extra dev pilotbench start
@@ -267,17 +304,20 @@ Working now:
 - experiment-memory SQLite schema at `db\agentpilot.sqlite`
 - telemetry snapshots, GPU power, swap, disk counters, and failure classification
 - Markdown and JSON receipts
+- HTML results page at `runs\results.html`
 - Textual model picker with dark styling, preset panel, and run dashboard stub
-- latest champion reporting through `pilotbench results`
-- deployment profile export through `pilotbench export-profile`
+- latest champion reporting through `agent-autobench results`
+- deployment profile export through `agent-autobench export-profile`
 - small workflow evaluation path
 - path readiness checks through `doctor`
-- beginner startup through `START-HERE.bat` and `pilotbench start`
+- beginner startup through `START-HERE.bat`, `agent-autobench first-run`, and `agent-autobench --start`
+- optional command shim through `INSTALL-COMMAND.bat`
 - unit tests and a GitHub Actions CI workflow
 
 Planned next:
 
 - richer OpenAI-compatible `llama-server` endpoint tests
+- richer final report rendering inside the TUI itself
 - paired KV-cache quality comparisons
 - MTP efficiency receipts
 - long-context synthetic receipt, ledger, and needle grids
@@ -294,4 +334,4 @@ Planned next:
 
 ## License
 
-No license has been selected yet. Choose one before presenting this as a fully open-source project.
+MIT License. See the repository license file when present.

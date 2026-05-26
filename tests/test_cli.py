@@ -395,6 +395,80 @@ def test_global_start_flag_opens_tui(monkeypatch):
     assert opened_roots == [Path("G:/AI/models")]
 
 
+def test_first_run_command_checks_paths_and_prepares_local_state(tmp_path, monkeypatch):
+    db_path = tmp_path / "db" / "agentpilot.sqlite"
+    runs_root = tmp_path / "runs"
+    monkeypatch.setattr(
+        "gguf_limit_bench.cli.build_doctor_report",
+        lambda **kwargs: DoctorReport(
+            checks=[
+                DoctorCheck(
+                    name="model root",
+                    status="ok",
+                    path=str(tmp_path),
+                    detail="directory exists",
+                )
+            ]
+        ),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "first-run",
+            "--root",
+            str(tmp_path),
+            "--db-path",
+            str(db_path),
+            "--runs-root",
+            str(runs_root),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert db_path.exists()
+    assert (runs_root / "leaderboard.md").exists()
+    assert "First-time setup is ready" in result.output
+    assert "agent-autobench --start" in result.output
+
+
+def test_first_run_json_out_is_agent_friendly(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "gguf_limit_bench.cli.build_doctor_report",
+        lambda **kwargs: DoctorReport(
+            checks=[
+                DoctorCheck(
+                    name="llama-bench",
+                    status="missing",
+                    path=str(tmp_path / "llama-bench.exe"),
+                    detail="file was not found",
+                )
+            ]
+        ),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "first-run",
+            "--root",
+            str(tmp_path),
+            "--db-path",
+            str(tmp_path / "db.sqlite"),
+            "--runs-root",
+            str(tmp_path / "runs"),
+            "--json-out",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "\x1b[" not in result.output
+    payload = json.loads(result.output)
+    assert payload["ready"] is False
+    assert payload["next_command"] == "agent-autobench doctor"
+    assert payload["checks"][0]["name"] == "llama-bench"
+
+
 def test_results_command_prints_latest_champion(tmp_path):
     run = tmp_path / "runs" / "20260526-test"
     run.mkdir(parents=True)
@@ -420,6 +494,8 @@ def test_results_command_prints_latest_champion(tmp_path):
     assert "Champion: Winner.gguf" in result.output
     assert (tmp_path / "runs" / "leaderboard.md").exists()
     assert (tmp_path / "runs" / "champion.json").exists()
+    assert (tmp_path / "runs" / "results.html").exists()
+    assert "HTML report" in result.output
 
 
 def test_packs_command_lists_builtin_benchmark_packs():

@@ -6,7 +6,7 @@ echo.
 echo Agent Pilot Autobench
 echo =====================
 echo.
-echo This opens the easy model picker.
+echo This opens the easy first-run flow.
 echo You can close this window any time.
 echo.
 
@@ -21,7 +21,18 @@ if errorlevel 1 (
   exit /b 1
 )
 
-uv run --extra dev pilotbench --start
+uv run --extra dev agent-autobench --help >nul 2>nul
+if "%ERRORLEVEL%"=="0" (
+  uv run --extra dev agent-autobench first-run
+  if not errorlevel 1 (
+    uv run --extra dev agent-autobench --start
+  )
+) else (
+  echo The agent-autobench command is not available in this checkout.
+  echo Falling back to the older pilotbench startup command.
+  echo.
+  uv run --extra dev pilotbench --start
+)
 set EXIT_CODE=%ERRORLEVEL%
 
 echo.

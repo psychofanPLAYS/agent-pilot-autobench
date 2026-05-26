@@ -2,7 +2,7 @@
 __pycache__/
 .pytest_cache/
 .ruff_cache/
+/package-lock.json
 runs/*
 !runs/.gitkeep
 *.pyc
-
