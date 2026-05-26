@@ -4,6 +4,24 @@ This project is a local llama.cpp-first bench tester for finding practical Herme
 
 ## Safe First Commands
 
+For complete beginners on Windows:
+
+```text
+Double-click START-HERE.bat
+```
+
+Open the easy model picker from a terminal:
+
+```powershell
+uv run --extra dev gguf-limit-bench --start
+```
+
+Check only, without opening the picker:
+
+```powershell
+uv run --extra dev gguf-limit-bench --start --check-only
+```
+
 Check whether the local folders and llama.cpp tools are ready:
 
 ```powershell

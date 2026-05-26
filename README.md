@@ -76,7 +76,41 @@ uv run --extra dev pytest -q
 
 ## First Run
 
-Start with the doctor command. It checks the paths before you spend time on benchmarks:
+### Easiest Windows Path
+
+Double-click:
+
+```text
+START-HERE.bat
+```
+
+That is the start button. It checks the computer and opens the model picker.
+
+More detail is in [docs/START-FOR-NORMAL-PEOPLE.md](docs/START-FOR-NORMAL-PEOPLE.md).
+
+### Easy Terminal Path
+
+If you already know how to open a terminal in this folder, run:
+
+```powershell
+uv run --extra dev gguf-limit-bench --start
+```
+
+This also works:
+
+```powershell
+uv run --extra dev gguf-limit-bench start
+```
+
+Check only, without opening the picker:
+
+```powershell
+uv run --extra dev gguf-limit-bench --start --check-only
+```
+
+### Manual Check
+
+The doctor command checks paths before you spend time on benchmarks:
 
 ```powershell
 uv run --extra dev gguf-limit-bench doctor
@@ -124,7 +158,7 @@ uv run --extra dev gguf-limit-bench survey --qwen-35b-only --mtp-only
 Open the terminal model picker:
 
 ```powershell
-uv run --extra dev gguf-limit-bench tui
+uv run --extra dev gguf-limit-bench start
 ```
 
 Run one autoresearch loop:
@@ -191,6 +225,7 @@ Working now:
 - Textual model picker
 - small workflow evaluation path
 - path readiness checks through `doctor`
+- beginner startup through `START-HERE.bat` and `gguf-limit-bench start`
 - unit tests and a GitHub Actions CI workflow
 
 Planned next:

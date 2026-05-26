@@ -28,9 +28,81 @@ DEFAULT_RUNS_ROOT = Path("runs")
 app = typer.Typer(
     help="Local-first GGUF autoresearch lab for finding useful agent pilot settings.",
     no_args_is_help=True,
+    invoke_without_command=True,
     rich_markup_mode="rich",
 )
 console = Console()
+
+
+@app.callback()
+def main(
+    start_now: bool = typer.Option(
+        False,
+        "--start",
+        help="Open the easy model picker.",
+    ),
+    check_only: bool = typer.Option(
+        False,
+        "--check-only",
+        help="Only check the computer. Do not open the picker.",
+    ),
+) -> None:
+    """Local-first GGUF autoresearch lab."""
+    if not start_now:
+        return
+    _start_app(root=DEFAULT_MODEL_ROOT, check_only=check_only)
+    raise typer.Exit()
+
+
+@app.command()
+def start(
+    root: Path = typer.Option(
+        DEFAULT_MODEL_ROOT,
+        help="Folder where your GGUF models live.",
+    ),
+    check_only: bool = typer.Option(
+        False,
+        "--check-only",
+        help="Only check the computer. Do not open the picker.",
+    ),
+    llama_bench: Path = DEFAULT_LLAMA_BENCH,
+    llama_cli: Path = DEFAULT_LLAMA_CLI,
+    runs_root: Path = DEFAULT_RUNS_ROOT,
+) -> None:
+    """Beginner start button: check paths, then open the model picker."""
+    _start_app(
+        root=root,
+        check_only=check_only,
+        llama_bench=llama_bench,
+        llama_cli=llama_cli,
+        runs_root=runs_root,
+    )
+
+
+def _start_app(
+    root: Path,
+    check_only: bool,
+    llama_bench: Path = DEFAULT_LLAMA_BENCH,
+    llama_cli: Path = DEFAULT_LLAMA_CLI,
+    runs_root: Path = DEFAULT_RUNS_ROOT,
+) -> None:
+    report = build_doctor_report(
+        model_roots=[root],
+        llama_bench=llama_bench,
+        llama_cli=llama_cli,
+        runs_root=runs_root,
+    )
+    if not report.ready:
+        console.print("Something is missing. No benchmark was started.")
+        _print_doctor_report(report)
+        console.print("Run this first: uv run --extra dev gguf-limit-bench doctor")
+        raise typer.Exit(1)
+    console.print("Everything looks ready.")
+    if check_only:
+        console.print("Remove --check-only to open the picker.")
+        return
+    console.print("Opening the model picker.")
+    BenchTui(root=root).run()
 
 
 @app.command()
