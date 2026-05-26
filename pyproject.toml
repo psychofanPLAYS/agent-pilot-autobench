@@ -1,7 +1,8 @@
 [project]
-name = "gguf-limit-bench"
+name = "agent-pilot-autobench"
 version = "0.1.0"
-description = "Repeatable local GGUF benchmark cockpit for XTREME and clamshell deployment choices."
+description = "Local-first autobenchmarking for choosing the best LLLM agent pilot."
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "nvidia-ml-py>=12.0.0",
@@ -18,7 +19,7 @@ dev = [
 ]
 
 [project.scripts]
-gguf-limit-bench = "gguf_limit_bench.cli:app"
+pilotbench = "gguf_limit_bench.cli:app"
 
 [build-system]
 requires = ["hatchling"]
@@ -27,6 +28,9 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gguf_limit_bench"]
 
 [tool.ruff]
 line-length = 100

@@ -1,4 +1,4 @@
-# GGUF Limit Bench Implementation Plan
+# Agent Pilot Autobench Implementation Plan
 
 Goal: build a repeatable TUI benchmark cockpit for David's local GGUF collection, starting with Qwen-family models and the XTREME RTX 4090.
 
@@ -9,7 +9,7 @@ Tech stack: Python, Textual, Rich, Typer, pytest, psutil, nvidia-ml-py, Optuna, 
 ## 18 Step Plan
 
 - [x] Back up `G:\_codex_global\config.toml` and register selected `G:\AI\skills` by path.
-- [x] Create `G:\AI\_codex_projects\gguf-limit-bench` and initialize git.
+- [x] Create the project folder and initialize git.
 - [x] Create a small project plan, receipts folder, and test-first structure.
 - [x] Add tests for GGUF discovery, family parsing, quant parsing, and mmproj vision detection.
 - [ ] Implement discovery from `G:\AI\models` and LM Studio metadata caches.

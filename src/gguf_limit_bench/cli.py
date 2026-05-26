@@ -12,6 +12,7 @@ from rich.table import Table
 from gguf_limit_bench.autoresearch import AutoresearchLoop, LlamaBenchAttemptRunner
 from gguf_limit_bench.bench_plan import BenchProfile
 from gguf_limit_bench.discovery import discover_models
+from gguf_limit_bench.doctor import DoctorReport, build_doctor_report
 from gguf_limit_bench.learning import OptunaSettingsLearner
 from gguf_limit_bench.runner import BenchmarkRunner
 from gguf_limit_bench.tui import BenchTui
@@ -24,8 +25,114 @@ DEFAULT_LLAMA_BENCH = Path("G:/AI/llamaCPP-server/_internal/runtime/llama.cpp/ll
 DEFAULT_LLAMA_CLI = Path("G:/AI/llamaCPP-server/_internal/runtime/llama.cpp/llama-cli.exe")
 DEFAULT_RUNS_ROOT = Path("runs")
 
-app = typer.Typer(help="Repeatable GGUF benchmark cockpit for XTREME.")
+app = typer.Typer(
+    help="Local-first autobenchmarking for choosing the best LLLM agent pilot.",
+    no_args_is_help=True,
+    invoke_without_command=True,
+    rich_markup_mode="rich",
+)
 console = Console()
+
+
+@app.callback()
+def main(
+    start_now: bool = typer.Option(
+        False,
+        "--start",
+        help="Open the easy model picker.",
+    ),
+    check_only: bool = typer.Option(
+        False,
+        "--check-only",
+        help="Only check the computer. Do not open the picker.",
+    ),
+) -> None:
+    """Local-first LLLM agent-pilot autobench."""
+    if not start_now:
+        return
+    _start_app(root=DEFAULT_MODEL_ROOT, check_only=check_only)
+    raise typer.Exit()
+
+
+@app.command()
+def start(
+    root: Path = typer.Option(
+        DEFAULT_MODEL_ROOT,
+        help="Folder where your GGUF models live.",
+    ),
+    check_only: bool = typer.Option(
+        False,
+        "--check-only",
+        help="Only check the computer. Do not open the picker.",
+    ),
+    llama_bench: Path = DEFAULT_LLAMA_BENCH,
+    llama_cli: Path = DEFAULT_LLAMA_CLI,
+    runs_root: Path = DEFAULT_RUNS_ROOT,
+) -> None:
+    """Beginner start button: check paths, then open the model picker."""
+    _start_app(
+        root=root,
+        check_only=check_only,
+        llama_bench=llama_bench,
+        llama_cli=llama_cli,
+        runs_root=runs_root,
+    )
+
+
+def _start_app(
+    root: Path,
+    check_only: bool,
+    llama_bench: Path = DEFAULT_LLAMA_BENCH,
+    llama_cli: Path = DEFAULT_LLAMA_CLI,
+    runs_root: Path = DEFAULT_RUNS_ROOT,
+) -> None:
+    report = build_doctor_report(
+        model_roots=[root],
+        llama_bench=llama_bench,
+        llama_cli=llama_cli,
+        runs_root=runs_root,
+    )
+    if not report.ready:
+        console.print("Something is missing. No benchmark was started.")
+        _print_doctor_report(report)
+        console.print("Run this first: uv run --extra dev pilotbench doctor")
+        raise typer.Exit(1)
+    console.print("Everything looks ready.")
+    if check_only:
+        console.print("Remove --check-only to open the picker.")
+        return
+    console.print("Opening the model picker.")
+    BenchTui(root=root).run()
+
+
+@app.command()
+def doctor(
+    root: list[Path] | None = typer.Option(
+        None,
+        "--root",
+        help="Model root to check. Repeat this option for multiple folders.",
+    ),
+    llama_bench: Path = DEFAULT_LLAMA_BENCH,
+    llama_cli: Path = DEFAULT_LLAMA_CLI,
+    runs_root: Path = DEFAULT_RUNS_ROOT,
+    strict: bool = False,
+    json_out: bool = False,
+) -> None:
+    """Check local paths before spending time on benchmark runs."""
+    roots = root if root else list(DEFAULT_MODEL_ROOTS)
+    report = build_doctor_report(
+        model_roots=roots,
+        llama_bench=llama_bench,
+        llama_cli=llama_cli,
+        runs_root=runs_root,
+    )
+    if json_out:
+        console.print_json(json.dumps(report.to_dict()))
+    else:
+        _print_doctor_report(report)
+    if strict and not report.ready:
+        typer.echo("Required checks failed.", err=True)
+        raise typer.Exit(1)
 
 
 @app.command()
@@ -245,6 +352,21 @@ def _filter_models(
     if mtp_only:
         models = [model for model in models if model.has_mtp]
     return models
+
+
+def _print_doctor_report(report: DoctorReport) -> None:
+    table = Table(title="Agent Pilot Autobench Doctor")
+    table.add_column("Check")
+    table.add_column("Status")
+    table.add_column("Path")
+    table.add_column("Detail")
+    for check in report.checks:
+        table.add_row(check.name, check.status, check.path, check.detail)
+    console.print(table)
+    if report.ready:
+        console.print("Ready for benchmark runs.")
+    else:
+        console.print("Some required paths are missing. Use --strict in scripts to fail fast.")
 
 
 def _is_mtp_model(model: Path) -> bool:

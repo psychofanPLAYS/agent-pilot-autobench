@@ -6,6 +6,7 @@ from typer.testing import CliRunner
 from gguf_limit_bench.autoresearch import AttemptResult
 from gguf_limit_bench.cli import DEFAULT_MODEL_ROOTS, app
 from gguf_limit_bench.discovery import ModelInfo
+from gguf_limit_bench.doctor import DoctorCheck, DoctorReport
 
 
 runner = CliRunner()
@@ -159,3 +160,132 @@ def test_autoresearch_all_honors_total_budget_and_finish_early(tmp_path, monkeyp
     assert result.exit_code == 0
     run_dirs = [path for path in (tmp_path / "runs").iterdir() if path.name != "learning"]
     assert len(run_dirs) == 1
+
+
+def test_start_command_check_only_prints_beginner_next_step(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "gguf_limit_bench.cli.build_doctor_report",
+        lambda **kwargs: DoctorReport(
+            checks=[
+                DoctorCheck(
+                    name="model root",
+                    status="ok",
+                    path=str(tmp_path),
+                    detail="directory exists",
+                )
+            ]
+        ),
+    )
+
+    result = runner.invoke(app, ["start", "--root", str(tmp_path), "--check-only"])
+
+    assert result.exit_code == 0
+    assert "Everything looks ready" in result.output
+    assert "Remove --check-only to open the picker" in result.output
+
+
+def test_start_command_opens_tui_after_ready_check(tmp_path, monkeypatch):
+    opened_roots: list[Path] = []
+    monkeypatch.setattr(
+        "gguf_limit_bench.cli.build_doctor_report",
+        lambda **kwargs: DoctorReport(
+            checks=[
+                DoctorCheck(
+                    name="model root",
+                    status="ok",
+                    path=str(tmp_path),
+                    detail="directory exists",
+                )
+            ]
+        ),
+    )
+
+    class FakeBenchTui:
+        def __init__(self, root: Path) -> None:
+            opened_roots.append(root)
+
+        def run(self) -> None:
+            pass
+
+    monkeypatch.setattr("gguf_limit_bench.cli.BenchTui", FakeBenchTui)
+
+    result = runner.invoke(app, ["start", "--root", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert opened_roots == [tmp_path]
+    assert "Opening the model picker" in result.output
+
+
+def test_start_command_exits_when_required_check_is_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "gguf_limit_bench.cli.build_doctor_report",
+        lambda **kwargs: DoctorReport(
+            checks=[
+                DoctorCheck(
+                    name="llama-bench",
+                    status="missing",
+                    path=str(tmp_path / "llama-bench.exe"),
+                    detail="file was not found",
+                )
+            ]
+        ),
+    )
+
+    result = runner.invoke(app, ["start", "--root", str(tmp_path)])
+
+    assert result.exit_code == 1
+    assert "Something is missing" in result.output
+    assert "Run this first" in result.output
+
+
+def test_global_start_flag_check_only_uses_beginner_path(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "gguf_limit_bench.cli.build_doctor_report",
+        lambda **kwargs: DoctorReport(
+            checks=[
+                DoctorCheck(
+                    name="model root",
+                    status="ok",
+                    path=str(tmp_path),
+                    detail="directory exists",
+                )
+            ]
+        ),
+    )
+
+    result = runner.invoke(app, ["--start", "--check-only"])
+
+    assert result.exit_code == 0
+    assert "Everything looks ready" in result.output
+    assert "Remove --check-only to open the picker" in result.output
+
+
+def test_global_start_flag_opens_tui(monkeypatch):
+    opened_roots: list[Path] = []
+    monkeypatch.setattr(
+        "gguf_limit_bench.cli.build_doctor_report",
+        lambda **kwargs: DoctorReport(
+            checks=[
+                DoctorCheck(
+                    name="model root",
+                    status="ok",
+                    path="G:/AI/models",
+                    detail="directory exists",
+                )
+            ]
+        ),
+    )
+
+    class FakeBenchTui:
+        def __init__(self, root: Path) -> None:
+            opened_roots.append(root)
+
+        def run(self) -> None:
+            pass
+
+    monkeypatch.setattr("gguf_limit_bench.cli.BenchTui", FakeBenchTui)
+
+    result = runner.invoke(app, ["--start"])
+
+    assert result.exit_code == 0
+    assert opened_roots == [Path("G:/AI/models")]

@@ -1,25 +1,57 @@
-# GGUF Limit Bench Command Board
+# Agent Pilot Autobench Command Board
 
-This project is a local llama.cpp-first bench tester for finding practical Hermes-agent GGUF settings without loading models one by one in LM Studio.
+This project is a local-first pilot tester for finding practical Hermes-agent GGUF settings without loading models one by one in LM Studio.
+
+Primary command: `pilotbench`
 
 ## Safe First Commands
+
+For complete beginners on Windows:
+
+```text
+Double-click START-HERE.bat
+```
+
+Open the easy model picker from a terminal:
+
+```powershell
+uv run --extra dev pilotbench --start
+```
+
+Check only, without opening the picker:
+
+```powershell
+uv run --extra dev pilotbench --start --check-only
+```
+
+Check whether the local folders and llama.cpp tools are ready:
+
+```powershell
+uv run --extra dev pilotbench doctor
+```
+
+Fail fast in scripts when a required path is missing:
+
+```powershell
+uv run --extra dev pilotbench doctor --strict
+```
 
 List Qwen-family GGUF models:
 
 ```powershell
-uv run --extra dev gguf-limit-bench survey --qwen-only
+uv run --extra dev pilotbench survey --qwen-only
 ```
 
 List only the Qwen 35B models David cares about:
 
 ```powershell
-uv run --extra dev gguf-limit-bench survey --qwen-35b-only
+uv run --extra dev pilotbench survey --qwen-35b-only
 ```
 
 List only Qwen 35B MTP models:
 
 ```powershell
-uv run --extra dev gguf-limit-bench survey --qwen-35b-only --mtp-only
+uv run --extra dev pilotbench survey --qwen-35b-only --mtp-only
 ```
 
 Default discovery should cover David's normal G-drive model roots:
@@ -30,37 +62,37 @@ Default discovery should cover David's normal G-drive model roots:
 Open the model picker TUI:
 
 ```powershell
-uv run --extra dev gguf-limit-bench tui
+uv run --extra dev pilotbench start
 ```
 
 Run the basic autoresearch loop for one model:
 
 ```powershell
-uv run --extra dev gguf-limit-bench autoresearch --model "G:\AI\models\path\to\model.gguf" --budget-minutes 5 --parallel-max 4
+uv run --extra dev pilotbench autoresearch --model "G:\AI\models\path\to\model.gguf" --budget-minutes 5 --parallel-max 4
 ```
 
 Learning is on by default. To do a one-off run without updating the learning database:
 
 ```powershell
-uv run --extra dev gguf-limit-bench autoresearch --model "G:\AI\models\path\to\model.gguf" --no-learning
+uv run --extra dev pilotbench autoresearch --model "G:\AI\models\path\to\model.gguf" --no-learning
 ```
 
 Run the basic autoresearch loop across discovered Qwen models:
 
 ```powershell
-uv run --extra dev gguf-limit-bench autoresearch-all --qwen-only --budget-minutes 5 --parallel-max 4
+uv run --extra dev pilotbench autoresearch-all --qwen-only --budget-minutes 5 --parallel-max 4
 ```
 
 Run the recommended Qwen 35B queue:
 
 ```powershell
-uv run --extra dev gguf-limit-bench autoresearch-all --qwen-35b-only --total-budget-minutes 30 --budget-minutes 5 --parallel-max 4 --workflow-eval
+uv run --extra dev pilotbench autoresearch-all --qwen-35b-only --total-budget-minutes 30 --budget-minutes 5 --parallel-max 4 --workflow-eval
 ```
 
 Run only Qwen 35B MTP candidates:
 
 ```powershell
-uv run --extra dev gguf-limit-bench autoresearch-all --qwen-35b-only --mtp-only --total-budget-minutes 20 --budget-minutes 5 --workflow-eval
+uv run --extra dev pilotbench autoresearch-all --qwen-35b-only --mtp-only --total-budget-minutes 20 --budget-minutes 5 --workflow-eval
 ```
 
 For a Codex-friendly bulk loop, the target behavior is:
