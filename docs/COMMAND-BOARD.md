@@ -4,6 +4,18 @@ This project is a local llama.cpp-first bench tester for finding practical Herme
 
 ## Safe First Commands
 
+Check whether the local folders and llama.cpp tools are ready:
+
+```powershell
+uv run --extra dev gguf-limit-bench doctor
+```
+
+Fail fast in scripts when a required path is missing:
+
+```powershell
+uv run --extra dev gguf-limit-bench doctor --strict
+```
+
 List Qwen-family GGUF models:
 
 ```powershell

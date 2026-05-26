@@ -1,7 +1,8 @@
 [project]
 name = "gguf-limit-bench"
 version = "0.1.0"
-description = "Repeatable local GGUF benchmark cockpit for XTREME and clamshell deployment choices."
+description = "Local-first GGUF autoresearch lab for finding useful agent pilot settings."
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "nvidia-ml-py>=12.0.0",
