@@ -1,4 +1,4 @@
-## Agentic Pilot Autobench
+## _Agentic Pilot Autobench_
 
 [![CI](https://github.com/psychofanPLAYS/agent-pilot-autobench/actions/workflows/ci.yml/badge.svg)](https://github.com/psychofanPLAYS/agent-pilot-autobench/actions/workflows/ci.yml)
 
