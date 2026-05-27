@@ -21,7 +21,7 @@ The project should copy the operating contract from Andrej Karpathy's
 
 Karpathy's original loop optimizes `val_bpb` for a small training setup. This
 repo's equivalent target must become an `agent_bench_score` built from stable
-benchmark phases, not from vibes or ad hoc prompts.
+benchmark phases, not from guesswork or ad hoc prompts.
 
 ## Required Phases
 

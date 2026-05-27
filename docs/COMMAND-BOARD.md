@@ -2,7 +2,7 @@
 
 This project is a local-first pilot tester for finding practical Hermes-agent GGUF settings without loading models one by one in LM Studio.
 
-Hero command after install: `agent-autobench`
+Primary command after install: `agent-autobench`
 
 Tiny shortcut after install: `apb`
 
@@ -372,9 +372,9 @@ agent-autobench start --benchmark-suite-plan benchmarks\plans\local-openai-smoke
 ```
 
 The plan format is deliberately command-based. Each task calls a real external
-harness such as `uvx --from lm-eval lm-eval run` or `inspect eval`, then
-PilotBENCHY captures the receipt, extracts a numeric score from JSON output, and
-appends the phase TSVs.
+harness such as `uvx --from lm-eval lm-eval run` or `inspect eval`, then Agent
+Pilot Autobench captures the receipt, extracts a numeric score from JSON output,
+and appends the phase TSVs.
 If a harness is missing, crashes, or does not produce a score, the suite writes
 failed evidence instead of pretending the run is useful.
 

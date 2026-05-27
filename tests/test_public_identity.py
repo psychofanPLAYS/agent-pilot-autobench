@@ -19,7 +19,8 @@ def test_readme_uses_public_command_name():
 
     assert "# Agent Pilot Autobench" in readme
     assert "agent-autobench first-run" in readme
-    assert "PilotBENCHY" in readme
+    assert "PilotBENCHY" not in readme
+    assert "Hero command" not in readme
     assert "apb first-run" in readme
     assert "pilotbench --start" in readme
     assert "Legacy command" not in readme
@@ -38,8 +39,22 @@ def test_docs_use_only_new_public_command_name():
 
     assert "agent-autobench" in docs
     assert "pilotbench" in docs
+    assert "PilotBENCHY" not in docs
+    assert "Hero command" not in docs
     assert "gguf-limit-bench" not in docs
     assert "Legacy command" not in docs
+
+
+def test_product_design_doc_is_linked_from_readme():
+    readme = Path("README.md").read_text(encoding="utf-8")
+    product_design = Path("docs/PRODUCT-DESIGN.md").read_text(encoding="utf-8")
+    product_design_lower = product_design.lower()
+
+    assert "docs/PRODUCT-DESIGN.md" in readme
+    assert "# Agent Pilot Autobench Product Design" in product_design
+    assert "readiness wizard" in product_design_lower
+    assert "campaign builder" in product_design_lower
+    assert "champion promotion" in product_design_lower
 
 
 def test_root_gitignore_hides_accidental_npm_lockfile():

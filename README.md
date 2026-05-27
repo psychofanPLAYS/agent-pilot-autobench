@@ -6,13 +6,13 @@ Local-first benchmarking for local LLMs, GGUF models, and llama.cpp runtime sett
 
 Agent Pilot Autobench is a local-first evaluation cockpit for choosing, stress-testing, and deploying agent-capable local LLMs on real hardware.
 
-It answers a practical question with evidence instead of vibes:
+It answers a practical question with evidence instead of guesswork:
 
 ### Which local model and runtime settings are actually useful for agent work?
 
 This repo is the public-facing home for that workflow.
 
-Hero command:
+Run this first:
 
 ```powershell
 agent-autobench first-run
@@ -57,6 +57,9 @@ Local model testing often collapses into guesses:
 That is not enough when you are trying to pick a real agent pilot for work.
 
 Agent Pilot Autobench keeps the process measurable, repeatable, and easy to inspect later. The output is meant to be useful to a human, a future run, and a reviewer on GitHub.
+
+For the product direction behind the next public milestone, see
+[docs/PRODUCT-DESIGN.md](docs/PRODUCT-DESIGN.md).
 
 ## How It Works
 
@@ -478,5 +481,4 @@ MIT. See `LICENSE`.
 
 ## Tiny Glossary
 
-- `PilotBENCHY`: our nickname for Agent Pilot Autobench.
-- `apb`: short for Agent Pilot Benchy, the quick command alias.
+- `apb`: short for Agent Pilot Autobench, the quick command alias.
