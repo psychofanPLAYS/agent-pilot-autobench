@@ -1,12 +1,17 @@
 # Agent Pilot Autobench
 
+## _Agentic Pilot Autobench_
+
 [![CI](https://github.com/psychofanPLAYS/agent-pilot-autobench/actions/workflows/ci.yml/badge.svg)](https://github.com/psychofanPLAYS/agent-pilot-autobench/actions/workflows/ci.yml)
 
 Local-first benchmarking for GGUF models, llama.cpp settings, and agent-style readiness.
 
-Agent Pilot Autobench helps answer one practical question:
+Agent Pilot Autobench answers a practical question with evidence instead of guesswork:
 
-> Which local model and runtime settings are useful enough for real agent work?
+> _**Which local model and runtime settings are actually useful for agent work?**_
+> _**Which GGUF should I use to power my Assistant's Harness? (ie. Hermes Agent, OpenClaw)**_
+
+> **You went on Hugging Face and pulled 10+ models. Let's figure out which one will serve you best.**
 
 It wraps existing tools such as `llama-bench`, `llama-cli`, `llama-server`, Optuna, Textual, Rich, and pytest. The project records receipts, scores, failures, and champion settings so results are based on repeatable evidence instead of vibes.
 
@@ -211,3 +216,8 @@ uv run --extra dev agent-autobench results
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Tiny Glossary
+
+- `apb`: short for Agent Pilot Autobench, the quick command alias.
+- `pilotBENCHY`: the friendly TUI/workflow name for the benchmark cockpit.
