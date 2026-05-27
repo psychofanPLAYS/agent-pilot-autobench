@@ -9,6 +9,9 @@ Agent Pilot Autobench is a local-first evaluation cockpit for choosing, stress-t
 ### It answers a practical question with evidence instead of guesswork:
 
 > _**Which local model and runtime settings are actually useful for agent work?**_
+> _**Which GGUF should I use to power my Assistant's Harness? (ie. Hermes Agent, OpenClaw)
+
+> __You went on HuggingsFace and pulled 10+ models... Let's figure out which one will serve You BEST!__
 
 This repo is the public-facing home for that workflow.
 
