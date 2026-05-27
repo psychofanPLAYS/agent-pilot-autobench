@@ -1,4 +1,4 @@
-# Agent Pilot Autobench
+# Agentic Pilot Autobench
 
 [![CI](https://github.com/psychofanPLAYS/agent-pilot-autobench/actions/workflows/ci.yml/badge.svg)](https://github.com/psychofanPLAYS/agent-pilot-autobench/actions/workflows/ci.yml)
 
@@ -482,3 +482,8 @@ MIT. See `LICENSE`.
 ## Tiny Glossary
 
 - `apb`: short for Agent Pilot Autobench, the quick command alias.
+
+
+
+
+~ _pilotBANCHY_
