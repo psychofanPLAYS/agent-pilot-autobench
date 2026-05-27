@@ -85,9 +85,7 @@ def load_config(config_path: Path | None = None) -> PilotbenchConfig:
             llama_bench=_path(paths.get("llama_bench"), DEFAULT_LLAMA_BENCH),
             llama_cli=_path(paths.get("llama_cli"), DEFAULT_LLAMA_CLI),
             llama_server=_path(paths.get("llama_server"), DEFAULT_LLAMA_SERVER),
-            llama_perplexity=_path(
-                paths.get("llama_perplexity"), DEFAULT_LLAMA_PERPLEXITY
-            ),
+            llama_perplexity=_path(paths.get("llama_perplexity"), DEFAULT_LLAMA_PERPLEXITY),
             runs_root=_path(paths.get("runs_root"), DEFAULT_RUNS_ROOT),
         ),
         benchmark=BenchmarkSettings(
@@ -123,9 +121,7 @@ def apply_env_overrides(config: PilotbenchConfig) -> PilotbenchConfig:
             llama_bench=_env_path("PILOTBENCH_LLAMA_BENCH", paths.llama_bench),
             llama_cli=_env_path("PILOTBENCH_LLAMA_CLI", paths.llama_cli),
             llama_server=_env_path("PILOTBENCH_LLAMA_SERVER", paths.llama_server),
-            llama_perplexity=_env_path(
-                "PILOTBENCH_LLAMA_PERPLEXITY", paths.llama_perplexity
-            ),
+            llama_perplexity=_env_path("PILOTBENCH_LLAMA_PERPLEXITY", paths.llama_perplexity),
             runs_root=_env_path("PILOTBENCH_RUNS_ROOT", paths.runs_root),
         ),
         benchmark=BenchmarkSettings(

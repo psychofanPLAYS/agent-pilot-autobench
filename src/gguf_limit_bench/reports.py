@@ -317,7 +317,9 @@ def write_leaderboard(runs_root: Path) -> Leaderboard:
         _model_comparison_markdown(model_comparison), encoding="utf-8"
     )
     (runs_root / "model-comparison.json").write_text(
-        json.dumps([asdict(entry) for entry in model_comparison.entries], ensure_ascii=True, indent=2),
+        json.dumps(
+            [asdict(entry) for entry in model_comparison.entries], ensure_ascii=True, indent=2
+        ),
         encoding="utf-8",
     )
     (runs_root / "results.html").write_text(_leaderboard_html(leaderboard), encoding="utf-8")
@@ -444,8 +446,7 @@ def _leaderboard_html(leaderboard: Leaderboard) -> str:
         _html_row(rank, entry) for rank, entry in enumerate(leaderboard.entries, start=1)
     )
     model_rows = "\n".join(
-        _model_html_row(rank, entry)
-        for rank, entry in enumerate(model_comparison.entries, start=1)
+        _model_html_row(rank, entry) for rank, entry in enumerate(model_comparison.entries, start=1)
     )
     settings = "\n".join(
         f"<li><span>{escape(str(key))}</span><strong>{escape(str(value))}</strong></li>"
@@ -591,7 +592,9 @@ def _model_recommendation(best: LeaderboardEntry, run_count: int) -> str:
             "treating this model as proven."
         )
     if best.status == "LOAD FAIL":
-        return "Best run still failed to load. Fix model path, VRAM fit, or llama.cpp settings first."
+        return (
+            "Best run still failed to load. Fix model path, VRAM fit, or llama.cpp settings first."
+        )
     return "Keep the receipt, but collect stronger evidence before ranking this model highly."
 
 

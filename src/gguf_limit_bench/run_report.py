@@ -184,13 +184,17 @@ def _metric_statuses(
         _metric_status(
             "generation_tps",
             result.get("generation_tokens_per_second"),
-            "measured" if float(result.get("generation_tokens_per_second") or 0.0) > 0 else "not_measured",
+            "measured"
+            if float(result.get("generation_tokens_per_second") or 0.0) > 0
+            else "not_measured",
             "Decode speed from llama-bench or the current attempt runner.",
         ),
         _metric_status(
             "prompt_tps",
             result.get("prompt_tokens_per_second"),
-            "measured" if float(result.get("prompt_tokens_per_second") or 0.0) > 0 else "not_measured",
+            "measured"
+            if float(result.get("prompt_tokens_per_second") or 0.0) > 0
+            else "not_measured",
             "Prompt ingestion speed from llama-bench or the current attempt runner.",
         ),
         _metric_status(
@@ -249,10 +253,10 @@ def _markdown(payload: dict) -> str:
         f"- Score: `{payload.get('score')}`",
         f"- Recommendation: {payload['recommendation']}",
         "",
-            "## Attempts",
-            "",
-            "| Attempt | Decision | Context | Gen TPS | Cold TTFT | Warm TTFT | Serving TPS | Failure |",
-            "| ---: | --- | ---: | ---: | ---: | ---: | ---: | --- |",
+        "## Attempts",
+        "",
+        "| Attempt | Decision | Context | Gen TPS | Cold TTFT | Warm TTFT | Serving TPS | Failure |",
+        "| ---: | --- | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
     for attempt in attempts:
         lines.append(
@@ -340,10 +344,10 @@ def _html(payload: dict) -> str:
   <main>
     <h1>pilotBENCHY Itemized Report</h1>
     <section class="panel">
-      <h2>{escape(Path(payload['model']).name)}</h2>
-      <p>Status: <strong>{escape(str(payload.get('status')))}</strong></p>
-      <p>Score: <strong>{escape(str(payload.get('score')))}</strong></p>
-      <p>{escape(payload['recommendation'])}</p>
+      <h2>{escape(Path(payload["model"]).name)}</h2>
+      <p>Status: <strong>{escape(str(payload.get("status")))}</strong></p>
+      <p>Score: <strong>{escape(str(payload.get("score")))}</strong></p>
+      <p>{escape(payload["recommendation"])}</p>
     </section>
     <section class="panel">
       <h2>Attempts</h2>

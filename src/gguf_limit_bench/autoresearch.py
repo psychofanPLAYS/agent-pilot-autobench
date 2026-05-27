@@ -495,9 +495,7 @@ class AutoresearchLoop:
                 baseline_perplexity = result.perplexity
             delta = (
                 round(result.perplexity - baseline_perplexity, 6)
-                if result.ok
-                and result.perplexity is not None
-                and baseline_perplexity is not None
+                if result.ok and result.perplexity is not None and baseline_perplexity is not None
                 else None
             )
             row = {

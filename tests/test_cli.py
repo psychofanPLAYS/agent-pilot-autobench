@@ -98,9 +98,12 @@ def test_autoresearch_command_accepts_context_ladder(tmp_path, monkeypatch):
     run_dirs = [
         path for path in (tmp_path / "runs").iterdir() if path.is_dir() and path.name != "learning"
     ]
-    assert json.loads((run_dirs[0] / "context-profile.json").read_text(encoding="utf-8"))[
-        "rows"
-    ][1]["context_size"] == 8192
+    assert (
+        json.loads((run_dirs[0] / "context-profile.json").read_text(encoding="utf-8"))["rows"][1][
+            "context_size"
+        ]
+        == 8192
+    )
 
 
 def test_autoresearch_command_accepts_perplexity_profile(tmp_path, monkeypatch):

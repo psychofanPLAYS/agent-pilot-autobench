@@ -750,7 +750,7 @@ def test_autoresearch_loop_writes_perplexity_profile_when_runner_is_provided(tmp
     assert [row["perplexity"] for row in profile["rows"]] == [6.0, 6.3, 7.2]
     assert profile["rows"][1]["perplexity_delta_vs_baseline"] == 0.3
     assert "perplexity" in (receipt.path / "perplexity-profile.tsv").read_text(encoding="utf-8")
-    assert "Perplexity Profile" in (
-        receipt.path / "perplexity-profile.md"
-    ).read_text(encoding="utf-8")
+    assert "Perplexity Profile" in (receipt.path / "perplexity-profile.md").read_text(
+        encoding="utf-8"
+    )
     assert metrics["perplexity_falloff"]["status"] == "measured"

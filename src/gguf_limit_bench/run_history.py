@@ -23,7 +23,9 @@ def _history_text(leaderboard: Leaderboard, limit: int) -> str:
         lines.append(_entry_line(rank, entry))
     remaining = len(leaderboard.entries) - limit
     if remaining > 0:
-        lines.append(f"... {remaining} older run(s) hidden. Open _runs/results.html for the full report.")
+        lines.append(
+            f"... {remaining} older run(s) hidden. Open _runs/results.html for the full report."
+        )
     champion = leaderboard.champion
     lines.extend(
         [

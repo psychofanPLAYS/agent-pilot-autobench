@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import replace
 from functools import partial
@@ -375,7 +375,9 @@ def _setup_app(
         "runs_root": str(config.paths.runs_root),
         "resolved_config": config.to_dict(),
         "next_command": (
-            "agent-autobench --start" if report.ready and install_ready else "agent-autobench doctor"
+            "agent-autobench --start"
+            if report.ready and install_ready
+            else "agent-autobench doctor"
         ),
     }
     if json_out:
@@ -1037,11 +1039,11 @@ def autoresearch_all(
             budget_seconds = min(budget_seconds, remaining_seconds)
         receipt = _run_one_autoresearch(
             model=model.path,
-        llama_bench=config.paths.llama_bench,
-        llama_cli=config.paths.llama_cli,
-        llama_server=config.paths.llama_server,
-        llama_perplexity=config.paths.llama_perplexity,
-        runs_root=config.paths.runs_root,
+            llama_bench=config.paths.llama_bench,
+            llama_cli=config.paths.llama_cli,
+            llama_server=config.paths.llama_server,
+            llama_perplexity=config.paths.llama_perplexity,
+            runs_root=config.paths.runs_root,
             budget_seconds=budget_seconds,
             parallel_max=config.benchmark.parallel_max,
             max_attempts=max_attempts,
