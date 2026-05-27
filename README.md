@@ -1,4 +1,4 @@
-# Agentic Pilot Autobench
+## Agentic Pilot Autobench
 
 [![CI](https://github.com/psychofanPLAYS/agent-pilot-autobench/actions/workflows/ci.yml/badge.svg)](https://github.com/psychofanPLAYS/agent-pilot-autobench/actions/workflows/ci.yml)
 
@@ -486,4 +486,4 @@ MIT. See `LICENSE`.
 
 
 
-~ _pilotBANCHY_
+~ _pilotBENCHY_
