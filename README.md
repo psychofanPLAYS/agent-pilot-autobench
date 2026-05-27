@@ -6,9 +6,9 @@ Local-first benchmarking for local LLMs, GGUF models, and llama.cpp runtime sett
 
 Agent Pilot Autobench is a local-first evaluation cockpit for choosing, stress-testing, and deploying agent-capable local LLMs on real hardware.
 
-It answers a practical question with evidence instead of guesswork:
+### It answers a practical question with evidence instead of guesswork:
 
-### Which local model and runtime settings are actually useful for agent work?
+> _**Which local model and runtime settings are actually useful for agent work?**_
 
 This repo is the public-facing home for that workflow.
 
