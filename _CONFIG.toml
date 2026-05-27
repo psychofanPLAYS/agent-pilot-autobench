@@ -1,0 +1,21 @@
+[paths]
+model_roots = ["_models"]
+llama_bench = "_llama/llama-bench.exe"
+llama_cli = "_llama/llama-cli.exe"
+llama_server = "_llama/llama-server.exe"
+llama_perplexity = "_llama/llama-perplexity.exe"
+runs_root = "_runs"
+
+[benchmark]
+# Default to real evidence, not a tiny scout. Use --preset quick when you only
+# want a short load/speed sanity check.
+default_preset = "deep"
+parallel_max = 4
+learning = true
+workflow_eval = true
+ttft_probe = true
+
+# Optional quality falloff profiling. Leave blank until you choose a local text
+# corpus; then pilotBENCHY can run llama-perplexity across these context tiers.
+perplexity_corpus = ""
+perplexity_contexts = [4096, 8192, 16384]

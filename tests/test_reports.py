@@ -1,6 +1,6 @@
 import json
 
-from gguf_limit_bench.reports import build_leaderboard, write_leaderboard
+from gguf_limit_bench.reports import build_leaderboard, build_model_comparison, write_leaderboard
 
 
 def _write_run(
@@ -168,6 +168,8 @@ def test_write_leaderboard_writes_markdown_and_champion_json(tmp_path):
     leaderboard = write_leaderboard(tmp_path)
 
     assert (tmp_path / "leaderboard.md").exists()
+    assert (tmp_path / "model-comparison.md").exists()
+    assert (tmp_path / "model-comparison.json").exists()
     assert (tmp_path / "champion.json").exists()
     assert (tmp_path / "results.html").exists()
     champion = json.loads((tmp_path / "champion.json").read_text(encoding="utf-8"))
@@ -203,6 +205,8 @@ def test_results_html_is_actionable_and_beautiful_enough_to_open(tmp_path):
     assert "agent-autobench export-profile" in html
     assert "LOAD FAIL" in html
     assert "Evidence" in html
+    assert "Best models on this hardware" in html
+    assert "_runs\\model-comparison.md" in html
 
 
 def test_write_leaderboard_handles_missing_runs_folder(tmp_path):
@@ -212,6 +216,7 @@ def test_write_leaderboard_handles_missing_runs_folder(tmp_path):
 
     assert leaderboard.entries == []
     assert (runs_root / "leaderboard.md").exists()
+    assert json.loads((runs_root / "model-comparison.json").read_text(encoding="utf-8")) == []
 
 
 def test_leaderboard_markdown_starts_with_plain_english_takeaway(tmp_path):
@@ -277,3 +282,46 @@ def test_leaderboard_surfaces_real_serving_ttft_and_tps(tmp_path):
     assert "250 ms" in markdown
     assert "500 ms" in markdown
     assert "30.00 tok/s" in markdown
+
+
+def test_model_comparison_groups_repeated_runs_by_model_path(tmp_path):
+    first = _write_run(tmp_path, "qwen-first", 20.0, 20.0, context=32768)
+    payload = json.loads((first / "best-settings.json").read_text(encoding="utf-8"))
+    payload["model"] = "G:/AI/models/Qwen-Agent.gguf"
+    (first / "best-settings.json").write_text(json.dumps(payload), encoding="utf-8")
+    second = _write_run(
+        tmp_path,
+        "qwen-second",
+        40.0,
+        40.0,
+        context=65536,
+        serving_ttft_ms=300.0,
+        serving_tokens_per_second=35.0,
+    )
+    payload = json.loads((second / "best-settings.json").read_text(encoding="utf-8"))
+    payload["model"] = "G:/AI/models/Qwen-Agent.gguf"
+    (second / "best-settings.json").write_text(json.dumps(payload), encoding="utf-8")
+    _write_run(tmp_path, "mistral", 30.0, 30.0, context=32768)
+
+    comparison = build_model_comparison(build_leaderboard(tmp_path))
+
+    qwen = next(entry for entry in comparison.entries if entry.model_name == "Qwen-Agent.gguf")
+    assert qwen.run_count == 2
+    assert qwen.best_run_id == "qwen-second"
+    assert qwen.best_context_label == "65536"
+    assert qwen.serving_tps == 35.0
+
+
+def test_write_leaderboard_writes_model_level_comparison_report(tmp_path):
+    _write_run(tmp_path, "winner", 99.0, 90.0, serving_ttft_ms=250.0)
+
+    write_leaderboard(tmp_path)
+
+    markdown = (tmp_path / "model-comparison.md").read_text(encoding="utf-8")
+    payload = json.loads((tmp_path / "model-comparison.json").read_text(encoding="utf-8"))
+    assert "pilotBENCHY Model Comparison" in markdown
+    assert "winner.gguf" in markdown
+    assert "per-model champion" in markdown or "Keep iterating" in markdown
+    assert payload[0]["model_name"] == "winner.gguf"
+    assert payload[0]["run_count"] == 1
+    assert payload[0]["browser_report_path"].endswith("report.html")

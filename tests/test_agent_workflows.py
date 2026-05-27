@@ -86,7 +86,7 @@ def test_workflow_eval_receipts_are_small_and_deterministic(tmp_path):
     assert (receipt.path / "best-settings.json").stat().st_size < 30_000
 
 
-def test_default_g_model_roots_include_lm_studio_gguf(monkeypatch, tmp_path):
+def test_default_model_root_is_repo_relative(monkeypatch, tmp_path):
     seen_roots = []
 
     def fake_discover(roots):
@@ -98,7 +98,7 @@ def test_default_g_model_roots_include_lm_studio_gguf(monkeypatch, tmp_path):
     result = runner.invoke(app, ["survey", "--json-out"])
 
     assert result.exit_code == 0
-    assert seen_roots == [Path("G:/AI/models"), Path("G:/AI/models/LM_Studio-gguf")]
+    assert seen_roots == [Path("_models")]
 
 
 def test_bulk_autoresearch_supports_total_budget_and_finish_early(tmp_path, monkeypatch):

@@ -399,14 +399,14 @@ def _combine_measurements(measurements: list[ServingProbeResult]) -> ServingProb
     first = measurements[0]
     warm_measurements = measurements[1:]
     warm_ttft = _mean([item.ttft_ms for item in warm_measurements if item.ttft_ms is not None])
-    warm_tps = _mean([item.tokens_per_second for item in warm_measurements])
+    warm_tps = _mean(_reliable_serving_tps(warm_measurements))
     warmup_penalty = None
     if first.ttft_ms is not None and warm_ttft is not None:
         warmup_penalty = max(0.0, first.ttft_ms - warm_ttft)
     return ServingProbeResult(
         ok=True,
         ttft_ms=first.ttft_ms,
-        tokens_per_second=_mean([item.tokens_per_second for item in measurements]) or 0.0,
+        tokens_per_second=_mean(_reliable_serving_tps(measurements)) or 0.0,
         output_chars=sum(item.output_chars for item in measurements),
         generated_tokens=sum(item.generated_tokens for item in measurements),
         failure="none",
@@ -426,6 +426,14 @@ def _combine_measurements(measurements: list[ServingProbeResult]) -> ServingProb
         ],
         question_results=[question for item in measurements for question in item.question_results],
     )
+
+
+def _reliable_serving_tps(measurements: list[ServingProbeResult]) -> list[float]:
+    return [
+        item.tokens_per_second
+        for item in measurements
+        if item.generated_tokens >= 8 and item.output_chars > 0
+    ]
 
 
 def _mean(values: list[float | None]) -> float | None:

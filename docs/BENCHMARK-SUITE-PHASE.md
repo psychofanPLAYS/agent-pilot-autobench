@@ -33,9 +33,9 @@ Already partly implemented.
 - Climb 8K, 16K, 32K, and higher contexts.
 - Record server-ready time, cold TTFT, warm TTFT, TPS, prompt-cache behavior,
   and per-question serving rows.
-- Write history to `runs\autoresearch-results.tsv` and
-  `runs\serving-metrics.tsv`.
-- Write every attempted setting to `runs\autoresearch-attempts.tsv` with a
+- Write history to `_runs\autoresearch-results.tsv` and
+  `_runs\serving-metrics.tsv`.
+- Write every attempted setting to `_runs\autoresearch-attempts.tsv` with a
   `keep`, `discard`, or `crash` decision.
 
 ### Phase 1: General-Purpose Benchmarks
@@ -65,7 +65,7 @@ Candidate tasks:
 
 Output requirement:
 
-- `runs\benchmark-suite.tsv`
+- `_runs\benchmark-suite.tsv`
 - one row per benchmark task group
 - include model, context, settings, benchmark id, score, pass/fail, runtime,
   receipt path, and failure class
@@ -82,7 +82,7 @@ Executable wrapper now exists:
 - Inspect score extractor: `python -m gguf_limit_bench.inspect_score`
 - installed optional dependency: `inspect-ai`
 - isolated BFCL CLI venv: `.venv-bfcl\Scripts\bfcl.exe`
-- output ledger: `runs\agentic-suite.tsv`
+- output ledger: `_runs\agentic-suite.tsv`
 
 Candidate suites:
 
@@ -105,7 +105,7 @@ Bundled plans:
 
 Output requirement:
 
-- `runs\agentic-suite.tsv`
+- `_runs\agentic-suite.tsv`
 - one row per task
 - include model, context, settings, task id, pass/fail, score, latency, tool
   validity, receipt path, and failure class
@@ -128,14 +128,14 @@ provided. The suite score combines:
 The current executable benchmark-suite runner writes the combined scalar to:
 
 ```text
-runs\agent-bench-score.tsv
+_runs\agent-bench-score.tsv
 ```
 
 Autoresearch also copies the suite outcome into:
 
 ```text
-runs\autoresearch-attempts.tsv
-runs\autoresearch-results.tsv
+_runs\autoresearch-attempts.tsv
+_runs\autoresearch-results.tsv
 ```
 
 Those rows include `agent_bench_score`, general score, agentic score, suite

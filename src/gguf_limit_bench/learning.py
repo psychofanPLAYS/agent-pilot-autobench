@@ -64,6 +64,9 @@ class OptunaSettingsLearner:
         )
         return LearningSuggestion(trial_id=trial.number, settings=settings)
 
+    def enqueue_settings(self, settings: AutoresearchSettings) -> None:
+        self.study.enqueue_trial(settings.to_dict(), skip_if_exists=True)
+
     def tell(self, suggestion: LearningSuggestion, result: AttemptResult) -> None:
         self.study.tell(suggestion.trial_id, result.score())
 

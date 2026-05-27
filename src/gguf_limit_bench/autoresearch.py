@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field, replace
 import json
 from pathlib import Path
+import re
 import subprocess
 import time
 from typing import Any, Callable
@@ -14,6 +15,7 @@ from gguf_limit_bench.benchmark_suite import (
 )
 from gguf_limit_bench.evidence import evidence_status, normalize_success_failure
 from gguf_limit_bench.receipts import RunReceipt
+from gguf_limit_bench.run_report import write_itemized_run_report
 from gguf_limit_bench.telemetry import classify_failure, sample_telemetry
 
 
@@ -84,6 +86,22 @@ class AttemptResult:
 AttemptRunner = Callable[[AutoresearchSettings], AttemptResult]
 
 
+@dataclass(frozen=True)
+class PerplexityResult:
+    ok: bool
+    perplexity: float | None
+    stdout: str
+    stderr: str
+    returncode: int
+    failure: str = "none"
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+PerplexityRunner = Callable[[AutoresearchSettings], PerplexityResult]
+
+
 class LlamaBenchAttemptRunner:
     def __init__(self, llama_bench: Path, model: Path, timeout_seconds: int = 300) -> None:
         self.llama_bench = llama_bench
@@ -126,6 +144,52 @@ class LlamaBenchAttemptRunner:
         )
 
 
+class LlamaPerplexityRunner:
+    def __init__(
+        self,
+        llama_perplexity: Path,
+        model: Path,
+        corpus: Path,
+        timeout_seconds: int = 600,
+    ) -> None:
+        self.llama_perplexity = llama_perplexity
+        self.model = model
+        self.corpus = corpus
+        self.timeout_seconds = timeout_seconds
+
+    def __call__(self, settings: AutoresearchSettings) -> PerplexityResult:
+        command = build_llama_perplexity_command(
+            llama_perplexity=self.llama_perplexity,
+            model=self.model,
+            corpus=self.corpus,
+            settings=settings,
+        )
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                check=False,
+                text=True,
+                timeout=self.timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as exc:
+            stdout = exc.stdout if isinstance(exc.stdout, str) else ""
+            stderr = exc.stderr if isinstance(exc.stderr, str) else "perplexity timed out"
+            return PerplexityResult(
+                ok=False,
+                perplexity=None,
+                stdout=stdout[-8000:],
+                stderr=stderr[-8000:],
+                returncode=124,
+                failure="timeout",
+            )
+        return parse_llama_perplexity_output(
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+            returncode=completed.returncode,
+        )
+
+
 class AutoresearchLoop:
     def __init__(
         self,
@@ -137,6 +201,9 @@ class AutoresearchLoop:
         max_attempts: int | None = None,
         learner: Any | None = None,
         benchmark_suite_plan: BenchmarkSuitePlan | None = None,
+        context_ladder: tuple[int, ...] | None = None,
+        perplexity_runner: PerplexityRunner | None = None,
+        perplexity_contexts: tuple[int, ...] | None = None,
     ) -> None:
         self.model = model
         self.runs_root = runs_root
@@ -146,6 +213,9 @@ class AutoresearchLoop:
         self.max_attempts = max_attempts
         self.learner = learner
         self.benchmark_suite_plan = benchmark_suite_plan
+        self.context_ladder = context_ladder
+        self.perplexity_runner = perplexity_runner
+        self.perplexity_contexts = perplexity_contexts
 
     def run(self) -> RunReceipt:
         receipt = RunReceipt.create(self.runs_root, slug=_safe_slug(self.model.stem))
@@ -289,6 +359,11 @@ class AutoresearchLoop:
             best_settings,
             best_result,
         )
+        if self.context_ladder:
+            self._write_context_profile(receipt, best_settings)
+        if self.perplexity_runner is not None and self.perplexity_contexts:
+            self._write_perplexity_profile(receipt, best_settings)
+        write_itemized_run_report(receipt.path)
         return receipt
 
     def _candidate(self, best: AutoresearchSettings, attempt_index: int) -> AutoresearchSettings:
@@ -349,6 +424,204 @@ class AutoresearchLoop:
             benchmark_suite_failure=None,
         )
 
+    def _write_context_profile(
+        self, receipt: RunReceipt, best_settings: AutoresearchSettings
+    ) -> None:
+        assert self.context_ladder is not None
+        rows: list[dict] = []
+        baseline_tps: float | None = None
+        receipt.event(
+            "context_ladder_started",
+            {"contexts": list(self.context_ladder), "base_settings": best_settings.to_dict()},
+        )
+        for context_size in self.context_ladder:
+            settings = replace(best_settings, context_size=int(context_size), kv_unified=True)
+            result = self.attempt_runner(settings)
+            if result.ok and result.generation_tokens_per_second > 0 and baseline_tps is None:
+                baseline_tps = result.generation_tokens_per_second
+            retention = (
+                result.generation_tokens_per_second / baseline_tps
+                if result.ok and baseline_tps
+                else None
+            )
+            row = {
+                "context_size": settings.context_size,
+                "ok": result.ok,
+                "generation_tps": result.generation_tokens_per_second,
+                "prompt_tps": result.prompt_tokens_per_second,
+                "tps_retention_vs_baseline": retention,
+                "cold_ttft_ms": result.serving_ttft_ms,
+                "warm_ttft_ms": result.serving_warm_ttft_ms,
+                "serving_tps": result.serving_tokens_per_second,
+                "failure": result.failure,
+                "settings": settings.to_dict(),
+            }
+            rows.append(row)
+            receipt.event(
+                "context_ladder_attempt_finished",
+                {"settings": settings.to_dict(), "result": result.to_dict(), "row": row},
+            )
+
+        payload = {
+            "run_id": receipt.path.name,
+            "model": str(self.model),
+            "base_settings": best_settings.to_dict(),
+            "rows": rows,
+        }
+        receipt.write_json("context-profile.json", payload)
+        (receipt.path / "context-profile.tsv").write_text(
+            _context_profile_tsv(rows), encoding="utf-8"
+        )
+        (receipt.path / "context-profile.md").write_text(
+            _context_profile_markdown(payload), encoding="utf-8"
+        )
+        receipt.event("context_ladder_finished", {"rows": rows})
+
+    def _write_perplexity_profile(
+        self, receipt: RunReceipt, best_settings: AutoresearchSettings
+    ) -> None:
+        assert self.perplexity_runner is not None
+        assert self.perplexity_contexts is not None
+        rows: list[dict] = []
+        baseline_perplexity: float | None = None
+        receipt.event(
+            "perplexity_profile_started",
+            {"contexts": list(self.perplexity_contexts), "base_settings": best_settings.to_dict()},
+        )
+        for context_size in self.perplexity_contexts:
+            settings = replace(best_settings, context_size=int(context_size), kv_unified=True)
+            result = self.perplexity_runner(settings)
+            if result.ok and result.perplexity is not None and baseline_perplexity is None:
+                baseline_perplexity = result.perplexity
+            delta = (
+                round(result.perplexity - baseline_perplexity, 6)
+                if result.ok
+                and result.perplexity is not None
+                and baseline_perplexity is not None
+                else None
+            )
+            row = {
+                "context_size": settings.context_size,
+                "ok": result.ok,
+                "perplexity": result.perplexity,
+                "perplexity_delta_vs_baseline": delta,
+                "failure": result.failure,
+                "settings": settings.to_dict(),
+            }
+            rows.append(row)
+            receipt.event(
+                "perplexity_profile_attempt_finished",
+                {"settings": settings.to_dict(), "result": result.to_dict(), "row": row},
+            )
+
+        payload = {
+            "run_id": receipt.path.name,
+            "model": str(self.model),
+            "base_settings": best_settings.to_dict(),
+            "rows": rows,
+        }
+        receipt.write_json("perplexity-profile.json", payload)
+        (receipt.path / "perplexity-profile.tsv").write_text(
+            _perplexity_profile_tsv(rows), encoding="utf-8"
+        )
+        (receipt.path / "perplexity-profile.md").write_text(
+            _perplexity_profile_markdown(payload), encoding="utf-8"
+        )
+        receipt.event("perplexity_profile_finished", {"rows": rows})
+
+
+def _context_profile_tsv(rows: list[dict]) -> str:
+    header = (
+        "context_size\tok\tgeneration_tps\tprompt_tps\t"
+        "tps_retention_vs_baseline\tcold_ttft_ms\twarm_ttft_ms\t"
+        "serving_tps\tfailure"
+    )
+    lines = [header]
+    for row in rows:
+        lines.append(
+            "\t".join(
+                [
+                    str(row["context_size"]),
+                    str(row["ok"]).lower(),
+                    _tsv_float(row["generation_tps"]),
+                    _tsv_float(row["prompt_tps"]),
+                    _tsv_float(row["tps_retention_vs_baseline"]),
+                    _tsv_float(row["cold_ttft_ms"]),
+                    _tsv_float(row["warm_ttft_ms"]),
+                    _tsv_float(row["serving_tps"]),
+                    str(row["failure"]),
+                ]
+            )
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _context_profile_markdown(payload: dict) -> str:
+    lines = [
+        f"# Context Profile: {Path(payload['model']).name}",
+        "",
+        "Fixed-context ladder using the best-known settings from this run.",
+        "",
+        "| Context | OK | Gen TPS | Prompt TPS | TPS Retention | Cold TTFT | Warm TTFT | Serving TPS | Failure |",
+        "| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+    ]
+    for row in payload["rows"]:
+        lines.append(
+            "| "
+            f"{row['context_size']} | {str(row['ok']).lower()} | "
+            f"{_md_float(row['generation_tps'])} | {_md_float(row['prompt_tps'])} | "
+            f"{_md_float(row['tps_retention_vs_baseline'])} | {_md_float(row['cold_ttft_ms'])} | "
+            f"{_md_float(row['warm_ttft_ms'])} | {_md_float(row['serving_tps'])} | "
+            f"{row['failure']} |"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _perplexity_profile_tsv(rows: list[dict]) -> str:
+    header = "context_size\tok\tperplexity\tperplexity_delta_vs_baseline\tfailure"
+    lines = [header]
+    for row in rows:
+        lines.append(
+            "\t".join(
+                [
+                    str(row["context_size"]),
+                    str(row["ok"]).lower(),
+                    _tsv_float(row["perplexity"]),
+                    _tsv_float(row["perplexity_delta_vs_baseline"]),
+                    str(row["failure"]),
+                ]
+            )
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _perplexity_profile_markdown(payload: dict) -> str:
+    lines = [
+        f"# Perplexity Profile: {Path(payload['model']).name}",
+        "",
+        "Fixed-context perplexity ladder using the best-known settings from this run.",
+        "",
+        "| Context | OK | Perplexity | Delta vs baseline | Failure |",
+        "| ---: | --- | ---: | ---: | --- |",
+    ]
+    for row in payload["rows"]:
+        lines.append(
+            "| "
+            f"{row['context_size']} | {str(row['ok']).lower()} | "
+            f"{_md_float(row['perplexity'])} | "
+            f"{_md_float(row['perplexity_delta_vs_baseline'])} | "
+            f"{row['failure']} |"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _tsv_float(value) -> str:
+    return "" if value is None else f"{float(value):.6g}"
+
+
+def _md_float(value) -> str:
+    return "n/a" if value is None else f"{float(value):.2f}"
+
 
 def build_autoresearch_llama_bench_command(
     llama_bench: Path,
@@ -378,6 +651,46 @@ def build_autoresearch_llama_bench_command(
     if settings.context_size:
         command.extend(["-d", str(settings.context_size)])
     return command
+
+
+def build_llama_perplexity_command(
+    llama_perplexity: Path,
+    model: Path,
+    corpus: Path,
+    settings: AutoresearchSettings,
+) -> list[str]:
+    return [
+        str(llama_perplexity),
+        "--model",
+        str(model),
+        "--file",
+        str(corpus),
+        "--ctx-size",
+        str(settings.context_size),
+        "--batch-size",
+        str(settings.batch_size),
+        "--ubatch-size",
+        str(settings.ubatch_size),
+        "--n-gpu-layers",
+        str(settings.gpu_layers),
+        "--flash-attn",
+        "on" if settings.flash_attention else "off",
+    ]
+
+
+def parse_llama_perplexity_output(stdout: str, stderr: str, returncode: int) -> PerplexityResult:
+    combined = stdout + "\n" + stderr
+    matches = re.findall(r"(?:PPL|perplexity)\s*[:=]\s*([0-9]+(?:\.[0-9]+)?)", combined, re.I)
+    perplexity = float(matches[-1]) if matches else None
+    ok = returncode == 0 and perplexity is not None
+    return PerplexityResult(
+        ok=ok,
+        perplexity=perplexity,
+        stdout=stdout[-8000:],
+        stderr=stderr[-8000:],
+        returncode=returncode,
+        failure="none" if ok else "no_perplexity",
+    )
 
 
 def parse_llama_bench_jsonl(
@@ -471,6 +784,9 @@ def _summary_lines(
         "",
         f"- Failed attempts recorded: `{len(failures)}`",
         "- Full attempt log: `events.jsonl`",
+        "- Itemized report: `itemized-report.md`",
+        "- Browser report: `report.html`",
+        "- Machine report: `report.json`",
     ]
     if learner_best is not None:
         lines.extend(
