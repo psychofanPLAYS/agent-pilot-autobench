@@ -31,6 +31,7 @@ class RunPreset:
     max_extra_minutes: int
     total_session_cap_minutes: int | None
     max_attempts: int | None
+    context_ladder: tuple[int, ...]
     packs: tuple[str, ...]
     adaptive: bool
 
@@ -43,7 +44,8 @@ PRESETS: dict[str, RunPreset] = {
         budget_minutes=5,
         max_extra_minutes=0,
         total_session_cap_minutes=None,
-        max_attempts=1,
+        max_attempts=3,
+        context_ladder=(),
         packs=("load-smoke", "speed"),
         adaptive=False,
     ),
@@ -54,7 +56,8 @@ PRESETS: dict[str, RunPreset] = {
         budget_minutes=10,
         max_extra_minutes=3,
         total_session_cap_minutes=None,
-        max_attempts=3,
+        max_attempts=5,
+        context_ladder=(4096, 8192, 16384, 32768),
         packs=("load-smoke", "speed", "json-discipline"),
         adaptive=True,
     ),
@@ -66,6 +69,7 @@ PRESETS: dict[str, RunPreset] = {
         max_extra_minutes=10,
         total_session_cap_minutes=None,
         max_attempts=None,
+        context_ladder=(4096, 8192, 16384, 32768, 65536, 131072),
         packs=("hermes-pilot", "context-limit", "tool-calling", "coding-smoke"),
         adaptive=True,
     ),
@@ -77,6 +81,7 @@ PRESETS: dict[str, RunPreset] = {
         max_extra_minutes=20,
         total_session_cap_minutes=480,
         max_attempts=None,
+        context_ladder=(4096, 8192, 16384, 32768, 65536, 131072),
         packs=("all",),
         adaptive=True,
     ),
@@ -90,6 +95,7 @@ class RunConfig:
     max_extra_minutes: int
     total_session_cap_minutes: int | None
     max_attempts: int | None
+    context_ladder: tuple[int, ...]
     packs: tuple[str, ...]
     adaptive: bool
     min_ttft_target_ms: int = 10_000
@@ -108,6 +114,7 @@ class RunConfig:
             max_extra_minutes=preset.max_extra_minutes,
             total_session_cap_minutes=preset.total_session_cap_minutes,
             max_attempts=preset.max_attempts,
+            context_ladder=preset.context_ladder,
             packs=preset.packs,
             adaptive=preset.adaptive,
         )

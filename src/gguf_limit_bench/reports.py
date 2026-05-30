@@ -46,6 +46,33 @@ class Leaderboard:
         return self.entries[0]
 
 
+@dataclass(frozen=True)
+class ModelComparisonEntry:
+    model_name: str
+    model_path: str
+    run_count: int
+    best_run_id: str
+    best_score: float
+    best_status: str
+    best_context_label: str
+    generation_tps: float
+    prompt_tps: float
+    cold_ttft_ms: float | None
+    warm_ttft_ms: float | None
+    serving_tps: float | None
+    agent_bench_score: float | None
+    benchmark_suite_status: str
+    best_receipt_path: str
+    itemized_report_path: str
+    browser_report_path: str
+    recommendation: str
+
+
+@dataclass(frozen=True)
+class ModelComparison:
+    entries: list[ModelComparisonEntry]
+
+
 def build_leaderboard(runs_root: Path) -> Leaderboard:
     entries: list[LeaderboardEntry] = []
     for best_path in sorted(runs_root.glob("*/best-settings.json")):
@@ -138,6 +165,62 @@ def build_leaderboard(runs_root: Path) -> Leaderboard:
     return Leaderboard(entries=sorted(entries, key=_leaderboard_rank_key, reverse=True))
 
 
+def build_model_comparison(leaderboard: Leaderboard) -> ModelComparison:
+    groups: dict[tuple[str, str], list[LeaderboardEntry]] = {}
+    for entry in leaderboard.entries:
+        groups.setdefault((entry.model_name, entry.model_path), []).append(entry)
+
+    comparison_entries: list[ModelComparisonEntry] = []
+    for (model_name, model_path), runs in groups.items():
+        ranked_runs = sorted(runs, key=_leaderboard_rank_key, reverse=True)
+        best = ranked_runs[0]
+        receipt = Path(best.receipt_path)
+        comparison_entries.append(
+            ModelComparisonEntry(
+                model_name=model_name,
+                model_path=model_path,
+                run_count=len(runs),
+                best_run_id=best.run_id,
+                best_score=best.score,
+                best_status=best.status,
+                best_context_label=best.context_label,
+                generation_tps=best.generation_tps,
+                prompt_tps=best.prompt_tps,
+                cold_ttft_ms=best.serving_ttft_ms,
+                warm_ttft_ms=best.serving_warm_ttft_ms,
+                serving_tps=best.serving_tps,
+                agent_bench_score=best.agent_bench_score,
+                benchmark_suite_status=best.benchmark_suite_status,
+                best_receipt_path=best.receipt_path,
+                itemized_report_path=str(receipt / "itemized-report.md"),
+                browser_report_path=str(receipt / "report.html"),
+                recommendation=_model_recommendation(best, len(runs)),
+            )
+        )
+    return ModelComparison(
+        entries=sorted(comparison_entries, key=_model_comparison_rank_key, reverse=True)
+    )
+
+
+def _model_comparison_rank_key(entry: ModelComparisonEntry) -> tuple[int, float, int]:
+    return (
+        {
+            "BENCHMARK SUITE": 700,
+            "WORKFLOW SMOKE": 600,
+            "WORKFLOW WEAK": 500,
+            "WORKFLOW UNPROVEN": 400,
+            "CONTEXT UNPROVEN": 300,
+            "SERVING MEASURED": 250,
+            "SPEED ONLY": 200,
+            "SLOW": 100,
+            "SUITE FAILED": 50,
+            "LOAD FAIL": 0,
+        }.get(entry.best_status, 0),
+        entry.best_score,
+        entry.run_count,
+    )
+
+
 def _leaderboard_rank_key(entry: LeaderboardEntry) -> tuple[int, float]:
     evidence_rank = {
         "BENCHMARK SUITE": 700,
@@ -225,9 +308,20 @@ def write_leaderboard(runs_root: Path) -> Leaderboard:
             "# Agent Pilot Autobench Leaderboard\n\nNo runs found.\n",
             encoding="utf-8",
         )
+        _write_empty_model_comparison(runs_root)
         (runs_root / "results.html").write_text(_empty_html(), encoding="utf-8")
         return leaderboard
+    model_comparison = build_model_comparison(leaderboard)
     (runs_root / "leaderboard.md").write_text(_leaderboard_markdown(leaderboard), encoding="utf-8")
+    (runs_root / "model-comparison.md").write_text(
+        _model_comparison_markdown(model_comparison), encoding="utf-8"
+    )
+    (runs_root / "model-comparison.json").write_text(
+        json.dumps(
+            [asdict(entry) for entry in model_comparison.entries], ensure_ascii=True, indent=2
+        ),
+        encoding="utf-8",
+    )
     (runs_root / "results.html").write_text(_leaderboard_html(leaderboard), encoding="utf-8")
     (runs_root / "champion.json").write_text(
         json.dumps(asdict(leaderboard.champion), ensure_ascii=True, indent=2),
@@ -285,6 +379,40 @@ def _leaderboard_markdown(leaderboard: Leaderboard) -> str:
     return "\n".join(lines)
 
 
+def _write_empty_model_comparison(runs_root: Path) -> None:
+    (runs_root / "model-comparison.md").write_text(
+        "# pilotBENCHY Model Comparison\n\nNo model runs found yet.\n",
+        encoding="utf-8",
+    )
+    (runs_root / "model-comparison.json").write_text("[]\n", encoding="utf-8")
+
+
+def _model_comparison_markdown(comparison: ModelComparison) -> str:
+    lines = [
+        "# pilotBENCHY Model Comparison",
+        "",
+        "This is the model-level view. It groups repeated runs by model so pilotBENCHY can "
+        "compare best-known settings per model instead of treating every receipt folder as a "
+        "separate universe.",
+        "",
+        "| Rank | Model | Runs | Best status | Best score | Context | Gen TPS | Prompt TPS | Cold TTFT | Warm TTFT | Serving TPS | Suite | Best receipt |",
+        "|---:|---|---:|---|---:|---|---:|---:|---:|---:|---:|---|---|",
+    ]
+    for rank, entry in enumerate(comparison.entries, start=1):
+        lines.append(
+            f"| {rank} | `{entry.model_name}` | {entry.run_count} | {entry.best_status} | "
+            f"{entry.best_score:.2f} | {entry.best_context_label} | "
+            f"{entry.generation_tps:.2f} | {entry.prompt_tps:.2f} | "
+            f"{_format_ms(entry.cold_ttft_ms)} | {_format_ms(entry.warm_ttft_ms)} | "
+            f"{_format_tps(entry.serving_tps)} | {entry.benchmark_suite_status} | "
+            f"`{entry.best_receipt_path}` |"
+        )
+    lines.extend(["", "## Recommendations", ""])
+    for entry in comparison.entries:
+        lines.append(f"- `{entry.model_name}`: {entry.recommendation}")
+    return "\n".join(lines) + "\n"
+
+
 def _empty_html() -> str:
     return "\n".join(
         [
@@ -313,8 +441,12 @@ def _empty_html() -> str:
 
 def _leaderboard_html(leaderboard: Leaderboard) -> str:
     champion = leaderboard.champion
+    model_comparison = build_model_comparison(leaderboard)
     rows = "\n".join(
         _html_row(rank, entry) for rank, entry in enumerate(leaderboard.entries, start=1)
+    )
+    model_rows = "\n".join(
+        _model_html_row(rank, entry) for rank, entry in enumerate(model_comparison.entries, start=1)
     )
     settings = "\n".join(
         f"<li><span>{escape(str(key))}</span><strong>{escape(str(value))}</strong></li>"
@@ -359,7 +491,8 @@ def _leaderboard_html(leaderboard: Leaderboard) -> str:
     <section class="panel">
       <h2>What to do next</h2>
       <ol>
-        <li>Open <code>runs\\leaderboard.md</code> when you want the compact Markdown version.</li>
+        <li>Open <code>_runs\\leaderboard.md</code> when you want the compact Markdown version.</li>
+        <li>Open <code>_runs\\model-comparison.md</code> when you want the per-model winner view.</li>
         <li>
           Run <code>agent-autobench export-profile</code> to create a localhost-safe
           server profile.
@@ -373,6 +506,21 @@ def _leaderboard_html(leaderboard: Leaderboard) -> str:
       <ul class="settings">
         {settings}
       </ul>
+    </section>
+    <section class="panel">
+      <h2>Best models on this hardware</h2>
+      <p class="receipt">Grouped by model name and path, ranked by the best proven run for each model.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Rank</th><th>Model</th><th>Runs</th><th>Status</th><th>Score</th>
+            <th>Context</th><th>Gen TPS</th><th>Cold TTFT</th><th>Serving</th><th>Receipt</th>
+          </tr>
+        </thead>
+        <tbody>
+          {model_rows}
+        </tbody>
+      </table>
     </section>
     <section class="panel">
       <h2>All runs</h2>
@@ -413,6 +561,41 @@ def _html_row(rank: int, entry: LeaderboardEntry) -> str:
         f"<td><code>{escape(entry.model_name)}</code></td>"
         "</tr>"
     )
+
+
+def _model_html_row(rank: int, entry: ModelComparisonEntry) -> str:
+    status_class = "pass" if entry.best_status in {"WORKFLOW SMOKE", "BENCHMARK SUITE"} else "fail"
+    return (
+        f'<tr class="{status_class}">'
+        f"<td>{rank}</td>"
+        f"<td><code>{escape(entry.model_name)}</code></td>"
+        f"<td>{entry.run_count}</td>"
+        f"<td>{escape(entry.best_status)}</td>"
+        f"<td>{entry.best_score:.2f}</td>"
+        f"<td>{escape(entry.best_context_label)}</td>"
+        f"<td>{entry.generation_tps:.2f}</td>"
+        f"<td>{escape(_format_ms(entry.cold_ttft_ms))}</td>"
+        f"<td>{escape(_format_tps(entry.serving_tps))}</td>"
+        f"<td><code>{escape(entry.best_receipt_path)}</code></td>"
+        "</tr>"
+    )
+
+
+def _model_recommendation(best: LeaderboardEntry, run_count: int) -> str:
+    if best.status == "BENCHMARK SUITE":
+        return "Suite-backed candidate. Use this as the current per-model champion."
+    if best.status == "WORKFLOW SMOKE":
+        return "Promising local candidate. Run the benchmark-suite phase before final promotion."
+    if best.status in {"WORKFLOW UNPROVEN", "SERVING MEASURED", "SPEED ONLY"}:
+        return (
+            f"{run_count} run(s) recorded. Keep iterating with context and workflow checks before "
+            "treating this model as proven."
+        )
+    if best.status == "LOAD FAIL":
+        return (
+            "Best run still failed to load. Fix model path, VRAM fit, or llama.cpp settings first."
+        )
+    return "Keep the receipt, but collect stronger evidence before ranking this model highly."
 
 
 def _plain_english_status(entry: LeaderboardEntry) -> str:

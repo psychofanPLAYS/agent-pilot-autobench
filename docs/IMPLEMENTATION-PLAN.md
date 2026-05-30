@@ -20,7 +20,7 @@ Tech stack: Python, Textual, Rich, Typer, pytest, psutil, nvidia-ml-py, Optuna, 
 - [x] Add tests for telemetry snapshots and OOM/failure classification.
 - [x] Implement psutil plus NVML telemetry with `nvidia-smi` fallback.
 - [x] Add tests for JSONL receipts, Markdown summaries, and recovery markers.
-- [x] Implement run folders under `runs/<timestamp>-<slug>`.
+- [x] Implement run folders under `_runs/<timestamp>-<slug>`.
 - [x] Wire a quick 5-minute per-model benchmark runner.
 - [ ] Read LM Studio logs/settings as read-only profile hints.
 - [x] Add a Karpathy-style loop: fixed budget, mutate one setting, measure, keep if score improves.
@@ -50,7 +50,7 @@ Each benchmark run writes:
 
 ## Autoresearch Rule
 
-The optimizer uses Karpathy's core pattern: fixed time budget, one metric, small setting changes, keep the change only when the recorded score improves. It now also persists Optuna trials under `runs/learning/optuna.sqlite3`, so later runs can reuse prior results instead of starting from scratch.
+The optimizer uses Karpathy's core pattern: fixed time budget, one metric, small setting changes, keep the change only when the recorded score improves. It now also persists Optuna trials under `_runs/learning/optuna.sqlite3`, so later runs can reuse prior results instead of starting from scratch.
 This is the full Karpathy-style contract only when `--benchmark-suite-plan`
 is provided. Without that plan, the loop is a system-viability scout. See
 `docs\BENCHMARK-SUITE-PHASE.md`.
@@ -75,12 +75,12 @@ The probe also records warm TTFT and warmup penalty so Qwen-style first-question
 latency can be separated from warmed-up serving behavior.
 The probe runs fixed questions in the same order every time: 1 at 4K, 2 at 8K,
 3 at 16K, and 5 at 32K and above. Per-question rows append to
-`runs/serving-metrics.tsv` for charting.
+`_runs/serving-metrics.tsv` for charting.
 
 Production-ready scoring still requires:
 
-- `runs\benchmark-suite.tsv` for general-purpose benchmark evidence.
-- `runs\agentic-suite.tsv` for agentic benchmark evidence.
-- `runs\agent-bench-score.tsv` for the combined benchmark-suite scalar.
+- `_runs\benchmark-suite.tsv` for general-purpose benchmark evidence.
+- `_runs\agentic-suite.tsv` for agentic benchmark evidence.
+- `_runs\agent-bench-score.tsv` for the combined benchmark-suite scalar.
 - `--benchmark-suite-plan` on autoresearch, so keep/discard/crash decisions
   preserve winning settings and reject losing settings by `agent_bench_score`.

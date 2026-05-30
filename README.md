@@ -1,205 +1,127 @@
+# Agent Pilot Autobench
+
 ## _Agentic Pilot Autobench_
 
 [![CI](https://github.com/psychofanPLAYS/agent-pilot-autobench/actions/workflows/ci.yml/badge.svg)](https://github.com/psychofanPLAYS/agent-pilot-autobench/actions/workflows/ci.yml)
 
-Local-first benchmarking for local LLMs, GGUF models, and llama.cpp runtime settings.
+Local-first benchmarking for GGUF models, llama.cpp settings, and agent-style readiness.
 
-Agent Pilot Autobench is a local-first evaluation cockpit for choosing, stress-testing, and deploying agent-capable local LLMs on real hardware.
-
-### It answers a practical question with evidence instead of guesswork:
+Agent Pilot Autobench answers a practical question with evidence instead of guesswork:
 
 > _**Which local model and runtime settings are actually useful for agent work?**_
 > _**Which GGUF should I use to power my Assistant's Harness? (ie. Hermes Agent, OpenClaw)**_
 
-> __You went on HuggingsFace and pulled 10+ models... Let's figure out which one will serve You BEST!__
+> **You went on Hugging Face and pulled 10+ models. Let's figure out which one will serve you best.**
 
-This repo is the public-facing home for that workflow.
+It wraps existing tools such as `llama-bench`, `llama-cli`, `llama-server`, Optuna, Textual, Rich, and pytest. The project records receipts, scores, failures, and champion settings so results are based on repeatable evidence instead of vibes.
 
-Run this first:
+## Start
 
-```powershell
-agent-autobench first-run
-```
-
-That command is the intended beginner entry point. The older `pilotbench`
-command remains as a compatibility alias.
-
-Short command after installing shortcuts:
-
-```powershell
-apb first-run
-```
-
-## What It Does
-
-Agent Pilot Autobench helps you measure:
-
-- which local GGUF model is usable behind an agent-style workflow
-- which settings are faster without becoming unstable
-- which candidate fails to load, OOMs, or falls back to the CPU
-- which run produced the best measured score, and where the proof lives
-- whether Optuna can learn from earlier attempts instead of starting blind every time
-
-It wraps proven open-source tools instead of reinventing them:
-
-- `llama-bench` and `llama-cli` from `llama.cpp`
-- local GGUF model folders
-- NVML, `nvidia-smi`, and `psutil` telemetry
-- Optuna with local SQLite for persistent setting search
-- Typer, Rich, and Textual for a usable CLI and TUI
-- pytest for a compact but real test suite
-
-## Why It Exists
-
-Local model testing often collapses into guesses:
-
-- "this one feels faster"
-- "that one loaded"
-- "LM Studio seemed smoother"
-
-That is not enough when you are trying to pick a real agent pilot for work.
-
-Agent Pilot Autobench keeps the process measurable, repeatable, and easy to inspect later. The output is meant to be useful to a human, a future run, and a reviewer on GitHub.
-
-For the product direction behind the next public milestone, see
-[docs/PRODUCT-DESIGN.md](docs/PRODUCT-DESIGN.md).
-
-## How It Works
-
-```mermaid
-flowchart LR
-    A["Discover GGUF models"] --> B["Choose candidate settings"]
-    B --> C["Run llama.cpp probe"]
-    C --> D["Collect speed, failure, and telemetry"]
-    D --> E["Write JSON and Markdown receipts"]
-    E --> F["Update local Optuna memory"]
-    F --> B
-    E --> G["Keep the best measured setting"]
-```
-
-## Requirements
-
-- Python 3.11 or newer
-- `uv`
-- GGUF models stored locally
-- `llama-bench` for speed probes
-- optional: `llama-cli` for workflow evaluation
-
-## Install
-
-From the repo root:
-
-```powershell
-uv sync --extra dev --extra bench
-uvx --from lm-eval lm-eval --help
-```
-
-Run the tests:
-
-```powershell
-uv run --extra dev pytest -q
-```
-
-## First Run
-
-The beginner command is:
-
-```powershell
-agent-autobench first-run
-```
-
-In plain English, `first-run` means:
-
-1. Sync the local `.venv` dependencies with `uv`, including benchmark-suite
-   harness wrappers.
-2. Create the `agent-autobench` and `apb` command shims in `G:\_codex_global\bin`.
-3. Check the model and llama.cpp paths.
-4. Create the local experiment database.
-5. Prepare the results folder and report files.
-6. Tell you the next command instead of failing silently.
-
-By default it does not silently change your Windows user PATH. To do that from
-the terminal, run:
-
-```powershell
-agent-autobench first-run --add-to-path
-```
-
-### Easiest Windows Path
-
-Double-click:
+On Windows, first run:
 
 ```text
-START-HERE.bat
+FIRST_RUN.bat
 ```
 
-That is the start button. It runs `agent-autobench first-run`, then opens the
-model picker when the checks pass.
+That installs the local command, adds `apb` to PATH, checks the machine, and opens the model picker when the required paths are ready.
 
-More detail is in [docs/START-FOR-NORMAL-PEOPLE.md](docs/START-FOR-NORMAL-PEOPLE.md).
-
-### Install The Windows Command
-
-If you want `agent-autobench` to work from any terminal folder on Windows,
-double-click:
-
-```text
-INSTALL-COMMAND.bat
-```
-
-That script creates a small command shim at `G:\_codex_global\bin\agent-autobench.bat`.
-It will ask before adding that folder to your user PATH. `first-run` now creates
-the same shims itself, so this `.bat` is mostly the double-click helper for PATH.
-It does not change the system PATH silently.
-
-### Easy Terminal Path
-
-If you already know how to open a terminal in this folder, use the local command:
+Terminal users can run the same first-run flow with:
 
 ```powershell
-.\.venv\Scripts\agent-autobench.exe first-run
+uv run --extra dev --extra bench agent-autobench --first-run
 ```
 
-If the local `.venv` is not installed yet, run:
+After first run adds the repo-local `_bin` folder to your user PATH, new terminals can use:
 
 ```powershell
-uv run --extra dev agent-autobench first-run
+apb --start
 ```
 
-The older compatibility command also works:
+## What Setup Creates
+
+The setup command prepares only local project state:
+
+- `.venv`: Python environment managed by `uv`
+- `_bin`: repo-local command shims for `agent-autobench` and `apb`
+- `_db`: local SQLite app state
+- `_runs`: benchmark receipts, ledgers, leaderboards, and HTML results
+
+It also runs the doctor checks for model folders and llama.cpp executables. If a path is missing, setup prints the exact check that failed.
+
+## What The App Measures
+
+- load success or failure
+- prompt and generation throughput
+- context size and runtime settings
+- cold and warm serving TTFT when `llama-server` probing is enabled
+- workflow smoke scores when workflow evaluation is enabled
+- benchmark-suite scores when a suite plan is provided
+- failure class such as timeout, model load failure, crash, GPU OOM, or memory allocation failure
+
+The optimizer follows the simple Karpathy-style loop: fixed budget, one measured score, small setting changes, keep the change only when the recorded score improves.
+
+## Results
+
+Each run writes a receipt folder under `_runs/<timestamp>-<model-name>/`.
+
+Important outputs:
+
+- `_runs/leaderboard.md`: compact ranked summary
+- `_runs/model-comparison.md`: best-known result grouped by model
+- `_runs/model-comparison.json`: machine-readable per-model comparison
+- `_runs/results.html`: browser-friendly results report
+- `_runs/champion.json`: current machine-readable champion
+- `_runs/autoresearch-results.tsv`: one row per completed run
+- `_runs/autoresearch-attempts.tsv`: one row per attempted setting with keep, discard, or crash
+- `_runs/serving-metrics.tsv`: per-question serving metrics
+- `_runs/benchmark-suite.tsv`, `_runs/agentic-suite.tsv`, `_runs/agent-bench-score.tsv`: standardized benchmark-suite evidence
+
+Each receipt also includes:
+
+- `itemized-report.md`: readable attempt-by-attempt report
+- `report.html`: browser report for the run
+- `report.json`: machine-readable itemized report, including metric coverage
+- `context-profile.md`, `context-profile.tsv`, `context-profile.json`: fixed context ladder profile when enabled
+
+The TUI remembers the last selected models and shows truncated previous-run summaries so the current session can be compared against earlier evidence without opening every receipt.
+
+## Common Commands
 
 ```powershell
-uv run --extra dev pilotbench --start
+apb --first-run
+apb --start
+agent-autobench doctor
+agent-autobench results
+agent-autobench results --open-browser
+agent-autobench results --serve
+agent-autobench benchmark-suite-plans
+agent-autobench benchmark-suite --plan benchmarks\plans\local-openai-smoke.plan.json
+agent-autobench autoresearch --model "path\to\model.gguf" --budget-minutes 5
+agent-autobench autoresearch --model "path\to\model.gguf" --context-ladder 4096 --context-ladder 8192 --context-ladder 16384
+agent-autobench autoresearch --model "path\to\model.gguf" --perplexity-corpus "path\to\corpus.txt" --perplexity-context 4096 --perplexity-context 8192
 ```
 
-Check only, without opening the picker:
+The short alias `apb` is created by setup for people who prefer a smaller command. The older `pilotbench` command remains available for compatibility.
 
-```powershell
-.\.venv\Scripts\agent-autobench.exe --start --check-only
-```
+## Configuration
 
-### Manual Check
+Defaults are repo-relative so the project can be unpacked anywhere:
 
-The doctor command checks paths before you spend time on benchmarks:
+- models: `_models`
+- llama.cpp executables: `_llama`
+- results: `_runs`
+- app state: `_db`
+- command shims: `_bin`
 
-```powershell
-uv run --extra dev pilotbench doctor
-```
+Override paths and defaults in the single repo-root `_CONFIG.toml`, with environment variables, or with CLI options.
 
-Default Windows workstation paths live in `pilotbench.toml`:
+Important defaults in `_CONFIG.toml`:
 
-- models: `G:\AI\models`
-- LM Studio GGUF models: `G:\AI\models\LM_Studio-gguf`
-- `llama-bench`: `G:\AI\llamaCPP-server\_internal\runtime\llama.cpp\llama-bench.exe`
-- `llama-cli`: `G:\AI\llamaCPP-server\_internal\runtime\llama.cpp\llama-cli.exe`
-- receipts: `runs\`
-
-For a different machine, edit `pilotbench.toml`, set environment variables, or pass paths
-explicitly. Precedence is:
-
-```text
-environment variables > CLI options > pilotbench.toml > built-in defaults
-```
+- `default_preset = "deep"` for long, evidence-heavy runs by default
+- `learning = true`
+- `workflow_eval = true`
+- `ttft_probe = true`
+- `perplexity_corpus = ""` until you choose a local quality-test corpus
 
 Useful environment variables:
 
@@ -208,285 +130,94 @@ PILOTBENCH_MODEL_ROOTS
 PILOTBENCH_LLAMA_BENCH
 PILOTBENCH_LLAMA_CLI
 PILOTBENCH_LLAMA_SERVER
+PILOTBENCH_LLAMA_PERPLEXITY
 PILOTBENCH_RUNS_ROOT
 PILOTBENCH_DEFAULT_PRESET
 PILOTBENCH_PARALLEL_MAX
 ```
 
-To inspect the resolved paths as JSON:
+To inspect resolved paths:
 
 ```powershell
-uv run --extra dev pilotbench doctor --json-out
+agent-autobench doctor --json-out
 ```
 
-To override paths for one command:
+## Benchmark Suite
+
+Speed-only tests are useful for scouting, but they are not enough to prove agent usefulness.
+
+The metric contract is intentionally practical:
+
+- TTFT: cold and warm first-token latency from `llama-server`
+- TPS: generation speed from `llama-bench` and reliable serving samples
+- context growth: 4K upward through larger context tiers
+- falloff: token/sec retention as context grows
+- perplexity falloff: optional `llama-perplexity` profile over a fixed corpus
+- metric coverage: every report says which metrics were measured, estimated, or still missing
+- stability: load failures, OOM, timeout, crash, and memory allocation failures
+- usefulness: benchmark-suite and workflow evidence when configured
+
+Perplexity falloff stays `not_measured` unless you provide a real text corpus
+and context tiers. That is better than pretending speed proves quality.
+
+For stronger evidence, run a benchmark-suite plan:
 
 ```powershell
-uv run --extra dev pilotbench doctor `
-  --root "D:\models" `
-  --llama-bench "D:\llama.cpp\llama-bench.exe" `
-  --llama-cli "D:\llama.cpp\llama-cli.exe" `
-  --runs-root "runs" `
-  --strict
+agent-autobench benchmark-suite --plan benchmarks\plans\local-openai-smoke.plan.json
 ```
 
-## Common Commands
-
-List discovered models:
+Autoresearch can optimize against the same suite score:
 
 ```powershell
-uv run --extra dev pilotbench survey
+agent-autobench autoresearch --model "path\to\model.gguf" --benchmark-suite-plan benchmarks\plans\local-openai-smoke.plan.json
 ```
 
-List Qwen models only:
+For context scaling evidence, add a fixed ladder:
 
 ```powershell
-uv run --extra dev pilotbench survey --qwen-only
+agent-autobench autoresearch --model "path\to\model.gguf" --context-ladder 4096 --context-ladder 8192 --context-ladder 16384 --context-ladder 32768
 ```
 
-List Qwen 35B MTP candidates:
+Normal, deep, and overnight presets also carry context ladder targets. Quick
+Scout stays small so first runs do not unexpectedly become long tests.
+
+For quality falloff evidence, add a fixed corpus and perplexity ladder:
 
 ```powershell
-uv run --extra dev pilotbench survey --qwen-35b-only --mtp-only
+agent-autobench autoresearch --model "path\to\model.gguf" --perplexity-corpus "path\to\corpus.txt" --perplexity-context 4096 --perplexity-context 8192 --perplexity-context 16384
 ```
 
-Open the terminal model picker:
+See [docs/BENCHMARK-SUITE-PHASE.md](docs/BENCHMARK-SUITE-PHASE.md) for the scoring contract and [docs/PRODUCT-DESIGN.md](docs/PRODUCT-DESIGN.md) for the product direction.
+
+## Safety And Privacy
+
+- Runs stay local by default.
+- The app does not upload models, prompts, or receipts to a cloud service.
+- Exported server profiles bind to `127.0.0.1` unless you intentionally change them.
+- Heavy artifacts should live in ignored folders such as `_runs`, `_models`, and `_llama`.
+
+## Development
+
+Install dependencies and run tests:
 
 ```powershell
-uv run --extra dev pilotbench start
+uv sync --extra dev --extra bench
+uv run --extra dev pytest -q
 ```
 
-Open the picker for suite-backed production-readiness runs:
+Narrow checks:
 
 ```powershell
-uv run --extra dev --extra bench pilotbench start `
-  --benchmark-suite-plan benchmarks\plans\local-openai-smoke.plan.json
+uv run --extra dev python -m compileall src tests
+uv run --extra dev agent-autobench doctor
+uv run --extra dev agent-autobench results
 ```
-
-Show the current champion after a run:
-
-```powershell
-uv run --extra dev pilotbench results
-```
-
-Create the local experiment memory database:
-
-```powershell
-uv run --extra dev pilotbench init-db
-```
-
-List benchmark packs:
-
-```powershell
-uv run --extra dev pilotbench packs
-```
-
-Export a ready-to-edit champion deployment profile:
-
-```powershell
-uv run --extra dev pilotbench export-profile
-```
-
-Generated server profiles bind to `127.0.0.1` by default. Edit the generated PowerShell only if you intentionally want LAN or Tailscale access.
-
-Run one autoresearch loop:
-
-```powershell
-uv run --extra dev pilotbench autoresearch `
-  --model "G:\AI\models\path\to\model.gguf" `
-  --budget-minutes 5 `
-  --parallel-max 4
-```
-
-Run the production-readiness loop with the benchmark suite deciding the winner:
-
-```powershell
-uv run --extra dev --extra bench pilotbench autoresearch `
-  --model "G:\AI\models\path\to\model.gguf" `
-  --budget-minutes 20 `
-  --parallel-max 4 `
-  --benchmark-suite-plan benchmark-suite.plan.json
-```
-
-With `--benchmark-suite-plan`, every successful speed/TTFT attempt also runs the
-general and agentic benchmark suite. The loop then optimizes by
-`agent_bench_score`; raw tokens/sec is recorded, but it does not decide the
-winner.
-
-Run a focused Qwen 35B campaign:
-
-```powershell
-uv run --extra dev pilotbench autoresearch-all `
-  --qwen-35b-only `
-  --total-budget-minutes 30 `
-  --budget-minutes 5 `
-  --parallel-max 4 `
-  --workflow-eval
-```
-
-## Receipts
-
-Every run writes a folder under `runs\<timestamp>-<model-name>\`.
-
-Important files:
-
-- `events.jsonl`: every attempt, settings, result, telemetry snapshot, and failure class
-- `summary.md`: plain-English best result
-- `best-settings.json`: machine-readable winner for that run
-- `learning.json`: best Optuna result when learning is enabled
-- `workflow-results.json`: optional small agent-style task scores
-- `recovery.json`: latest status for resuming or debugging
-- `runs\leaderboard.md`: ranked cross-run champion board
-- `runs\champion.json`: latest machine-readable champion
-
-The receipt folder is the source of truth. If a model fails, that failure is still useful because the next run can avoid wasting time in the same zone.
-
-## Beginner Presets
-
-The TUI starts with plain-language presets:
-
-- `Quick Scout`: does it load and look fast?
-- `Normal`: good default test.
-- `Deep Pilot`: serious agent pilot test, up to 20 minutes per model.
-- `Overnight`: total campaign cap for longer research.
-
-The default useful-pilot target is: TTFT under 10 seconds, generation at least 20 tok/s, full GPU offload, no swap, stable JSON/tool behavior, and the best context that preserves quality.
-Autoresearch starts context probing at 4K, then climbs the ladder instead of
-using an implicit default context.
-
-## Current Score
-
-The current fast-loop score is deliberately simple:
-
-```text
-score =
-  generation_tokens_per_second
-+ prompt_tokens_per_second / 100
-+ context_bonus
-+ workflow_score
-+ serving_tokens_per_second / 10
-- cold_serving_ttft_ms / 1000
-```
-
-Failed attempts receive a large negative score. That keeps the optimizer honest: a flashy setting that crashes is not a champion.
-When real serving TTFT is missing, the score pays a 10-second TTFT penalty. That
-keeps old speed-only receipts from looking as strong as a measured local serving
-run.
-
-The serving probe now records both first-request and warmed-up latency:
-
-- `serving_ttft_ms`: cold first request after the server is ready
-- `serving_warm_ttft_ms`: average of later requests in the same server session
-- `serving_warmup_penalty_ms`: cold TTFT minus warm TTFT
-- `serving_server_ready_ms`: time for `llama-server` to become healthy after launch
-- `serving_cold_start_to_first_token_ms`: server launch plus first-token latency
-
-The serving probe always uses the same ordered agent question suite by context
-tier: 4K asks question 1, 8K asks questions 1-2, 16K asks questions 1-3, and
-32K+ asks all 5. Each question writes one row to `runs\serving-metrics.tsv` so
-cold TTFT, warm TTFT, token cache behavior, and serving speed can be charted
-over time.
-
-## Project Status
-
-Working now:
-
-- GGUF discovery and filtering
-- heaviest-to-lightest model sorting with on-disk GB
-- Qwen / parameter / quant / MTP name parsing
-- llama.cpp benchmark command planning
-- local autoresearch loop with budget and attempt limits
-- beginner presets for quick/normal/deep/overnight runs
-- benchmark pack registry with built-in pack metadata
-- context-limit ladder and boundary refinement planner
-- persistent Optuna learning in SQLite
-- experiment-memory SQLite schema at `db\agentpilot.sqlite`
-- telemetry snapshots, GPU power, swap, disk counters, and failure classification
-- Markdown and JSON receipts
-- Karpathy-style append-only autoresearch ledger at `runs\autoresearch-results.tsv`
-- per-attempt Karpathy-style decision ledger at `runs\autoresearch-attempts.tsv`,
-  including current git branch/commit metadata
-- per-question serving metrics ledger at `runs\serving-metrics.tsv`
-- HTML results page at `runs\results.html`
-- Textual model picker with dark styling, preset panel, and run dashboard
-- latest champion reporting through `agent-autobench results`
-- deployment profile export through `agent-autobench export-profile`
-- small workflow evaluation path
-- path readiness checks through `doctor`
-- real `llama-server` streaming TTFT probe through `serve-probe` and autoresearch
-- executable benchmark-suite wrapper through `agent-autobench benchmark-suite`
-- bundled benchmark-suite plans under `benchmarks\plans\`
-- installed benchmark harness base: `inspect-ai` in the `bench` extra, with
-  EleutherAI `lm-eval` invoked through `uvx --from lm-eval` so its transitive
-  cache dependencies stay out of the committed project lockfile
-- isolated BFCL CLI venv at `.venv-bfcl` for Python 3.11, verified with
-  `.venv-bfcl\Scripts\bfcl.exe --help`
-- autoresearch can consume a `--benchmark-suite-plan` and make
-  keep/discard/crash decisions over `agent_bench_score`
-- beginner startup through `START-HERE.bat`, `agent-autobench first-run`, and `agent-autobench --start`
-- optional command shim through `INSTALL-COMMAND.bat`
-- unit tests and a GitHub Actions CI workflow
-
-Required before "production-ready":
-
-- `docs\BENCHMARK-SUITE-PHASE.md` is now the required missing bench phase.
-- Phase 0 system viability is partly implemented: explicit 4K first, then 8K,
-  16K, 32K+, with fixed serving questions, TTFT, TPS, warmup penalty, cache
-  evidence, and `runs\serving-metrics.tsv`.
-- Phase 1 now has a command-based wrapper for general-purpose benchmark evidence
-  through existing harnesses such as EleutherAI `lm-evaluation-harness`, writing
-  `runs\benchmark-suite.tsv`.
-- Phase 2 now has a command-based wrapper for agentic benchmark evidence through
-  Inspect AI and future BFCL, SWE-bench, tau2-bench/tau3-bench, and repo-local
-  deterministic agent tasks, writing `runs\agentic-suite.tsv`.
-- Phase 3 now makes the autoresearch loop use Karpathy-style keep/discard/crash
-  decisions over a comparable `agent_bench_score` when
-  `--benchmark-suite-plan` is provided.
-- A run without `--benchmark-suite-plan` is not production-ready. It remains
-  system-viability evidence with labels such as `slow`, `speed_only`,
-  `serving_measured`, `context_unproven`, `workflow_unproven`,
-  `workflow_weak`, and `workflow_smoke`, not production-ready.
-
-Current local smoke receipt:
-
-- `runs\20260526-185157-benchmark-suite` is the first corrected live local
-  suite receipt after the scorer fix. It failed honestly with `0.000000`, so it
-  is not production-ready evidence.
-
-Planned next:
-
-- improve the model prompt/settings or model choice until
-  `benchmarks\plans\local-openai-smoke.plan.json` produces a passing live
-  receipt
-- install and verify heavier SWE-bench / tau2-bench dependencies before treating
-  `benchmarks\plans\external-agentic-heavy.plan.json` as more than a
-  receipt-producing integration plan
-- richer OpenAI-compatible `llama-server` endpoint compatibility tests
-- richer final report rendering inside the TUI itself
-- paired KV-cache quality comparisons
-- MTP efficiency receipts
-- long-context synthetic receipt, ledger, and needle grids
-- BFCL-style tool-call task packs
-- champion profile export as ready-to-run PowerShell scripts
-
-## References
-
-- [llama.cpp server docs](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md)
-- [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness)
-- [RULER long-context paper](https://arxiv.org/abs/2404.06654)
-- [Berkeley Function Calling Leaderboard](https://github.com/ShishirPatil/gorilla/tree/main/berkeley-function-call-leaderboard)
-- [Hermes Agent providers](https://hermes-agent.nousresearch.com/docs/integrations/providers)
-- [Karpathy autoresearch](https://github.com/karpathy/autoresearch)
 
 ## License
 
-MIT. See `LICENSE`.
+MIT. See [LICENSE](LICENSE).
 
 ## Tiny Glossary
 
 - `apb`: short for Agent Pilot Autobench, the quick command alias.
-
-
-
-
-~ _pilotBENCHY_
+- `pilotBENCHY`: the friendly TUI/workflow name for the benchmark cockpit.

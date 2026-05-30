@@ -4,7 +4,7 @@ import sys
 
 from typer.testing import CliRunner
 
-from gguf_limit_bench.autoresearch import AttemptResult
+from gguf_limit_bench.autoresearch import AttemptResult, PerplexityResult
 from gguf_limit_bench.cli import app
 from gguf_limit_bench.config import (
     BenchmarkSettings,
@@ -54,6 +54,7 @@ def test_autoresearch_command_writes_receipts(tmp_path, monkeypatch):
             "1",
             "--max-attempts",
             "1",
+            "--no-workflow-eval",
         ],
     )
 
@@ -64,6 +65,104 @@ def test_autoresearch_command_writes_receipts(tmp_path, monkeypatch):
     assert len(run_dirs) == 1
     assert json.loads((run_dirs[0] / "best-settings.json").read_text(encoding="utf-8"))
     assert (tmp_path / "runs" / "learning" / "optuna.sqlite3").exists()
+
+
+def test_autoresearch_command_accepts_context_ladder(tmp_path, monkeypatch):
+    monkeypatch.setattr("gguf_limit_bench.cli.LlamaBenchAttemptRunner", FakeAttemptRunner)
+    model = tmp_path / "Qwen3-Test-Q4_K_M.gguf"
+    model.write_bytes(b"fake")
+
+    result = runner.invoke(
+        app,
+        [
+            "autoresearch",
+            "--model",
+            str(model),
+            "--runs-root",
+            str(tmp_path / "runs"),
+            "--budget-minutes",
+            "1",
+            "--max-attempts",
+            "1",
+            "--no-learning",
+            "--no-ttft-probe",
+            "--no-workflow-eval",
+            "--context-ladder",
+            "4096",
+            "--context-ladder",
+            "8192",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    run_dirs = [
+        path for path in (tmp_path / "runs").iterdir() if path.is_dir() and path.name != "learning"
+    ]
+    assert (
+        json.loads((run_dirs[0] / "context-profile.json").read_text(encoding="utf-8"))["rows"][1][
+            "context_size"
+        ]
+        == 8192
+    )
+
+
+def test_autoresearch_command_accepts_perplexity_profile(tmp_path, monkeypatch):
+    monkeypatch.setattr("gguf_limit_bench.cli.LlamaBenchAttemptRunner", FakeAttemptRunner)
+
+    class FakePerplexityRunner:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        def __call__(self, settings):
+            return PerplexityResult(
+                ok=True,
+                perplexity=6.0 + settings.context_size / 4096,
+                stdout="Final estimate: PPL = 7.0",
+                stderr="",
+                returncode=0,
+            )
+
+    monkeypatch.setattr("gguf_limit_bench.cli.LlamaPerplexityRunner", FakePerplexityRunner)
+    model = tmp_path / "Qwen3-Test-Q4_K_M.gguf"
+    model.write_bytes(b"fake")
+    corpus = tmp_path / "corpus.txt"
+    corpus.write_text("hello local benchmark world\n", encoding="utf-8")
+    llama_perplexity = tmp_path / "llama-perplexity.exe"
+    llama_perplexity.write_text("fake", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "autoresearch",
+            "--model",
+            str(model),
+            "--runs-root",
+            str(tmp_path / "runs"),
+            "--budget-minutes",
+            "1",
+            "--max-attempts",
+            "1",
+            "--no-learning",
+            "--no-ttft-probe",
+            "--no-workflow-eval",
+            "--llama-perplexity",
+            str(llama_perplexity),
+            "--perplexity-corpus",
+            str(corpus),
+            "--perplexity-context",
+            "4096",
+            "--perplexity-context",
+            "8192",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    run_dirs = [
+        path for path in (tmp_path / "runs").iterdir() if path.is_dir() and path.name != "learning"
+    ]
+    profile = json.loads((run_dirs[0] / "perplexity-profile.json").read_text(encoding="utf-8"))
+    assert [row["context_size"] for row in profile["rows"]] == [4096, 8192]
+    assert "Perplexity profile" in result.output
 
 
 def test_autoresearch_command_accepts_benchmark_suite_plan(tmp_path, monkeypatch):
@@ -117,6 +216,7 @@ def test_autoresearch_command_accepts_benchmark_suite_plan(tmp_path, monkeypatch
             "1",
             "--no-learning",
             "--no-ttft-probe",
+            "--no-workflow-eval",
             "--benchmark-suite-plan",
             str(plan_path),
         ],
@@ -157,6 +257,7 @@ def test_autoresearch_all_qwen_only_skips_non_qwen_models(tmp_path, monkeypatch)
             "1",
             "--max-attempts",
             "1",
+            "--no-workflow-eval",
         ],
     )
 
@@ -212,9 +313,8 @@ def test_autoresearch_all_qwen_35b_only_skips_27b_models(tmp_path, monkeypatch):
     )
 
 
-def test_default_model_roots_include_lm_studio_folder():
-    assert Path("G:/AI/models") in DEFAULT_MODEL_ROOTS
-    assert Path("G:/AI/models/LM_Studio-gguf") in DEFAULT_MODEL_ROOTS
+def test_default_model_roots_are_repo_relative():
+    assert DEFAULT_MODEL_ROOTS == (Path("_models"),)
 
 
 def test_autoresearch_all_honors_total_budget_and_finish_early(tmp_path, monkeypatch):
@@ -272,6 +372,41 @@ def test_start_command_check_only_prints_beginner_next_step(tmp_path, monkeypatc
     assert result.exit_code == 0
     assert "Everything looks ready" in result.output
     assert "Remove --check-only to open the picker" in result.output
+
+
+def test_first_run_option_sets_up_then_starts_from_config(tmp_path, monkeypatch):
+    calls: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        "gguf_limit_bench.cli.load_config",
+        lambda: PilotbenchConfig(
+            paths=PathSettings(
+                model_roots=(tmp_path,),
+                llama_bench=tmp_path / "llama-bench.exe",
+                llama_cli=tmp_path / "llama-cli.exe",
+                llama_server=tmp_path / "llama-server.exe",
+                llama_perplexity=tmp_path / "llama-perplexity.exe",
+                runs_root=tmp_path / "_runs",
+            ),
+            benchmark=BenchmarkSettings(parallel_max=2, default_preset="deep"),
+        ),
+    )
+    monkeypatch.setattr(
+        "gguf_limit_bench.cli._setup_app",
+        lambda **kwargs: calls.append(("setup", kwargs)),
+    )
+    monkeypatch.setattr(
+        "gguf_limit_bench.cli._start_app",
+        lambda **kwargs: calls.append(("start", kwargs)),
+    )
+
+    result = runner.invoke(app, ["--first-run"])
+
+    assert result.exit_code == 0
+    assert [name for name, _ in calls] == ["setup", "start"]
+    assert calls[0][1]["install_command"] is True
+    assert calls[0][1]["add_to_path"] is True
+    assert calls[1][1]["preset"] == "deep"
+    assert calls[1][1]["parallel_max"] == 2
 
 
 def test_start_command_opens_tui_after_ready_check(tmp_path, monkeypatch):
@@ -477,7 +612,7 @@ def test_global_start_flag_opens_tui(monkeypatch):
                 DoctorCheck(
                     name="model root",
                     status="ok",
-                    path="G:/AI/models",
+                    path="_models",
                     detail="directory exists",
                 )
             ]
@@ -498,7 +633,7 @@ def test_global_start_flag_opens_tui(monkeypatch):
     result = runner.invoke(app, ["--start"])
 
     assert result.exit_code == 0
-    assert opened_roots == [Path("G:/AI/models")]
+    assert opened_roots == [Path("_models")]
 
 
 def test_first_run_command_checks_paths_and_prepares_local_state(tmp_path, monkeypatch):
@@ -521,7 +656,7 @@ def test_first_run_command_checks_paths_and_prepares_local_state(tmp_path, monke
     result = runner.invoke(
         app,
         [
-            "first-run",
+            "setup",
             "--root",
             str(tmp_path),
             "--db-path",
@@ -531,6 +666,7 @@ def test_first_run_command_checks_paths_and_prepares_local_state(tmp_path, monke
             "--shim-dir",
             str(tmp_path / "bin"),
             "--skip-env-sync",
+            "--no-add-to-path",
         ],
     )
 
@@ -539,12 +675,12 @@ def test_first_run_command_checks_paths_and_prepares_local_state(tmp_path, monke
     assert (runs_root / "leaderboard.md").exists()
     assert (tmp_path / "bin" / "agent-autobench.bat").exists()
     assert (tmp_path / "bin" / "apb.bat").exists()
-    assert "First-time installer" in result.output
-    assert "First-time setup is ready" in result.output
+    assert "Setup wizard" in result.output
+    assert "Setup is ready" in result.output
     assert "agent-autobench --start" in result.output
 
 
-def test_first_run_command_uses_resolved_runs_root_when_not_overridden(tmp_path, monkeypatch):
+def test_setup_command_uses_resolved_runs_root_when_not_overridden(tmp_path, monkeypatch):
     expected_runs_root = tmp_path / "resolved-runs"
 
     monkeypatch.setattr(
@@ -577,12 +713,13 @@ def test_first_run_command_uses_resolved_runs_root_when_not_overridden(tmp_path,
     result = runner.invoke(
         app,
         [
-            "first-run",
+            "setup",
             "--db-path",
             str(tmp_path / "db.sqlite"),
             "--shim-dir",
             str(tmp_path / "bin"),
             "--skip-env-sync",
+            "--no-add-to-path",
             "--json-out",
         ],
     )
@@ -592,7 +729,7 @@ def test_first_run_command_uses_resolved_runs_root_when_not_overridden(tmp_path,
     assert json.loads(result.output)["runs_root"] == str(expected_runs_root)
 
 
-def test_first_run_json_out_is_agent_friendly(tmp_path, monkeypatch):
+def test_setup_json_out_is_agent_friendly(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "gguf_limit_bench.cli.build_doctor_report",
         lambda **kwargs: DoctorReport(
@@ -610,7 +747,7 @@ def test_first_run_json_out_is_agent_friendly(tmp_path, monkeypatch):
     result = runner.invoke(
         app,
         [
-            "first-run",
+            "setup",
             "--root",
             str(tmp_path),
             "--db-path",
@@ -620,6 +757,7 @@ def test_first_run_json_out_is_agent_friendly(tmp_path, monkeypatch):
             "--shim-dir",
             str(tmp_path / "bin"),
             "--skip-env-sync",
+            "--no-add-to-path",
             "--json-out",
         ],
     )
@@ -661,6 +799,71 @@ def test_results_command_prints_latest_champion(tmp_path):
     assert (tmp_path / "runs" / "champion.json").exists()
     assert (tmp_path / "runs" / "results.html").exists()
     assert "HTML report" in result.output
+
+
+def test_results_command_can_open_browser_report(tmp_path, monkeypatch):
+    run = tmp_path / "runs" / "20260526-test"
+    run.mkdir(parents=True)
+    (run / "best-settings.json").write_text(
+        json.dumps(
+            {
+                "model": "G:/AI/models/Winner.gguf",
+                "settings": {"context_size": 0, "parallel": 1, "gpu_layers": 99},
+                "result": {
+                    "generation_tokens_per_second": 42.0,
+                    "prompt_tokens_per_second": 900.0,
+                    "failure": "unknown",
+                },
+                "score": 51.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    opened: list[str] = []
+    monkeypatch.setattr("gguf_limit_bench.cli.webbrowser.open", lambda url: opened.append(url))
+
+    result = runner.invoke(
+        app,
+        ["results", "--runs-root", str(tmp_path / "runs"), "--open-browser"],
+    )
+
+    assert result.exit_code == 0
+    assert opened == [(tmp_path / "runs" / "results.html").resolve().as_uri()]
+    assert "Opened browser report" in result.output
+
+
+def test_results_command_can_delegate_to_local_report_server(tmp_path, monkeypatch):
+    run = tmp_path / "runs" / "20260526-test"
+    run.mkdir(parents=True)
+    (run / "best-settings.json").write_text(
+        json.dumps(
+            {
+                "model": "G:/AI/models/Winner.gguf",
+                "settings": {"context_size": 0, "parallel": 1, "gpu_layers": 99},
+                "result": {
+                    "generation_tokens_per_second": 42.0,
+                    "prompt_tokens_per_second": 900.0,
+                    "failure": "unknown",
+                },
+                "score": 51.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    served: list[tuple[Path, int]] = []
+    monkeypatch.setattr(
+        "gguf_limit_bench.cli._serve_report_directory",
+        lambda directory, port: served.append((directory, port)),
+    )
+
+    result = runner.invoke(
+        app,
+        ["results", "--runs-root", str(tmp_path / "runs"), "--serve", "--port", "8765"],
+    )
+
+    assert result.exit_code == 0
+    assert served == [((tmp_path / "runs").resolve(), 8765)]
+    assert "http://127.0.0.1:8765/results.html" in result.output
 
 
 def test_serve_probe_command_prints_real_serving_metrics(tmp_path, monkeypatch):

@@ -7,7 +7,7 @@ import shutil
 import subprocess
 
 
-DEFAULT_SHIM_DIR = Path("G:/_codex_global/bin")
+DEFAULT_SHIM_DIR = Path("_bin")
 
 
 @dataclass(frozen=True)
@@ -46,15 +46,16 @@ def sync_project_environment(repo_root: Path, skip: bool = False) -> InstallStep
             detail="environment sync was skipped by option",
         )
 
+    if local_agent.exists():
+        return InstallStep(
+            name="python environment",
+            status="ok",
+            path=str(local_agent),
+            detail="local command already exists",
+        )
+
     uv = shutil.which("uv")
     if uv is None:
-        if local_agent.exists():
-            return InstallStep(
-                name="python environment",
-                status="ok",
-                path=str(local_agent),
-                detail="local command already exists; uv was not needed",
-            )
         return InstallStep(
             name="python environment",
             status="missing",
@@ -104,7 +105,12 @@ def sync_project_environment(repo_root: Path, skip: bool = False) -> InstallStep
     )
 
 
+def resolved_shim_dir(repo_root: Path, shim_dir: Path = DEFAULT_SHIM_DIR) -> Path:
+    return shim_dir if shim_dir.is_absolute() else repo_root / shim_dir
+
+
 def install_command_shims(repo_root: Path, shim_dir: Path = DEFAULT_SHIM_DIR) -> list[InstallStep]:
+    shim_dir = resolved_shim_dir(repo_root, shim_dir)
     steps: list[InstallStep] = []
     try:
         shim_dir.mkdir(parents=True, exist_ok=True)

@@ -58,12 +58,14 @@ def test_workflow_eval_receipts_are_small_and_deterministic(tmp_path):
         for line in (receipt.path / "events.jsonl").read_text(encoding="utf-8").splitlines()
     ]
 
-    assert set(path.name for path in receipt.path.iterdir()) == {
+    receipt_files = set(path.name for path in receipt.path.iterdir())
+    assert {
         "best-settings.json",
         "events.jsonl",
         "recovery.json",
         "summary.md",
-    }
+    }.issubset(receipt_files)
+    assert {"itemized-report.md", "report.html", "report.json"}.issubset(receipt_files)
     assert Path(best["model"]) == Path("G:/AI/models/Qwen3-Agent-Q4_K_M.gguf")
     assert best["settings"] == {
         "context_size": 4096,
@@ -86,7 +88,7 @@ def test_workflow_eval_receipts_are_small_and_deterministic(tmp_path):
     assert (receipt.path / "best-settings.json").stat().st_size < 30_000
 
 
-def test_default_g_model_roots_include_lm_studio_gguf(monkeypatch, tmp_path):
+def test_default_model_root_is_repo_relative(monkeypatch, tmp_path):
     seen_roots = []
 
     def fake_discover(roots):
@@ -98,7 +100,7 @@ def test_default_g_model_roots_include_lm_studio_gguf(monkeypatch, tmp_path):
     result = runner.invoke(app, ["survey", "--json-out"])
 
     assert result.exit_code == 0
-    assert seen_roots == [Path("G:/AI/models"), Path("G:/AI/models/LM_Studio-gguf")]
+    assert seen_roots == [Path("_models")]
 
 
 def test_bulk_autoresearch_supports_total_budget_and_finish_early(tmp_path, monkeypatch):
@@ -121,6 +123,7 @@ def test_bulk_autoresearch_supports_total_budget_and_finish_early(tmp_path, monk
             "--max-attempts",
             "1",
             "--no-learning",
+            "--no-workflow-eval",
         ],
     )
 

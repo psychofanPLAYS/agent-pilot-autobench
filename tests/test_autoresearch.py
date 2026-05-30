@@ -7,8 +7,11 @@ from gguf_limit_bench.autoresearch import (
     AttemptResult,
     AutoresearchLoop,
     AutoresearchSettings,
+    PerplexityResult,
     build_autoresearch_llama_bench_command,
+    build_llama_perplexity_command,
     parse_llama_bench_jsonl,
+    parse_llama_perplexity_output,
 )
 from gguf_limit_bench.benchmark_suite import BenchmarkSuitePlan
 
@@ -56,6 +59,30 @@ def test_autoresearch_llama_bench_command_uses_low_burn_probe():
     assert "-pg" in command
     assert "128,32" in command
     assert "--no-warmup" in command
+
+
+def test_llama_perplexity_command_uses_model_corpus_and_context():
+    command = build_llama_perplexity_command(
+        llama_perplexity=Path("llama-perplexity.exe"),
+        model=Path("model.gguf"),
+        corpus=Path("corpus.txt"),
+        settings=AutoresearchSettings(context_size=8192, batch_size=1024),
+    )
+
+    assert command[:3] == ["llama-perplexity.exe", "--model", "model.gguf"]
+    assert ["--file", "corpus.txt"] == command[3:5]
+    assert ["--ctx-size", "8192"] in [command[index : index + 2] for index in range(len(command))]
+
+
+def test_parse_llama_perplexity_output_extracts_final_ppl():
+    result = parse_llama_perplexity_output(
+        stdout="partial\nFinal estimate: PPL = 6.1234 +/- 0.02",
+        stderr="",
+        returncode=0,
+    )
+
+    assert result.ok is True
+    assert result.perplexity == 6.1234
 
 
 def test_autoresearch_loop_keeps_only_better_setting_and_writes_receipts(tmp_path):
@@ -107,6 +134,15 @@ def test_autoresearch_loop_keeps_only_better_setting_and_writes_receipts(tmp_pat
     assert best["result"]["generation_tokens_per_second"] == 42.0
     assert [event["type"] for event in events].count("autoresearch_attempt_finished") == 3
     assert (receipt.path / "summary.md").exists()
+    assert (receipt.path / "itemized-report.md").exists()
+    assert (receipt.path / "report.html").exists()
+    assert (receipt.path / "report.json").exists()
+    report = json.loads((receipt.path / "report.json").read_text(encoding="utf-8"))
+    metrics = {metric["metric"]: metric for metric in report["metric_statuses"]}
+    assert metrics["generation_tps"]["status"] == "measured"
+    assert metrics["max_total_usable_context"]["status"] == "estimated"
+    assert metrics["tps_falloff_with_context"]["status"] == "measured"
+    assert metrics["perplexity_falloff"]["status"] == "not_measured"
     assert "Plain-English Takeaway" in (receipt.path / "summary.md").read_text(encoding="utf-8")
     assert (receipt.path / "recovery.json").exists()
     ledger = tmp_path / "autoresearch-results.tsv"
@@ -623,3 +659,98 @@ def test_autoresearch_loop_uses_learning_suggestions_and_reports_scores(tmp_path
     assert learner.reported[0][0].trial_id == 123
     assert learner.reported[0][1].generation_tokens_per_second == 64.0
     assert best["learner_best"]["score"] == 88.0
+
+
+def test_autoresearch_loop_writes_context_profile_from_fixed_ladder(tmp_path):
+    seen: list[AutoresearchSettings] = []
+
+    def fake_runner(settings: AutoresearchSettings) -> AttemptResult:
+        seen.append(settings)
+        speed_by_context = {4096: 90.0, 8192: 72.0, 16384: 45.0}
+        return AttemptResult(
+            ok=True,
+            generation_tokens_per_second=speed_by_context[settings.context_size],
+            prompt_tokens_per_second=900.0,
+            ttft_ms=None,
+            context_size=settings.context_size,
+            failure="none",
+            stdout="",
+            stderr="",
+            returncode=0,
+            serving_ttft_ms=200.0 + settings.context_size / 4096,
+            serving_warm_ttft_ms=100.0 + settings.context_size / 4096,
+        )
+
+    loop = AutoresearchLoop(
+        model=Path("G:/AI/models/Qwen3-Test-Q4_K_M.gguf"),
+        runs_root=tmp_path,
+        attempt_runner=fake_runner,
+        budget_seconds=60,
+        max_attempts=1,
+        context_ladder=(4096, 8192, 16384),
+    )
+
+    receipt = loop.run()
+    profile = json.loads((receipt.path / "context-profile.json").read_text(encoding="utf-8"))
+    report = json.loads((receipt.path / "report.json").read_text(encoding="utf-8"))
+    metrics = {metric["metric"]: metric for metric in report["metric_statuses"]}
+
+    assert [settings.context_size for settings in seen] == [4096, 4096, 8192, 16384]
+    assert [row["context_size"] for row in profile["rows"]] == [4096, 8192, 16384]
+    assert profile["rows"][0]["tps_retention_vs_baseline"] == 1.0
+    assert profile["rows"][1]["tps_retention_vs_baseline"] == 0.8
+    assert profile["rows"][2]["tps_retention_vs_baseline"] == 0.5
+    assert "context_size" in (receipt.path / "context-profile.tsv").read_text(encoding="utf-8")
+    assert "Context Profile" in (receipt.path / "context-profile.md").read_text(encoding="utf-8")
+    assert metrics["tps_falloff_with_context"]["status"] == "measured"
+
+
+def test_autoresearch_loop_writes_perplexity_profile_when_runner_is_provided(tmp_path):
+    seen_contexts: list[int] = []
+
+    def fake_attempt_runner(settings: AutoresearchSettings) -> AttemptResult:
+        return AttemptResult(
+            ok=True,
+            generation_tokens_per_second=80.0,
+            prompt_tokens_per_second=900.0,
+            ttft_ms=None,
+            context_size=settings.context_size,
+            failure="none",
+            stdout="",
+            stderr="",
+            returncode=0,
+        )
+
+    def fake_perplexity_runner(settings: AutoresearchSettings) -> PerplexityResult:
+        seen_contexts.append(settings.context_size)
+        return PerplexityResult(
+            ok=True,
+            perplexity={4096: 6.0, 8192: 6.3, 16384: 7.2}[settings.context_size],
+            stderr="",
+            stdout="Final estimate: PPL = 6.0",
+            returncode=0,
+        )
+
+    loop = AutoresearchLoop(
+        model=Path("G:/AI/models/Qwen3-Test-Q4_K_M.gguf"),
+        runs_root=tmp_path,
+        attempt_runner=fake_attempt_runner,
+        budget_seconds=60,
+        max_attempts=1,
+        perplexity_runner=fake_perplexity_runner,
+        perplexity_contexts=(4096, 8192, 16384),
+    )
+
+    receipt = loop.run()
+    profile = json.loads((receipt.path / "perplexity-profile.json").read_text(encoding="utf-8"))
+    report = json.loads((receipt.path / "report.json").read_text(encoding="utf-8"))
+    metrics = {metric["metric"]: metric for metric in report["metric_statuses"]}
+
+    assert seen_contexts == [4096, 8192, 16384]
+    assert [row["perplexity"] for row in profile["rows"]] == [6.0, 6.3, 7.2]
+    assert profile["rows"][1]["perplexity_delta_vs_baseline"] == 0.3
+    assert "perplexity" in (receipt.path / "perplexity-profile.tsv").read_text(encoding="utf-8")
+    assert "Perplexity Profile" in (receipt.path / "perplexity-profile.md").read_text(
+        encoding="utf-8"
+    )
+    assert metrics["perplexity_falloff"]["status"] == "measured"

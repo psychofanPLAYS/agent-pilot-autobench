@@ -18,11 +18,13 @@ def test_readme_uses_public_command_name():
     readme = Path("README.md").read_text(encoding="utf-8")
 
     assert "# Agent Pilot Autobench" in readme
-    assert "agent-autobench first-run" in readme
+    assert "agent-autobench --first-run" in readme
+    assert "apb --start" in readme
     assert "PilotBENCHY" not in readme
     assert "Hero command" not in readme
-    assert "apb first-run" in readme
-    assert "pilotbench --start" in readme
+    assert "apb" in readme
+    assert "pilotbench" in readme
+    assert readme.count("agent-autobench --first-run") <= 2
     assert "Legacy command" not in readme
     assert "`gguf-limit-bench`" not in readme
     assert "LlamaLab" not in readme
@@ -43,6 +45,7 @@ def test_docs_use_only_new_public_command_name():
     assert "Hero command" not in docs
     assert "gguf-limit-bench" not in docs
     assert "Legacy command" not in docs
+    assert "first-run" in docs.lower()
 
 
 def test_product_design_doc_is_linked_from_readme():

@@ -37,6 +37,7 @@ def build_doctor_report(
     llama_cli: Path,
     runs_root: Path,
     llama_server: Path | None = None,
+    llama_perplexity: Path | None = None,
 ) -> DoctorReport:
     checks: list[DoctorCheck] = []
     for root in model_roots:
@@ -45,11 +46,20 @@ def build_doctor_report(
     checks.append(_path_check(name="llama-cli", path=llama_cli, expected="file"))
     if llama_server is not None:
         checks.append(_path_check(name="llama-server", path=llama_server, expected="file"))
+    if llama_perplexity is not None:
+        checks.append(
+            _path_check(
+                name="llama-perplexity",
+                path=llama_perplexity,
+                expected="file",
+                required=False,
+            )
+        )
     checks.append(_runs_root_check(runs_root))
     return DoctorReport(checks=checks)
 
 
-def _path_check(name: str, path: Path, expected: str) -> DoctorCheck:
+def _path_check(name: str, path: Path, expected: str, required: bool = True) -> DoctorCheck:
     exists = path.exists()
     if expected == "directory":
         ok = exists and path.is_dir()
@@ -62,6 +72,7 @@ def _path_check(name: str, path: Path, expected: str) -> DoctorCheck:
         status="ok" if ok else "missing",
         path=str(path),
         detail=detail,
+        required=required,
     )
 
 

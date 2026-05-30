@@ -33,7 +33,7 @@ Autobench answers:
 
 ### 1. Readiness Wizard
 
-The first-run flow should become a proper readiness wizard that ends in either a
+The setup flow should become a proper readiness wizard that ends in either a
 green start state or a clear fix list.
 
 Expected behavior:
@@ -42,7 +42,7 @@ Expected behavior:
   `llama-server`, writable receipt folders, and GPU telemetry access.
 - Explain each failure in plain language.
 - Offer copy-paste commands for the next step.
-- Write `runs/readiness.json` so future agents can inspect setup state.
+- Write `_runs/readiness.json` so future agents can inspect setup state.
 
 Success measure:
 
@@ -112,7 +112,7 @@ Expected behavior:
 
 Success measure:
 
-- A reviewer can understand the run history from `runs/results.html` alone.
+- A reviewer can understand the run history from `_runs/results.html` alone.
 
 ### 6. Benchmark Pack Contract
 
@@ -133,7 +133,7 @@ Success measure:
 
 ## Suggested Roadmap
 
-1. **Stabilize first-run and reporting**
+1. **Stabilize setup and reporting**
    - Readiness wizard receipt.
    - Clear setup errors.
    - Static HTML report improvements.
@@ -165,7 +165,7 @@ Success measure:
 
 Use **Agent Pilot Autobench** as the public product name. Keep copy specific:
 
-- "first-run command" for the beginner entry point
+- "setup command" for the beginner entry point
 - "measured winner" for the best result from receipts
 - "promoted champion" for an operator-approved deployment candidate
 - "receipt" for the evidence folder that proves what happened

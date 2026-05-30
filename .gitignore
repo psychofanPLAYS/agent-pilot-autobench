@@ -4,7 +4,13 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 /package-lock.json
+/_bin/
+/_db/
+/_runs/*
+!_runs/.gitkeep
 /db/
-runs/*
+/runs/*
 !runs/.gitkeep
+/_models/
+/_llama/
 *.pyc

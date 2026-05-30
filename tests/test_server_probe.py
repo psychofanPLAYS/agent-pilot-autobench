@@ -4,9 +4,11 @@ from pathlib import Path
 from gguf_limit_bench.autoresearch import AutoresearchSettings
 from gguf_limit_bench.server_probe import (
     DEFAULT_AGENT_TTFT_QUESTIONS,
+    ServingProbeResult,
     build_llama_server_command,
     iter_llama_completion_stream_events,
     measure_llama_completion_stream_ttft,
+    _combine_measurements,
     serving_prompts_for_context,
 )
 
@@ -152,3 +154,26 @@ def test_custom_prompt_is_repeated_only_when_explicitly_supplied():
 
     assert [prompt.id for prompt in prompts] == ["custom_prompt"] * 3
     assert [prompt.prompt for prompt in prompts] == ["fallback"] * 3
+
+
+def test_combined_serving_tps_ignores_tiny_degenerate_samples():
+    good = ServingProbeResult(
+        ok=True,
+        ttft_ms=100.0,
+        tokens_per_second=120.0,
+        output_chars=200,
+        generated_tokens=64,
+        failure="none",
+    )
+    bogus = ServingProbeResult(
+        ok=True,
+        ttft_ms=90.0,
+        tokens_per_second=1_000_000.0,
+        output_chars=0,
+        generated_tokens=1,
+        failure="none",
+    )
+
+    result = _combine_measurements([good, bogus])
+
+    assert result.tokens_per_second == 120.0

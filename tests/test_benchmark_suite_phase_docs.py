@@ -10,10 +10,10 @@ def test_required_benchmark_suite_phase_is_documented():
         "BFCL",
         "SWE-bench",
         "tau-bench",
-        "runs\\benchmark-suite.tsv",
-        "runs\\agentic-suite.tsv",
-        "runs\\agent-bench-score.tsv",
-        "runs\\autoresearch-attempts.tsv",
+        "_runs\\benchmark-suite.tsv",
+        "_runs\\agentic-suite.tsv",
+        "_runs\\agent-bench-score.tsv",
+        "_runs\\autoresearch-attempts.tsv",
         "inspect-ai",
         "keep",
         "discard",
@@ -37,9 +37,9 @@ def test_public_docs_block_production_ready_claim_until_suite_exists():
     )
 
     assert "docs\\BENCHMARK-SUITE-PHASE.md" in docs
-    assert "runs\\benchmark-suite.tsv" in docs
-    assert "runs\\agentic-suite.tsv" in docs
-    assert "runs\\agent-bench-score.tsv" in docs
+    assert "_runs\\benchmark-suite.tsv" in docs
+    assert "_runs\\agentic-suite.tsv" in docs
+    assert "_runs\\agent-bench-score.tsv" in docs
     assert "not production-ready" in docs or "before production-ready" in docs
     assert "keep/discard/crash" in docs
 

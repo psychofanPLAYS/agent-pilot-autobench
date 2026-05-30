@@ -47,13 +47,13 @@ For GGUF agent-pilot research, the stable harness is:
 Generated evidence belongs under:
 
 ```text
-runs\
+_runs\
 ```
 
 Local experiment data belongs under:
 
 ```text
-db\
+_db\
 ```
 
 Do not delete benchmark runs, local databases, or model files without explicit
@@ -82,7 +82,7 @@ status this Phase 0 loop may emit.
 Each run should append a tab-separated row to:
 
 ```text
-runs\autoresearch-results.tsv
+_runs\autoresearch-results.tsv
 ```
 
 Columns:
@@ -97,7 +97,7 @@ append-only, easy to grep, and not a replacement for full JSON receipts.
 Per-question serving metrics append to:
 
 ```text
-runs\serving-metrics.tsv
+_runs\serving-metrics.tsv
 ```
 
 That ledger is for charts over time. It writes one row per serving question with
@@ -106,7 +106,7 @@ stable `question_index` and `question_id` values.
 Per-attempt keep/discard/crash decisions append to:
 
 ```text
-runs\autoresearch-attempts.tsv
+_runs\autoresearch-attempts.tsv
 ```
 
 This ledger is closer to Karpathy's `results.tsv` than the final best-settings
@@ -114,20 +114,32 @@ receipt. It writes one row for every attempted setting with `decision` equal to
 `keep`, `discard`, or `crash`, plus the evidence status, comparable score,
 git branch/commit metadata, settings JSON, and receipt path.
 
+The run-level leaderboard is not the whole story. The model-level comparison
+files group repeated runs by model path so the app can answer the hardware
+question David actually cares about:
+
+```text
+_runs\model-comparison.md
+_runs\model-comparison.json
+```
+
+Those files record each model's best-known receipt, run count, status, TTFT,
+TPS, context, suite status, and next recommendation.
+
 The benchmark-suite phase writes these ledgers before a run can be called
 production-ready:
 
 ```text
-runs\benchmark-suite.tsv
-runs\agentic-suite.tsv
-runs\agent-bench-score.tsv
+_runs\benchmark-suite.tsv
+_runs\agentic-suite.tsv
+_runs\agent-bench-score.tsv
 ```
 
-`runs\benchmark-suite.tsv` is for general-purpose benchmark scores. The first
+`_runs\benchmark-suite.tsv` is for general-purpose benchmark scores. The first
 integration target should be EleutherAI `lm-evaluation-harness`, because it is
 an existing broad benchmark harness instead of a homegrown replacement.
 
-`runs\agentic-suite.tsv` is for agent deployment usefulness: tool/function
+`_runs\agentic-suite.tsv` is for agent deployment usefulness: tool/function
 calling, coding-agent tasks, task completion, JSON repair, command safety, and
 multi-step planning. Candidate external suites are BFCL, SWE-bench, and
 tau2-bench/tau3-bench. Repo-local deterministic tasks should fill the gaps where
@@ -176,12 +188,72 @@ For a model or model batch:
 1. Establish a 4K context baseline run.
 2. Run a fixed-budget benchmark attempt.
 3. Parse speed, server-ready time, cold serving TTFT, warm serving TTFT, warmup penalty, context, workflow, failure class, and telemetry evidence.
-4. Write full JSON/Markdown receipts under `runs\`.
-5. Append one row to `runs\autoresearch-results.tsv`.
-6. Append one row per attempted setting to `runs\autoresearch-attempts.tsv`.
+4. Write full JSON/Markdown receipts under `_runs\`.
+5. Append one row to `_runs\autoresearch-results.tsv`.
+6. Append one row per attempted setting to `_runs\autoresearch-attempts.tsv`.
 7. Mark each attempted setting as `keep`, `discard`, or `crash`.
-8. Ask the same serving questions in the same order by context tier: 1 at 4K, 2 at 8K, 3 at 16K, and 5 at 32K and above. Append those rows to `runs\serving-metrics.tsv`.
-9. Keep the best measured settings for that model only when score improves.
-10. Mark results honestly if they are speed-only, workflow-weak, or workflow-smoke.
+8. Ask the same serving questions in the same order by context tier: 1 at 4K, 2 at 8K, 3 at 16K, and 5 at 32K and above. Append those rows to `_runs\serving-metrics.tsv`.
+9. Write `itemized-report.md`, `report.html`, and `report.json` with explicit
+   metric coverage: measured, estimated, needs context ladder, or not measured.
+10. Keep the best measured settings for that model only when score improves.
+11. Mark results honestly if they are speed-only, workflow-weak, or workflow-smoke.
 
 The loop is useful only when the label matches the evidence.
+
+## Metric Coverage Honesty
+
+Every itemized report should make missing evidence visible. Current coverage:
+
+- `cold_ttft_ms`: measured when the serving probe captures cold TTFT.
+- `warm_ttft_ms`: measured when the serving probe captures warm TTFT.
+- `generation_tps`: measured from llama-bench or the active attempt runner.
+- `prompt_tps`: measured from llama-bench or the active attempt runner.
+- `max_total_usable_context`: estimated from the largest successful context in
+  the receipt; fully proven only after a context ladder.
+- `tps_falloff_with_context`: measured only when the receipt has successful
+  attempts at more than one context size.
+- `perplexity_falloff`: measured only when a real corpus and perplexity ladder
+  are provided.
+- `agent_bench_score`: measured only when the benchmark-suite phase runs.
+
+## Context Ladder
+
+Autoresearch can now run a fixed context ladder after it finds the best-known
+settings for a model:
+
+```text
+agent-autobench autoresearch --model path\to\model.gguf --context-ladder 4096 --context-ladder 8192 --context-ladder 16384 --context-ladder 32768
+```
+
+This writes:
+
+```text
+context-profile.md
+context-profile.tsv
+context-profile.json
+```
+
+The ladder reuses the best setting shape and changes only `context_size` with
+unified KV enabled. This makes token/sec retention and TTFT falloff visible
+without mixing it up with unrelated batch, parallel, or GPU-layer mutations.
+
+## Perplexity Ladder
+
+Autoresearch can also run a quality-falloff profile with llama.cpp's
+`llama-perplexity` when you provide a fixed text corpus:
+
+```text
+agent-autobench autoresearch --model path\to\model.gguf --perplexity-corpus path\to\corpus.txt --perplexity-context 4096 --perplexity-context 8192 --perplexity-context 16384
+```
+
+This writes:
+
+```text
+perplexity-profile.md
+perplexity-profile.tsv
+perplexity-profile.json
+```
+
+The report marks `perplexity_falloff` as measured only when multiple successful
+perplexity rows exist. Otherwise it remains `not_measured`, because speed and
+TTFT do not prove output quality.
