@@ -33,7 +33,8 @@ Use `G:\_codex_global\docs\sidecar-catalogue.md` for the full catalogue.
 ## Context Workflow
 
 - Start `/goal` for large benchmark campaigns, multi-session changes, or work that needs master/subagent coordination.
-- Use Research -> Plan -> Implement for medium or larger changes.
+- Always use context engineering, scaled to task size: research code-derived truth first, plan when more than a tiny one-shot, implement from narrow context, verify, then summarize.
+- Use sidecars/subagents for context isolation and delegation when the work fits and tool policy allows it. Choose the proper level agent for the lane: light scout/monitor for cheap bounded work, medium/strong implementation or debugger for hard slices, reviewer for critique, docs writer for receipts.
 - Keep raw benchmark logs out of the main context. Summarize the command, model, settings, evidence path, and result.
 - Keep long sessions token-efficient: use targeted `rg`/path-specific reads, avoid dumping long server logs into chat, and keep sidecar prompts/results compact.
 - Recycle sidecars around roughly 75% context use or when logs/research get noisy.
@@ -45,6 +46,7 @@ Use `G:\_codex_global\docs\sidecar-catalogue.md` for the full catalogue.
 - Isolate compatibility-only benchmark harnesses in their own venv when newer Python breaks upstream wheels or native builds.
 - Document any older compatibility lane. Example: BFCL may use `.venv-bfcl` on Python 3.11 when newer Python tries to build `tree-sitter` locally.
 - Install first-party tooling only when a current failing check proves it is needed; record why it was installed and where it writes data.
+- For SemLoc/Hermes/local-AI routing and benchmark context, use semantic recall first: reLOC when online, otherwise `hybrid-recall`. If the XTREME big4/profile stack is down, use CLAMSHELL's embedder/reranker fallback through hybrid-recall/clamshell-recall instead of waking the stack by habit. QE benchmarks should treat the small 2B QE lane as the default baseline; promote the M2 pilot model for QE only after it passes the standard QE test.
 
 ## Git Hygiene
 
