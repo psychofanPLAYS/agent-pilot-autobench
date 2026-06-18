@@ -1,9 +1,23 @@
 [project]
 name = "agent-pilot-autobench"
 version = "0.1.0"
-description = "Local-first autobenchmarking for choosing the best LLLM agent pilot."
+description = "Local-first GGUF and llama.cpp benchmarking for agent workloads."
 readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+keywords = ["gguf", "llama.cpp", "benchmarking", "local-ai", "agents"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Benchmark",
+]
 dependencies = [
     "nvidia-ml-py>=12.0.0",
     "optuna>=4.8.0",
@@ -29,6 +43,10 @@ bench = [
 agent-autobench = "gguf_limit_bench.cli:app"
 apb = "gguf_limit_bench.cli:app"
 pilotbench = "gguf_limit_bench.cli:app"
+
+[project.urls]
+Repository = "https://github.com/psychofanPLAYS/agent-pilot-autobench"
+Issues = "https://github.com/psychofanPLAYS/agent-pilot-autobench/issues"
 
 [build-system]
 requires = ["hatchling"]

@@ -72,7 +72,7 @@ from gguf_limit_bench.workflows import WorkflowAugmentedAttemptRunner, WorkflowE
 
 
 app = typer.Typer(
-    help="Local-first autobenchmarking for choosing the best LLLM agent pilot.",
+    help="Local-first GGUF and llama.cpp benchmarking for agent workloads.",
     no_args_is_help=True,
     invoke_without_command=True,
     rich_markup_mode="rich",
