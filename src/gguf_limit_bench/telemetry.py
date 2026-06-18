@@ -2,8 +2,16 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import subprocess
+from typing import TypedDict
 
 import psutil
+
+
+class _GpuSample(TypedDict, total=False):
+    used: int | None
+    total: int | None
+    util: int | None
+    power: float | None
 
 
 @dataclass(frozen=True)
@@ -64,7 +72,7 @@ def sample_telemetry() -> TelemetrySnapshot:
     )
 
 
-def _sample_gpu_with_nvidia_smi() -> dict[str, int | None]:
+def _sample_gpu_with_nvidia_smi() -> _GpuSample:
     query = "memory.used,memory.total,utilization.gpu,power.draw"
     try:
         completed = subprocess.run(

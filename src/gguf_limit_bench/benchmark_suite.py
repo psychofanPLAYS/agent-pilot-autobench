@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import time
-from typing import Any
+from typing import Any, TypeGuard
 
 
 GENERAL_LEDGER = "benchmark-suite.tsv"
@@ -173,6 +173,7 @@ def run_benchmark_suite(
 
 def _task_from_dict(payload: dict[str, Any]) -> BenchmarkSuiteTask:
     commands = _commands_from_payload(payload)
+    min_score_value = payload.get("min_score")
     return BenchmarkSuiteTask(
         id=str(payload["id"]),
         phase=str(payload["phase"]),
@@ -180,7 +181,7 @@ def _task_from_dict(payload: dict[str, Any]) -> BenchmarkSuiteTask:
         commands=commands,
         env={str(key): str(value) for key, value in dict(payload.get("env", {})).items()},
         timeout_seconds=int(payload.get("timeout_seconds", 600)),
-        min_score=(None if payload.get("min_score") is None else float(payload.get("min_score"))),
+        min_score=None if min_score_value is None else float(min_score_value),
         score_file=None if payload.get("score_file") is None else str(payload.get("score_file")),
     )
 
@@ -272,7 +273,11 @@ def _run_task(
         stderr = "\n".join(stderr_parts)
         score = _score_from_task_output(task, stdout=stdout, task_dir=task_dir)
         ok = returncode == 0 and score is not None
-        pass_fail = "pass" if ok and _passes_threshold(score, task.min_score) else "fail"
+        pass_fail = (
+            "pass"
+            if returncode == 0 and score is not None and _passes_threshold(score, task.min_score)
+            else "fail"
+        )
         failure_class = _failure_class(
             returncode=returncode,
             score=score,
@@ -409,7 +414,7 @@ def _find_score(payload: Any) -> float | None:
     return None
 
 
-def _is_number(value: Any) -> bool:
+def _is_number(value: Any) -> TypeGuard[int | float]:
     return isinstance(value, int | float) and not isinstance(value, bool)
 
 

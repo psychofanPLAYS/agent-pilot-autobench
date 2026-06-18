@@ -45,7 +45,7 @@ def load_benchmark_packs(plugin_dir: Path | None = None) -> dict[str, BenchmarkP
 
 
 def _builtin_packs() -> dict[str, BenchmarkPack]:
-    common = {
+    common: dict[str, Any] = {
         "version": "2026.05.26",
         "settings_space": {},
         "safety_policy": "local_deterministic",

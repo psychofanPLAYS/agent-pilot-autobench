@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 import os
@@ -200,6 +201,8 @@ def _paths(value: object, default: tuple[Path, ...]) -> tuple[Path, ...]:
         return default
     if isinstance(value, str):
         return tuple(Path(item.strip()) for item in value.split(os.pathsep) if item.strip())
+    if not isinstance(value, Iterable):
+        raise TypeError("Expected paths to be a string or iterable")
     return tuple(Path(str(item)) for item in value)
 
 
@@ -233,6 +236,8 @@ def _ints(value: object, default: tuple[int, ...]) -> tuple[int, ...]:
         return default
     if isinstance(value, str):
         return tuple(int(item.strip()) for item in value.split(os.pathsep) if item.strip())
+    if not isinstance(value, Iterable):
+        raise TypeError("Expected integers to be a string or iterable")
     return tuple(int(item) for item in value)
 
 

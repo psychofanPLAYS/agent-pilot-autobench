@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 
 DEFAULT_SCORE_KEYS = (
@@ -63,7 +63,7 @@ def _collect_scores(payload: Any, grouped: dict[str, list[float]]) -> None:
             _collect_scores(item, grouped)
 
 
-def _is_number(value: Any) -> bool:
+def _is_number(value: Any) -> TypeGuard[int | float]:
     return isinstance(value, int | float) and not isinstance(value, bool)
 
 

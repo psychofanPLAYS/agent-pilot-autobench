@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field, replace
 import json
 from pathlib import Path
@@ -99,6 +100,8 @@ def build_llama_server_command(
     host: str,
     port: int,
 ) -> list[str]:
+    from gguf_limit_bench.flag_ladder import llama_server_args_for_settings
+
     command = [
         str(llama_server),
         "--model",
@@ -123,6 +126,7 @@ def build_llama_server_command(
         "--slots",
         "--no-webui",
     ]
+    command.extend(llama_server_args_for_settings(settings))
     return command
 
 
@@ -436,7 +440,7 @@ def _reliable_serving_tps(measurements: list[ServingProbeResult]) -> list[float]
     ]
 
 
-def _mean(values: list[float | None]) -> float | None:
+def _mean(values: Iterable[float | None]) -> float | None:
     clean = [value for value in values if value is not None]
     if not clean:
         return None
