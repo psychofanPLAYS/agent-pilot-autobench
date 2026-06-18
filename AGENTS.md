@@ -2,7 +2,9 @@
 
 ## Purpose
 
-This repo is David's local-first autobenchmarking lab for finding useful llama.cpp/GGUF settings for agent workflows. It should produce evidence, receipts, and champion settings rather than vibes.
+This repository is a local-first benchmarking lab for finding useful llama.cpp/GGUF
+settings for agent workflows. It should produce evidence, receipts, and champion
+settings rather than vibes.
 
 ## Operating Rule
 
@@ -21,14 +23,14 @@ If no sidecar is used for a big task, state the concrete reason.
 ## Preferred Sidecars
 
 - `repo_reader`: map the codebase, CLI commands, tests, run receipts, config, and likely edit points.
-- `local AI probe`: inspect XTREME llama.cpp paths, GGUF models, benchmark commands, GPU/offload evidence, and receipt folders.
+- `local AI probe`: inspect llama.cpp paths, GGUF models, benchmark commands, GPU/offload evidence, and receipt folders.
 - `monitor_worker`: watch long benchmark/test/server output and report only meaningful state changes.
 - `reviewer_worker`: critique diffs, benchmark assumptions, Windows path handling, and receipt correctness.
 - `docs_writer`: update README, handoffs, beginner docs, command boards, and release notes.
 - `dependency_doctor`: inspect `uv`, Python, package, PATH, and lockfile issues.
 - `windows_ops`: inspect Windows launch scripts, environment variables, services, and PowerShell behavior.
 
-Use `G:\_codex_global\docs\sidecar-catalogue.md` for the full catalogue.
+Use only agent capabilities available in the current development environment.
 
 ## Context Workflow
 
@@ -46,21 +48,23 @@ Use `G:\_codex_global\docs\sidecar-catalogue.md` for the full catalogue.
 - Isolate compatibility-only benchmark harnesses in their own venv when newer Python breaks upstream wheels or native builds.
 - Document any older compatibility lane. Example: BFCL may use `.venv-bfcl` on Python 3.11 when newer Python tries to build `tree-sitter` locally.
 - Install first-party tooling only when a current failing check proves it is needed; record why it was installed and where it writes data.
-- For SemLoc/Hermes/local-AI routing and benchmark context, use semantic recall first: reLOC when online, otherwise `hybrid-recall`. If the XTREME big4/profile stack is down, use CLAMSHELL's embedder/reranker fallback through hybrid-recall/clamshell-recall instead of waking the stack by habit. QE benchmarks should treat the small 2B QE lane as the default baseline; promote the M2 pilot model for QE only after it passes the standard QE test.
+- Keep optional local-AI helpers outside the product contract. Tests and documented
+  commands must not depend on private services or a particular workstation.
 
 ## Git Hygiene
 
-- Before ending substantial work, make git reviewable: fetch, inspect status/diff, run the narrow verification checks, stage the intended scope, commit, push, and open a draft PR when David asked for a publish flow.
-- If the branch is `main`, create a `codex/...` branch before committing new work unless David explicitly wants direct commits on `main`.
+- Before ending substantial work, make git reviewable: fetch, inspect status/diff, run the narrow verification checks, stage the intended scope, commit, and publish only when requested.
+- If the branch is `main`, create a `codex/...` branch before committing new work unless direct commits were explicitly requested.
 - Prove local/remote state after push with `git rev-list --left-right --count <branch>...origin/<branch>` and `git status --short --branch`.
-- Keep generated benchmark receipts, model files, databases, and caches out of commits unless David explicitly asks to publish a specific receipt artifact.
+- Keep generated benchmark receipts, model files, databases, and caches out of commits unless a specific small public artifact is intentionally approved.
 
 ## Project Constraints
 
-- Keep heavy artifacts on `G:\`, especially models, runs, caches, and virtual environments.
-- Do not put large downloads or benchmark output on `C:\`.
+- Keep heavy artifacts in the configured project-local ignored directories or another
+  explicitly selected data drive.
+- Do not place large downloads or benchmark output in system-managed directories.
 - Prefer existing llama.cpp tools such as `llama-bench`, `llama-cli`, and later `llama-server` over custom reinvention.
-- Preserve Windows usability: `.bat` launchers should be readable, reversible, and safe for David to double-click.
+- Preserve Windows usability: `.bat` launchers should be readable, reversible, and safe to double-click.
 - Keep generated run evidence in `runs\` and local experiment data in `db\`.
 - Do not delete benchmark runs, model files, or local databases without explicit approval.
 
@@ -69,7 +73,7 @@ Use `G:\_codex_global\docs\sidecar-catalogue.md` for the full catalogue.
 Use the narrowest practical checks:
 
 ```powershell
-uv run --extra dev pytest -q
+uv run --extra dev python -m pytest -q
 uv run --extra dev python -m compileall src tests
 uv run --extra dev agent-autobench first-run
 uv run --extra dev agent-autobench results

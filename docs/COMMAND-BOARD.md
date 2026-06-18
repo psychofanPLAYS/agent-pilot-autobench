@@ -78,6 +78,41 @@ Learning is on by default. To avoid updating the local Optuna memory:
 agent-autobench autoresearch --model "path\to\model.gguf" --no-learning
 ```
 
+## SimpleBench Flag Ladder
+
+Dry-run the useful autoresearch ladder first. This writes the exact
+`llama-server` commands and starts no model process:
+
+```powershell
+agent-autobench autoresearch --model "path\to\model.gguf" --flag-ladder --dry-run
+```
+
+Run the real 10-question SimpleBench flag comparison:
+
+```powershell
+agent-autobench autoresearch --model "path\to\model.gguf" --llama-server "path\to\llama-server.exe" --flag-ladder --budget-minutes 20 --parallel-max 6
+```
+
+The ladder asks the same 10 SimpleBench public questions for every flag profile,
+scores accuracy first and speed second, then writes the best observed profile to
+`best-settings.json`. A completed ladder names a champion; a budget-limited or
+attempt-limited ladder is explicitly marked partial and names only a provisional best.
+Partial ladders are not eligible for promotion to the project-wide `champion.json`.
+Add experimental llama.cpp flags without changing code:
+
+```powershell
+agent-autobench autoresearch --model "path\to\model.gguf" --flag-ladder --llama-server-extra-arg=--dry
+```
+
+Use `--simple-bench` or `--simple-bench-system-prompt` to point at a different
+local benchmark file or prompt. The default answer budget is 1024 tokens so
+strict `Final Answer: X` scoring does not guess from truncated reasoning.
+
+Each supported flag is tested as an independent ablation against the same base,
+and `flag-ladder-results.md` reports its TPS slowdown versus `L0-baseline`.
+Models whose filename contains `MTP` automatically receive three additional
+native speculative rungs using `--draft-max 8`, `16`, and `32`.
+
 ## Queue
 
 ```powershell
@@ -149,6 +184,14 @@ Receipt files:
 - `perplexity-profile.md`: quality falloff report when `--perplexity-corpus` is used
 - `perplexity-profile.tsv`: grep/chart-friendly perplexity ladder rows
 - `perplexity-profile.json`: machine-readable perplexity ladder rows
+- `simplebench-<profile>\summary.json`: SimpleBench accuracy, speed, settings, and launch command for one flag profile
+- `simplebench-<profile>\transcript.jsonl`: one row per SimpleBench question and model answer
+- `simplebench-<profile>\warnings.log`: short warning/error-only log
+- `simplebench-<profile>\server-tail.log`: bounded final server log lines
+- `flag-ladder-plan.json`: dry-run command plan when `--flag-ladder --dry-run` is used
+- `flag-ladder-results.md`: completion status, champion or provisional best, and the attempted profile table
+- `flag-ladder-results.tsv`: chart-friendly profile comparison
+- `flag-ladder-results.json`: full settings, commands, receipts, and comparison data
 - `best-settings.json`: best settings and score
 - `learning.json`: best Optuna settings when learning is enabled
 - `recovery.json`: latest recovery status

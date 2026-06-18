@@ -1000,6 +1000,8 @@ def autoresearch(
         help="Extra raw llama-server argument appended to every flag-ladder rung. Repeatable.",
     ),
 ) -> None:
+    if dry_run and not flag_ladder:
+        raise typer.BadParameter("--dry-run requires --flag-ladder", param_hint="--dry-run")
     try:
         extra_server_args = validate_extra_server_args(tuple(llama_server_extra_arg or ()))
     except ValueError as exc:

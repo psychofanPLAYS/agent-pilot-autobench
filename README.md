@@ -1,10 +1,11 @@
 # Agent Pilot Autobench
 
-## _Agentic Pilot Autobench_
-
 [![CI](https://github.com/psychofanPLAYS/agent-pilot-autobench/actions/workflows/ci.yml/badge.svg)](https://github.com/psychofanPLAYS/agent-pilot-autobench/actions/workflows/ci.yml)
+[![Python 3.11-3.13](https://img.shields.io/badge/python-3.11--3.13-blue.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-Local-first benchmarking for GGUF models, llama.cpp settings, and agent-style readiness.
+Local-first GGUF and llama.cpp benchmarking for agent workloads, with reproducible
+receipts instead of one-off speed claims.
 
 Agent Pilot Autobench answers a practical question with evidence instead of guesswork:
 
@@ -14,6 +15,15 @@ Agent Pilot Autobench answers a practical question with evidence instead of gues
 > **You went on Hugging Face and pulled 10+ models. Let's figure out which one will serve you best.**
 
 It wraps existing tools such as `llama-bench`, `llama-cli`, `llama-server`, Optuna, Textual, Rich, and pytest. The project records receipts, scores, failures, and champion settings so results are based on repeatable evidence instead of vibes.
+
+**Fastest first run on Windows:** double-click `FIRST_RUN.bat`.
+
+**What proves it works:** every experiment records its command, settings, telemetry,
+score, failure class, and generated reports under `_runs/`; CI independently tests
+Python 3.11, 3.12, and 3.13 and smoke-installs the built wheel.
+
+Start with the [architecture and code map](docs/ARCHITECTURE.md), or jump directly
+to the [command board](docs/COMMAND-BOARD.md).
 
 ## Start
 
@@ -85,6 +95,11 @@ Each receipt also includes:
 
 The TUI remembers the last selected models and shows truncated previous-run summaries so the current session can be compared against earlier evidence without opening every receipt.
 
+For a safe preview that starts no model server, see the
+[sanitized flag-ladder dry-run artifact](docs/examples/flag-ladder-dry-run.md). It shows
+the exact profiles and commands the live run would evaluate without claiming benchmark
+performance that has not been measured.
+
 ## Common Commands
 
 ```powershell
@@ -97,6 +112,8 @@ agent-autobench results --serve
 agent-autobench benchmark-suite-plans
 agent-autobench benchmark-suite --plan benchmarks\plans\local-openai-smoke.plan.json
 agent-autobench autoresearch --model "path\to\model.gguf" --budget-minutes 5
+agent-autobench autoresearch --model "path\to\model.gguf" --flag-ladder --dry-run
+agent-autobench autoresearch --model "path\to\model.gguf" --llama-server "path\to\llama-server.exe" --flag-ladder --budget-minutes 20 --parallel-max 6
 agent-autobench autoresearch --model "path\to\model.gguf" --context-ladder 4096 --context-ladder 8192 --context-ladder 16384
 agent-autobench autoresearch --model "path\to\model.gguf" --perplexity-corpus "path\to\corpus.txt" --perplexity-context 4096 --perplexity-context 8192
 ```
@@ -172,6 +189,26 @@ Autoresearch can optimize against the same suite score:
 agent-autobench autoresearch --model "path\to\model.gguf" --benchmark-suite-plan benchmarks\plans\local-openai-smoke.plan.json
 ```
 
+For an immediately useful local comparison, run the llama.cpp flag ladder
+against the 10-question SimpleBench public set:
+
+```powershell
+agent-autobench autoresearch --model "path\to\model.gguf" --flag-ladder --dry-run
+agent-autobench autoresearch --model "path\to\model.gguf" --llama-server "path\to\llama-server.exe" --flag-ladder --budget-minutes 20 --parallel-max 6
+```
+
+`--dry-run` writes the launch plan without starting a server. The live run
+starts one benchmark-owned `llama-server` process per flag profile, asks the
+same 10 questions, records `transcript.jsonl` and `summary.json`, and picks the
+best settings by accuracy first and speed second. Extra llama.cpp flags can be
+tested with repeatable `--llama-server-extra-arg=...`.
+
+The generated `flag-ladder-results.md` shows each independent flag ablation's
+TPS slowdown versus baseline, TTFT, strict answer accuracy, warnings, and exact
+receipt. MTP-named models automatically add native `--draft-max 8/16/32`
+profiles. Full server logs are retained, with short `warnings.log` and
+`server-tail.log` files for quick review.
+
 For context scaling evidence, add a fixed ladder:
 
 ```powershell
@@ -213,9 +250,58 @@ uv run --extra dev agent-autobench doctor
 uv run --extra dev agent-autobench results
 ```
 
+## Verification
+
+The release gate is intentionally copy-pasteable:
+
+```powershell
+uv sync --extra dev --locked
+uv run --extra dev python -m pytest -q
+uv run --extra dev ruff format --check .
+uv run --extra dev ruff check .
+uv run --extra dev mypy src
+uv run --extra dev python -m compileall -q src tests
+uv build
+```
+
+GitHub Actions runs tests on Python 3.11-3.13, exercises the Windows launchers and CLI,
+then builds and installs the wheel in an isolated environment. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the complete contributor workflow and
+[CHANGELOG.md](CHANGELOG.md) for release-facing changes.
+
+## Project Status
+
+Agent Pilot Autobench is an **alpha release candidate**. Its offline release gates,
+packaging, dry-run orchestration, and mocked server lifecycle are automated. A live
+flag-ladder sweep on representative GGUF models and current llama.cpp binaries is the
+remaining hardware acceptance gate before a stable release is considered.
+
+## Limitations
+
+- Benchmark results are machine-, model-, quantization-, and llama.cpp-build-specific.
+- The bundled SimpleBench public snapshot contains only ten multiple-choice questions;
+  it is a deterministic smoke signal, not a general intelligence score.
+- A faster profile is not automatically a better agent. Use workflow or benchmark-suite
+  evidence when task quality matters.
+- The project currently targets Windows for the guided first-run experience. Core Python
+  commands and CI also run on Linux, but the `.bat` launchers are Windows-only.
+- Model downloads and llama.cpp binaries are intentionally not bundled.
+
+## Project Documentation
+
+- [Architecture and code map](docs/ARCHITECTURE.md)
+- [Autoresearch contract](docs/AUTORESEARCH-PROGRAM.md)
+- [Command board](docs/COMMAND-BOARD.md)
+- [Product design](docs/PRODUCT-DESIGN.md)
+- [Security policy](SECURITY.md)
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+The bundled SimpleBench public snapshot is also MIT-licensed by its upstream authors;
+see the included [dataset notice](src/gguf_limit_bench/data/SIMPLEBENCH_NOTICE.md) for
+the pinned source revision and checksum.
 
 ## Tiny Glossary
 

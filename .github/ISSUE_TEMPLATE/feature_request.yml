@@ -1,0 +1,33 @@
+name: Feature request
+description: Propose a focused improvement to the benchmark workflow.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What benchmark or operator problem is difficult today?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the evidence or workflow that would make the problem solved.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Existing tools or alternatives
+      description: Which ready-made tool, llama.cpp feature, or current workaround did you consider?
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Project fit
+      options:
+        - label: The request keeps model data and receipts local by default.
+          required: true
+        - label: The request can be verified with a repeatable test or receipt.
+          required: true

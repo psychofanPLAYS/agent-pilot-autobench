@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, replace
 import json
+import math
 from pathlib import Path
 import re
 import subprocess
@@ -326,6 +327,10 @@ class AutoresearchLoop:
                     "telemetry": sample_telemetry().to_dict(),
                 },
             )
+            remaining_seconds = self.budget_seconds - (time.monotonic() - started)
+            set_timeout = getattr(self.attempt_runner, "set_timeout_seconds", None)
+            if callable(set_timeout):
+                set_timeout(max(1, math.ceil(remaining_seconds)))
             result = self.attempt_runner(settings)
             if result.ok and self.benchmark_suite_plan is not None:
                 remaining_seconds = self.budget_seconds - (time.monotonic() - started)
@@ -389,6 +394,11 @@ class AutoresearchLoop:
                 returncode=1,
             )
 
+        planned_profiles = (
+            len(self.candidate_sequence) if self.candidate_sequence is not None else None
+        )
+        ladder_complete = planned_profiles is None or len(attempt_records) >= planned_profiles
+
         receipt.write_json(
             "best-settings.json",
             {
@@ -396,7 +406,8 @@ class AutoresearchLoop:
                 "settings": best_settings.to_dict(),
                 "result": best_result.to_dict(),
                 "score": best_result.score(),
-                "status": _status_for_result(best_result),
+                "status": _status_for_result(best_result) if ladder_complete else "partial",
+                "promotion_eligible": ladder_complete,
                 "learner_best": self.learner.best() if self.learner is not None else None,
             },
         )
@@ -434,11 +445,14 @@ class AutoresearchLoop:
         if self.perplexity_runner is not None and self.perplexity_contexts:
             self._write_perplexity_profile(receipt, best_settings)
         if self.candidate_sequence is not None:
+            assert planned_profiles is not None
             _write_flag_ladder_comparison(
                 receipt=receipt,
                 model=self.model,
                 attempts=attempt_records,
-                champion_profile=best_settings.profile_name,
+                champion_profile=best_settings.profile_name if ladder_complete else None,
+                provisional_best_profile=best_settings.profile_name,
+                planned_profiles=planned_profiles,
             )
         write_itemized_run_report(receipt.path)
         return receipt
@@ -701,7 +715,9 @@ def _write_flag_ladder_comparison(
     receipt: RunReceipt,
     model: Path,
     attempts: list[tuple[AutoresearchSettings, AttemptResult]],
-    champion_profile: str,
+    champion_profile: str | None,
+    provisional_best_profile: str,
+    planned_profiles: int,
 ) -> None:
     baseline_tps = next(
         (
@@ -739,7 +755,11 @@ def _write_flag_ladder_comparison(
         )
     payload = {
         "model": str(model),
+        "status": "complete" if len(attempts) >= planned_profiles else "partial",
+        "planned_profiles": planned_profiles,
+        "completed_profiles": len(attempts),
         "champion_profile": champion_profile,
+        "provisional_best_profile": provisional_best_profile,
         "baseline_profile": "L0-baseline",
         "baseline_tps": baseline_tps,
         "rows": rows,
@@ -791,10 +811,20 @@ def _flag_ladder_tsv(rows: list[dict]) -> str:
 
 
 def _flag_ladder_markdown(payload: dict) -> str:
+    result_label = (
+        f"Champion: `{payload['champion_profile']}`"
+        if payload["champion_profile"] is not None
+        else f"Provisional best: `{payload['provisional_best_profile']}` (partial ladder)"
+    )
     lines = [
         f"# Flag Ladder Results: {Path(payload['model']).name}",
         "",
-        f"Champion: `{payload['champion_profile']}`",
+        (
+            f"Status: `{payload['status']}` "
+            f"({payload['completed_profiles']}/{payload['planned_profiles']} profiles)"
+        ),
+        "",
+        result_label,
         "",
         "Positive slowdown means slower than L0; negative means faster.",
         "",

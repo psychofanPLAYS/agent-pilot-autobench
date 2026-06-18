@@ -71,6 +71,9 @@ class LlamaServerSimpleBenchAttemptRunner:
     def set_receipt_path(self, receipt_path: Path) -> None:
         self.receipt_path = receipt_path
 
+    def set_timeout_seconds(self, timeout_seconds: int) -> None:
+        self.timeout_seconds = max(1, timeout_seconds)
+
     def __call__(self, settings: AutoresearchSettings) -> AttemptResult:
         started = time.perf_counter()
         deadline = time.monotonic() + self.timeout_seconds
@@ -84,7 +87,7 @@ class LlamaServerSimpleBenchAttemptRunner:
         )
         attempt_dir = self._attempt_dir(settings)
         attempt_dir.mkdir(parents=True, exist_ok=True)
-        (attempt_dir / "launch.cmd").write_text(_windows_command_line(command), encoding="utf-8")
+        _write_launch_receipt(attempt_dir, command)
         stdout_log = (attempt_dir / "server.stdout.log").open("w", encoding="utf-8")
         stderr_log = (attempt_dir / "server.stderr.log").open("w", encoding="utf-8")
         try:
@@ -450,11 +453,9 @@ def _add_short_log_metadata(attempt_dir: Path, warning_count: int) -> None:
     )
 
 
-def _windows_command_line(command: list[str]) -> str:
-    return " ".join(_quote_arg(part) for part in command) + "\n"
-
-
-def _quote_arg(part: str) -> str:
-    if not part or any(char.isspace() for char in part):
-        return '"' + part.replace('"', '\\"') + '"'
-    return part
+def _write_launch_receipt(attempt_dir: Path, command: list[str]) -> None:
+    """Store exact argv as data, never as a double-clickable command script."""
+    (attempt_dir / "launch-command.json").write_text(
+        json.dumps(command, ensure_ascii=True, indent=2),
+        encoding="utf-8",
+    )

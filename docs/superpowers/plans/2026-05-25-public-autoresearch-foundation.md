@@ -4,7 +4,7 @@
 
 **Goal:** Make the existing GGUF benchmark cockpit easier to run, safer to publish, and clearer as the start of Agent Pilot Autobench.
 
-**Architecture:** Keep the existing package name and benchmark internals stable. Add a small readiness-check module, public-facing README, and CI while preserving local `G:\` defaults for David's workstation.
+**Architecture:** Keep the existing package name and benchmark internals stable. Add a small readiness-check module, public-facing README, and CI while preserving portable project-local defaults.
 
 **Tech Stack:** Python, Typer, Rich, pytest, uv, GitHub Actions.
 

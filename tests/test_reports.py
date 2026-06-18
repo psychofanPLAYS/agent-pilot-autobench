@@ -24,6 +24,7 @@ def _write_run(
     benchmark_suite_agentic_score=None,
     benchmark_suite_receipt=None,
     benchmark_suite_failure=None,
+    promotion_eligible=True,
 ):
     run = root / name
     run.mkdir()
@@ -66,6 +67,7 @@ def _write_run(
                     "benchmark_suite_failure": benchmark_suite_failure,
                 },
                 "score": score,
+                "promotion_eligible": promotion_eligible,
             }
         ),
         encoding="utf-8",
@@ -84,6 +86,17 @@ def test_build_leaderboard_ranks_successes_and_explains_context_zero(tmp_path):
     assert leaderboard.entries[0].status == "SPEED ONLY"
     assert leaderboard.entries[0].context_label == "unset (speed-only)"
     assert leaderboard.entries[-1].status == "LOAD FAIL"
+
+
+def test_partial_ladder_is_not_eligible_for_global_champion(tmp_path):
+    _write_run(tmp_path, "complete", 10.0, 10.0)
+    _write_run(tmp_path, "partial-fast", 999.0, 999.0, promotion_eligible=False)
+
+    leaderboard = write_leaderboard(tmp_path)
+
+    assert [entry.model_name for entry in leaderboard.entries] == ["complete.gguf"]
+    champion = json.loads((tmp_path / "champion.json").read_text(encoding="utf-8"))
+    assert champion["model_name"] == "complete.gguf"
 
 
 def test_leaderboard_marks_serving_measured_when_ttft_exists_without_context(tmp_path):

@@ -39,6 +39,33 @@ jobs:
       - name: Run tests
         run: uv run --extra dev python -m pytest -q
 
+  windows-smoke:
+    name: Windows first-run and CLI smoke test
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: uv sync --extra dev --locked
+
+      - name: Test Windows launchers and CLI boundaries
+        run: uv run --extra dev python -m pytest tests/test_windows_scripts.py tests/test_cli.py -q
+
+      - name: Smoke-test public commands
+        run: |
+          uv run --extra dev agent-autobench --help
+          uv run --extra dev agent-autobench doctor --json-out
+
   quality:
     name: Types, build, and wheel smoke test
     runs-on: ubuntu-latest

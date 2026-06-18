@@ -8,11 +8,11 @@ Tech stack: Python, Textual, Rich, Typer, pytest, psutil, nvidia-ml-py, Optuna, 
 
 ## 18 Step Plan
 
-- [x] Back up `G:\_codex_global\config.toml` and register selected `G:\AI\skills` by path.
+- [x] Establish project-local configuration and reusable development guidance.
 - [x] Create the project folder and initialize git.
 - [x] Create a small project plan, receipts folder, and test-first structure.
 - [x] Add tests for GGUF discovery, family parsing, quant parsing, and mmproj vision detection.
-- [ ] Implement discovery from `G:\AI\models` and LM Studio metadata caches.
+- [ ] Implement discovery from configured model roots and optional LM Studio metadata caches.
 - [x] Add tests for model selection state: space toggles rows, select-all selects all.
 - [x] Implement a Textual model picker with select-all at the top.
 - [x] Add tests for `llama-bench` command planning and safe profile expansion.

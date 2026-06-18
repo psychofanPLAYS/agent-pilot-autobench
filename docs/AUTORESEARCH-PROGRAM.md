@@ -1,11 +1,8 @@
 # Agent Pilot Autobench Autoresearch Program
 
-Adapted from Andrej Karpathy's `karpathy/autoresearch` `program.md` pattern.
-Upstream inspected locally at:
-
-```text
-G:\AI\_codex_projects\_upstream\karpathy-autoresearch
-```
+Adapted from Andrej Karpathy's
+[`karpathy/autoresearch`](https://github.com/karpathy/autoresearch) `program.md`
+pattern.
 
 Upstream commit inspected:
 
@@ -116,7 +113,7 @@ git branch/commit metadata, settings JSON, and receipt path.
 
 The run-level leaderboard is not the whole story. The model-level comparison
 files group repeated runs by model path so the app can answer the hardware
-question David actually cares about:
+question the project is designed to answer:
 
 ```text
 _runs\model-comparison.md
@@ -173,7 +170,7 @@ To make autoresearch optimize settings by the suite result, pass the same plan
 into the loop:
 
 ```text
-agent-autobench autoresearch --model G:\AI\models\path\to\model.gguf --benchmark-suite-plan benchmark-suite.plan.json
+agent-autobench autoresearch --model G:\models\model.gguf --benchmark-suite-plan benchmark-suite.plan.json
 ```
 
 With that option enabled, every successful speed/TTFT attempt runs the general
@@ -200,6 +197,52 @@ For a model or model batch:
 
 The loop is useful only when the label matches the evidence.
 
+## SimpleBench Flag Ladder
+
+The default ten-question fixture is the unchanged MIT-licensed public SimpleBench
+snapshot pinned in `src\gguf_limit_bench\data\`. Its upstream revision, checksum,
+license, and limitations are recorded in `SIMPLEBENCH_NOTICE.md` beside the data.
+
+For real llama.cpp flag comparison, use the opt-in flag ladder:
+
+```text
+agent-autobench autoresearch --model path\to\model.gguf --flag-ladder --dry-run
+agent-autobench autoresearch --model path\to\model.gguf --llama-server path\to\llama-server.exe --flag-ladder --budget-minutes 20 --parallel-max 6
+```
+
+This path is separate from the short TTFT serving probe. It starts one
+benchmark-owned `llama-server` process per flag profile, asks the fixed
+10-question SimpleBench public set in the same order every time, writes a
+`simplebench-<profile>\transcript.jsonl` and `summary.json`, then uses
+`simple_bench_score` for keep/discard decisions.
+
+Profiles are independent ablations against a stable base so an unsupported or
+slow flag does not contaminate later rows. `flag-ladder-results.md` records TPS
+slowdown versus `L0-baseline`, TTFT, accuracy, warnings, failures, and champion.
+Per-profile full logs are preserved alongside compact `warnings.log` and
+`server-tail.log` views.
+
+The default score is accuracy-first and speed-second. The speed tie-breaker is
+mathematically bounded below the value of one additional correct answer:
+
+```text
+simple_bench_score = accuracy * 1000 + bounded_speed_tiebreaker
+```
+
+This prevents a fast but wrong profile from beating a slower profile that gets
+more answers correct. Partial ladders are labeled and expose no champion; they
+show only a provisional best until every planned profile has been attempted and
+are excluded from the project-wide champion leaderboard.
+`--dry-run` writes `flag-ladder-plan.json` and starts no
+server, which is the safe first command when llama.cpp paths are uncertain.
+Repeat `--llama-server-extra-arg=...` to test additional runtime flags without
+changing code.
+
+When the model filename identifies preserved MTP heads, the ladder adds native
+llama.cpp speculative profiles for `--draft-max 8`, `16`, and `32`, with
+`--draft-min 0 --draft-p-min 0.75`. There is no literal `--mtp` switch in the
+tested llama.cpp build; these are its supported native draft controls.
+
 ## Metric Coverage Honesty
 
 Every itemized report should make missing evidence visible. Current coverage:
@@ -215,6 +258,8 @@ Every itemized report should make missing evidence visible. Current coverage:
 - `perplexity_falloff`: measured only when a real corpus and perplexity ladder
   are provided.
 - `agent_bench_score`: measured only when the benchmark-suite phase runs.
+- `simple_bench_score`: measured only when `--flag-ladder` runs the SimpleBench
+  batch through `llama-server`.
 
 ## Context Ladder
 

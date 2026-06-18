@@ -77,6 +77,11 @@ def build_leaderboard(runs_root: Path) -> Leaderboard:
     entries: list[LeaderboardEntry] = []
     for best_path in sorted(runs_root.glob("*/best-settings.json")):
         payload = json.loads(best_path.read_text(encoding="utf-8"))
+        if (
+            payload.get("promotion_eligible") is False
+            or str(payload.get("status", "")).lower() == "partial"
+        ):
+            continue
         result = _normalized_result(payload)
         settings = payload.get("settings", {})
         model_path = str(payload.get("model", ""))

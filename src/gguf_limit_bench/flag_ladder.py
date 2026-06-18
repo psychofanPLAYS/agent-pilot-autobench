@@ -44,6 +44,12 @@ def build_core_flag_ladder(
         extra_server_args=extra_server_args,
     )
     comparison_base = _copy(base, profile_name="L2-kv-unified", parallel=parallel, kv_unified=True)
+    q8_profile = _copy(
+        comparison_base,
+        profile_name="L6-q8-kv",
+        cache_type_k="q8_0",
+        cache_type_v="q8_0",
+    )
     ladder = [
         base,
         _copy(base, profile_name="L1-parallel", parallel=parallel),
@@ -63,17 +69,12 @@ def build_core_flag_ladder(
             profile_name="L5-checkpoints",
             ctx_checkpoints=16,
         ),
-        _copy(
-            comparison_base,
-            profile_name="L6-q8-kv",
-            cache_type_k="q8_0",
-            cache_type_v="q8_0",
-        ),
+        q8_profile,
     ]
     for threads in (12, 16, 24, 32):
         ladder.append(
             _copy(
-                comparison_base,
+                q8_profile,
                 profile_name=f"T{threads}-threads",
                 threads=threads,
                 threads_batch=threads,

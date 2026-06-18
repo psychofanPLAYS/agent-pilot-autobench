@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Usage questions and ideas
+    url: https://github.com/psychofanPLAYS/agent-pilot-autobench/discussions
+    about: Ask for setup help or discuss benchmark interpretation.
+  - name: Private security report
+    url: https://github.com/psychofanPLAYS/agent-pilot-autobench/security/advisories/new
+    about: Report vulnerabilities without exposing details publicly.

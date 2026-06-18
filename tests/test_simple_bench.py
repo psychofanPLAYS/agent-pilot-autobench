@@ -17,8 +17,13 @@ from gguf_limit_bench.simple_bench import (
     combine_simple_bench_results,
     extract_final_answer,
     load_simple_bench_questions,
+    load_simple_bench_system_prompt,
 )
-from gguf_limit_bench.simple_bench_runner import _write_short_logs, measure_simple_bench_completion
+from gguf_limit_bench.simple_bench_runner import (
+    _write_launch_receipt,
+    _write_short_logs,
+    measure_simple_bench_completion,
+)
 
 
 def test_load_simple_bench_public_shape(tmp_path):
@@ -152,7 +157,34 @@ def test_simple_bench_score_is_accuracy_first_speed_second():
     assert batch.ok is True
     assert batch.accuracy == 0.5
     assert batch.median_tps == 50.0
-    assert batch.score == 550.0
+    assert 500.0 < batch.score < 1000.0
+
+
+def test_one_more_correct_answer_always_beats_unbounded_speed():
+    def batch(*, correct: bool, tps: float):
+        return combine_simple_bench_results(
+            [
+                SimpleBenchQuestionResult(
+                    question_id=1,
+                    expected_answer="A",
+                    predicted_answer="A" if correct else "B",
+                    correct=correct,
+                    ttft_ms=10.0,
+                    tokens_per_second=tps,
+                    generated_tokens=1,
+                    output_chars=1,
+                    prompt_chars=1,
+                    response="Final Answer: A" if correct else "Final Answer: B",
+                )
+            ]
+        )
+
+    assert batch(correct=True, tps=1.0).score > batch(correct=False, tps=1_000_000.0).score
+
+
+def test_explicit_missing_system_prompt_is_rejected(tmp_path):
+    with pytest.raises(FileNotFoundError, match="system prompt"):
+        load_simple_bench_system_prompt(tmp_path / "missing.txt")
 
 
 def test_core_flag_ladder_builds_ordered_profiles_and_extra_args():
@@ -174,6 +206,8 @@ def test_core_flag_ladder_builds_ordered_profiles_and_extra_args():
     assert ladder[0].context_size == 8192
     assert ladder[1].parallel == 6
     assert ladder[-1].threads == 32
+    assert all(settings.cache_type_k == "q8_0" for settings in ladder[7:])
+    assert all(settings.cache_type_v == "q8_0" for settings in ladder[7:])
     assert ladder[0].extra_server_args == ("--dry-run",)
 
 
@@ -281,6 +315,15 @@ def test_remaining_attempt_timeout_is_bounded_and_fails_when_exhausted(monkeypat
         simple_bench_runner._remaining_timeout_seconds(100.0)
 
 
+def test_launch_receipt_stores_exact_argv_without_executable_cmd(tmp_path):
+    command = ["llama-server.exe", "--model", "G:\\models\\A&B 50%.gguf", "--flag=^value"]
+
+    _write_launch_receipt(tmp_path, command)
+
+    assert json.loads((tmp_path / "launch-command.json").read_text(encoding="utf-8")) == command
+    assert not (tmp_path / "launch.cmd").exists()
+
+
 def test_candidate_sequence_writes_flag_slowdown_comparison(tmp_path):
     candidates = (
         AutoresearchSettings(profile_name="L0-baseline"),
@@ -316,3 +359,54 @@ def test_candidate_sequence_writes_flag_slowdown_comparison(tmp_path):
     assert payload["champion_profile"] == "L0-baseline"
     assert payload["rows"][1]["slowdown_vs_baseline_percent"] == 20.0
     assert "Slowdown vs L0" in (receipt.path / "flag-ladder-results.md").read_text(encoding="utf-8")
+
+
+def test_partial_candidate_sequence_is_labeled_and_has_no_champion(tmp_path):
+    candidates = (
+        AutoresearchSettings(profile_name="L0-baseline"),
+        AutoresearchSettings(profile_name="L1-parallel", parallel=4),
+    )
+
+    class BoundedRunner:
+        def __init__(self):
+            self.timeouts: list[int] = []
+
+        def set_timeout_seconds(self, timeout_seconds: int) -> None:
+            self.timeouts.append(timeout_seconds)
+
+        def __call__(self, settings):
+            return AttemptResult(
+                ok=True,
+                generation_tokens_per_second=100.0,
+                prompt_tokens_per_second=0.0,
+                ttft_ms=50.0,
+                context_size=settings.context_size,
+                failure="none",
+                stdout="",
+                stderr="",
+                returncode=0,
+                flag_profile=settings.profile_name,
+                simple_bench_score=500.0,
+                simple_bench_accuracy=0.5,
+            )
+
+    runner = BoundedRunner()
+    receipt = AutoresearchLoop(
+        model=Path("model.gguf"),
+        runs_root=tmp_path,
+        attempt_runner=runner,
+        budget_seconds=7,
+        max_attempts=1,
+        candidate_sequence=candidates,
+    ).run()
+
+    payload = json.loads((receipt.path / "flag-ladder-results.json").read_text(encoding="utf-8"))
+    assert runner.timeouts and 1 <= runner.timeouts[0] <= 7
+    assert payload["status"] == "partial"
+    assert payload["planned_profiles"] == 2
+    assert payload["completed_profiles"] == 1
+    assert payload["champion_profile"] is None
+    assert payload["provisional_best_profile"] == "L0-baseline"
+    best = json.loads((receipt.path / "best-settings.json").read_text(encoding="utf-8"))
+    assert best["status"] == "partial"
+    assert best["promotion_eligible"] is False

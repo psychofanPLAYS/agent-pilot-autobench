@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import json
+import math
 from pathlib import Path
 import re
 
@@ -105,6 +106,8 @@ def load_simple_bench_questions(path: Path | None = None) -> list[SimpleBenchQue
 def load_simple_bench_system_prompt(path: Path | None = None) -> str:
     source = path or DEFAULT_SIMPLE_BENCH_SYSTEM_PROMPT
     if not source.exists():
+        if path is not None:
+            raise FileNotFoundError(f"SimpleBench system prompt was not found: {source}")
         return (
             "You are an expert at reasoning. Think briefly, then end with "
             "Final Answer: X where X is A, B, C, D, E, or F."
@@ -144,9 +147,10 @@ def combine_simple_bench_results(
     median_tps = _median(tps_values) or 0.0
     min_tps = min(tps_values) if tps_values else 0.0
     median_ttft = _median(ttft_values)
-    # Accuracy dominates, then speed separates ties. This keeps the loop from
-    # choosing a fast setting that gets the fixed reasoning questions wrong.
-    score = accuracy * 1000.0 + median_tps
+    # Accuracy wins lexicographically. The bounded speed term is always smaller
+    # than the score change from one additional correct answer.
+    speed_tiebreaker = (2.0 / math.pi) * math.atan(max(0.0, median_tps))
+    score = accuracy * 1000.0 + speed_tiebreaker * (1000.0 / (total + 1))
     failures = [result.failure for result in results if result.failure != "none"]
     return SimpleBenchBatchResult(
         ok=total > 0 and not failures,

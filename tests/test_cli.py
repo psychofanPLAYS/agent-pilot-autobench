@@ -322,6 +322,30 @@ def test_autoresearch_flag_ladder_dry_run_writes_plan_without_runner(tmp_path, m
     assert "--dry" in plan["profiles"][0]["command"]
 
 
+def test_autoresearch_dry_run_requires_flag_ladder(tmp_path, monkeypatch):
+    def fail_runner(*args, **kwargs):
+        raise AssertionError("invalid dry run must not create a benchmark runner")
+
+    monkeypatch.setattr("gguf_limit_bench.cli.LlamaBenchAttemptRunner", fail_runner)
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"fake")
+
+    result = runner.invoke(
+        app,
+        [
+            "autoresearch",
+            "--model",
+            str(model),
+            "--runs-root",
+            str(tmp_path / "runs"),
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "--dry-run requires --flag-ladder" in result.output
+
+
 def test_autoresearch_all_qwen_only_skips_non_qwen_models(tmp_path, monkeypatch):
     monkeypatch.setattr("gguf_limit_bench.cli.LlamaBenchAttemptRunner", FakeAttemptRunner)
     qwen = ModelInfo(path=tmp_path / "Qwen3-Test-Q4_K_M.gguf", name="qwen", family="qwen")
