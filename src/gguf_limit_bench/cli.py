@@ -14,7 +14,10 @@ from rich.console import Console
 from rich.table import Table
 
 from gguf_limit_bench.autoresearch import (
+    AttemptResult,
+    AttemptRunner,
     AutoresearchLoop,
+    AutoresearchSettings,
     LlamaBenchAttemptRunner,
     LlamaPerplexityRunner,
 )
@@ -48,10 +51,21 @@ from gguf_limit_bench.installer import (
 )
 from gguf_limit_bench.learning import OptunaSettingsLearner
 from gguf_limit_bench.packs import load_benchmark_packs
+from gguf_limit_bench.flag_ladder import (
+    build_core_flag_ladder,
+    build_flag_ladder_plan,
+    validate_extra_server_args,
+)
+from gguf_limit_bench.receipts import RunReceipt
 from gguf_limit_bench.reports import write_leaderboard
 from gguf_limit_bench.runner import BenchmarkRunner
 from gguf_limit_bench.run_config import PRESETS, RunConfig
 from gguf_limit_bench.server_probe import DEFAULT_AGENT_TTFT_PROMPT, probe_llama_server_ttft
+from gguf_limit_bench.simple_bench import (
+    DEFAULT_SIMPLE_BENCH_PATH,
+    DEFAULT_SIMPLE_BENCH_SYSTEM_PROMPT,
+)
+from gguf_limit_bench.simple_bench_runner import LlamaServerSimpleBenchAttemptRunner
 from gguf_limit_bench.state_db import init_state_db
 from gguf_limit_bench.tui import BenchTui
 from gguf_limit_bench.workflows import WorkflowAugmentedAttemptRunner, WorkflowEvaluator
@@ -914,14 +928,14 @@ def serve_probe(
 @app.command()
 def autoresearch(
     model: Annotated[Path, typer.Option(help="GGUF model path.")],
-    budget_minutes: int = 5,
+    budget_minutes: int = typer.Option(5, min=1),
     parallel_max: int | None = None,
     llama_bench: Path | None = None,
     llama_cli: Path | None = None,
     llama_server: Path | None = None,
     llama_perplexity: Path | None = None,
     runs_root: Path | None = None,
-    max_attempts: int | None = None,
+    max_attempts: int | None = typer.Option(None, min=1),
     learning: bool = True,
     workflow_eval: bool = True,
     ttft_probe: bool = True,
@@ -948,7 +962,51 @@ def autoresearch(
             "by agent_bench_score."
         ),
     ),
+    flag_ladder: bool = typer.Option(
+        False,
+        "--flag-ladder",
+        help="Run a fixed llama-server flag ladder through the 10-question SimpleBench batch.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Write the flag-ladder launch plan without starting llama-server.",
+    ),
+    flag_context_size: int = typer.Option(
+        4096,
+        "--flag-context-size",
+        min=1,
+        help="Context size used by every rung in the flag ladder.",
+    ),
+    simple_bench: Path = typer.Option(
+        DEFAULT_SIMPLE_BENCH_PATH,
+        "--simple-bench",
+        help="SimpleBench JSON file with eval_data rows.",
+    ),
+    simple_bench_system_prompt: Path = typer.Option(
+        DEFAULT_SIMPLE_BENCH_SYSTEM_PROMPT,
+        "--simple-bench-system-prompt",
+        help="System prompt prepended before each SimpleBench question.",
+    ),
+    simple_bench_max_tokens: int = typer.Option(
+        1024,
+        "--simple-bench-max-tokens",
+        min=1,
+        help="Maximum generated tokens per SimpleBench question.",
+    ),
+    llama_server_extra_arg: list[str] | None = typer.Option(
+        None,
+        "--llama-server-extra-arg",
+        help="Extra raw llama-server argument appended to every flag-ladder rung. Repeatable.",
+    ),
 ) -> None:
+    try:
+        extra_server_args = validate_extra_server_args(tuple(llama_server_extra_arg or ()))
+    except ValueError as exc:
+        raise typer.BadParameter(
+            str(exc),
+            param_hint="--llama-server-extra-arg",
+        ) from exc
     config = with_cli_overrides(
         load_config(),
         llama_bench=llama_bench,
@@ -976,6 +1034,13 @@ def autoresearch(
         perplexity_context=_context_ladder_or_none(perplexity_context),
         benchmark_suite_plan=benchmark_suite_plan,
         enable_mtp=_is_mtp_model(model),
+        flag_ladder=flag_ladder,
+        dry_run=dry_run,
+        flag_context_size=flag_context_size,
+        simple_bench=simple_bench,
+        simple_bench_system_prompt=simple_bench_system_prompt,
+        simple_bench_max_tokens=simple_bench_max_tokens,
+        llama_server_extra_args=extra_server_args,
     )
     _print_receipt_outputs(receipt.path)
 
@@ -1223,12 +1288,51 @@ def _run_one_autoresearch(
     perplexity_context: tuple[int, ...] | None = None,
     benchmark_suite_plan: Path | None = None,
     enable_mtp: bool = False,
+    flag_ladder: bool = False,
+    dry_run: bool = False,
+    flag_context_size: int = 4096,
+    simple_bench: Path = DEFAULT_SIMPLE_BENCH_PATH,
+    simple_bench_system_prompt: Path = DEFAULT_SIMPLE_BENCH_SYSTEM_PROMPT,
+    simple_bench_max_tokens: int = 1024,
+    llama_server_extra_args: tuple[str, ...] = (),
 ):
-    attempt_runner = LlamaBenchAttemptRunner(
-        llama_bench=llama_bench,
-        model=model,
-        timeout_seconds=max(30, budget_seconds),
-    )
+    candidate_sequence = None
+    attempt_runner: AttemptRunner
+    if flag_ladder:
+        candidate_sequence = build_core_flag_ladder(
+            context_size=flag_context_size,
+            parallel_max=parallel_max,
+            extra_server_args=llama_server_extra_args,
+            enable_mtp=enable_mtp,
+        )
+        if dry_run:
+            return _write_flag_ladder_dry_run(
+                model=model,
+                llama_server=llama_server,
+                runs_root=runs_root,
+                context_size=flag_context_size,
+                parallel_max=parallel_max,
+                extra_server_args=llama_server_extra_args,
+                enable_mtp=enable_mtp,
+            )
+        attempt_runner = LlamaServerSimpleBenchAttemptRunner(
+            llama_server=llama_server,
+            model=model,
+            benchmark_path=simple_bench,
+            system_prompt_path=simple_bench_system_prompt,
+            timeout_seconds=max(60, budget_seconds),
+            max_tokens=simple_bench_max_tokens,
+        )
+        learning = False
+        workflow_eval = False
+        ttft_probe = False
+        max_attempts = max_attempts if max_attempts is not None else len(candidate_sequence)
+    else:
+        attempt_runner = LlamaBenchAttemptRunner(
+            llama_bench=llama_bench,
+            model=model,
+            timeout_seconds=max(30, budget_seconds),
+        )
     if workflow_eval:
         attempt_runner = WorkflowAugmentedAttemptRunner(
             bench_runner=attempt_runner,
@@ -1242,7 +1346,7 @@ def _run_one_autoresearch(
     if ttft_probe:
         base_runner = attempt_runner
 
-        def attempt_runner(settings):
+        def ttft_attempt_runner(settings: AutoresearchSettings) -> AttemptResult:
             result = base_runner(settings)
             if not result.ok:
                 return result
@@ -1267,6 +1371,8 @@ def _run_one_autoresearch(
                 serving_question_results=serving.question_results,
                 serving_failure=None,
             )
+
+        attempt_runner = ttft_attempt_runner
 
     loop = AutoresearchLoop(
         model=model,
@@ -1293,8 +1399,76 @@ def _run_one_autoresearch(
             else None
         ),
         perplexity_contexts=perplexity_context,
+        candidate_sequence=candidate_sequence,
     )
     return loop.run()
+
+
+def _write_flag_ladder_dry_run(
+    *,
+    model: Path,
+    llama_server: Path,
+    runs_root: Path,
+    context_size: int,
+    parallel_max: int,
+    extra_server_args: tuple[str, ...],
+    enable_mtp: bool,
+) -> RunReceipt:
+    receipt = RunReceipt.create(runs_root, slug=f"{model.stem}-flag-ladder-dry-run")
+    plan = build_flag_ladder_plan(
+        llama_server=llama_server,
+        model=model,
+        host="127.0.0.1",
+        port=6939,
+        context_size=context_size,
+        parallel_max=parallel_max,
+        extra_server_args=extra_server_args,
+        enable_mtp=enable_mtp,
+    )
+    receipt.write_json(
+        "flag-ladder-plan.json",
+        {
+            "model": str(model),
+            "llama_server": str(llama_server),
+            "context_size": context_size,
+            "parallel_max": parallel_max,
+            "extra_server_args": list(extra_server_args),
+            "mtp_heads_detected": enable_mtp,
+            "mtp_detection": "model filename contains MTP" if enable_mtp else "not detected",
+            "profiles": plan,
+            "dry_run": True,
+        },
+    )
+    (receipt.path / "flag-ladder-plan.md").write_text(
+        _flag_ladder_plan_markdown(model=model, plan=plan),
+        encoding="utf-8",
+    )
+    receipt.write_summary(
+        [
+            f"# Flag Ladder Dry Run: {model.name}",
+            "",
+            "No llama-server process was started.",
+            "",
+            f"- Plan JSON: `{receipt.path / 'flag-ladder-plan.json'}`",
+            f"- Plan Markdown: `{receipt.path / 'flag-ladder-plan.md'}`",
+        ]
+    )
+    receipt.event("flag_ladder_dry_run_written", {"profiles": plan})
+    receipt.mark_recovery(step="flag-ladder-dry-run", status="finished")
+    return receipt
+
+
+def _flag_ladder_plan_markdown(*, model: Path, plan: list[dict]) -> str:
+    lines = [
+        f"# Flag Ladder Plan: {model.name}",
+        "",
+        "| Profile | Hypothesis | Command |",
+        "| --- | --- | --- |",
+    ]
+    for row in plan:
+        command = " ".join(str(part) for part in row["command"])
+        lines.append(f"| {row['name']} | {row['hypothesis']} | `{command}` |")
+    return "\n".join(lines) + "\n"
 
 
 def _run_tui_selection(
@@ -1390,6 +1564,8 @@ def _print_receipt_outputs(receipt_path: Path) -> None:
     browser_report = receipt_path / "report.html"
     context_profile = receipt_path / "context-profile.md"
     perplexity_profile = receipt_path / "perplexity-profile.md"
+    flag_ladder_plan = receipt_path / "flag-ladder-plan.md"
+    flag_ladder_results = receipt_path / "flag-ladder-results.md"
     if report_path.exists():
         console.print(f"Itemized report: {report_path}")
     if browser_report.exists():
@@ -1398,6 +1574,10 @@ def _print_receipt_outputs(receipt_path: Path) -> None:
         console.print(f"Context profile: {context_profile}")
     if perplexity_profile.exists():
         console.print(f"Perplexity profile: {perplexity_profile}")
+    if flag_ladder_plan.exists():
+        console.print(f"Flag ladder plan: {flag_ladder_plan}")
+    if flag_ladder_results.exists():
+        console.print(f"Flag ladder results: {flag_ladder_results}")
 
 
 def _receipt_score(receipt_path: Path) -> float | None:

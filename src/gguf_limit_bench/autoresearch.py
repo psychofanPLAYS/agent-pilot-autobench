@@ -19,8 +19,37 @@ from gguf_limit_bench.run_report import write_itemized_run_report
 from gguf_limit_bench.telemetry import classify_failure, sample_telemetry
 
 
+BASE_SETTING_FIELDS = (
+    "context_size",
+    "parallel",
+    "gpu_layers",
+    "batch_size",
+    "ubatch_size",
+    "flash_attention",
+    "kv_unified",
+)
+EXTRA_SETTING_DEFAULTS = {
+    "profile_name": "baseline",
+    "cont_batching": True,
+    "cache_ram_mb": None,
+    "cache_reuse": None,
+    "cache_idle_slots": False,
+    "ctx_checkpoints": None,
+    "checkpoint_min_step": None,
+    "cache_type_k": None,
+    "cache_type_v": None,
+    "threads": None,
+    "threads_batch": None,
+    "draft_max": None,
+    "draft_min": None,
+    "draft_p_min": None,
+    "extra_server_args": (),
+}
+
+
 @dataclass(frozen=True)
 class AutoresearchSettings:
+    profile_name: str = "baseline"
     context_size: int = 4096
     parallel: int = 1
     gpu_layers: int = 99
@@ -28,9 +57,28 @@ class AutoresearchSettings:
     ubatch_size: int = 512
     flash_attention: bool = True
     kv_unified: bool = True
+    cont_batching: bool = True
+    cache_ram_mb: int | None = None
+    cache_reuse: int | None = None
+    cache_idle_slots: bool = False
+    ctx_checkpoints: int | None = None
+    checkpoint_min_step: int | None = None
+    cache_type_k: str | None = None
+    cache_type_v: str | None = None
+    threads: int | None = None
+    threads_batch: int | None = None
+    draft_max: int | None = None
+    draft_min: int | None = None
+    draft_p_min: float | None = None
+    extra_server_args: tuple[str, ...] = ()
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        payload = {field_name: getattr(self, field_name) for field_name in BASE_SETTING_FIELDS}
+        for field_name, default in EXTRA_SETTING_DEFAULTS.items():
+            value = getattr(self, field_name)
+            if value != default:
+                payload[field_name] = value
+        return payload
 
 
 @dataclass(frozen=True)
@@ -60,10 +108,18 @@ class AttemptResult:
     benchmark_suite_ok: bool | None = None
     benchmark_suite_receipt: str | None = None
     benchmark_suite_failure: str | None = None
+    flag_profile: str | None = None
+    launch_command: list[str] = field(default_factory=list)
+    simple_bench_score: float | None = None
+    simple_bench_accuracy: float | None = None
+    simple_bench_receipt: str | None = None
+    simple_bench_failure: str | None = None
 
     def score(self) -> float:
         if not self.ok:
             return -10_000.0
+        if self.simple_bench_score is not None:
+            return self.simple_bench_score
         if self.agent_bench_score is not None:
             return self.agent_bench_score
         context_bonus = min(self.context_size, 131_072) / 4096.0
@@ -204,6 +260,7 @@ class AutoresearchLoop:
         context_ladder: tuple[int, ...] | None = None,
         perplexity_runner: PerplexityRunner | None = None,
         perplexity_contexts: tuple[int, ...] | None = None,
+        candidate_sequence: tuple[AutoresearchSettings, ...] | None = None,
     ) -> None:
         self.model = model
         self.runs_root = runs_root
@@ -216,15 +273,22 @@ class AutoresearchLoop:
         self.context_ladder = context_ladder
         self.perplexity_runner = perplexity_runner
         self.perplexity_contexts = perplexity_contexts
+        self.candidate_sequence = candidate_sequence
 
     def run(self) -> RunReceipt:
         receipt = RunReceipt.create(self.runs_root, slug=_safe_slug(self.model.stem))
+        attach_receipt = getattr(self.attempt_runner, "set_receipt_path", None)
+        if callable(attach_receipt):
+            attach_receipt(receipt.path)
         receipt.event(
             "autoresearch_started",
             {
                 "model": str(self.model),
                 "budget_seconds": self.budget_seconds,
                 "parallel_max": self.parallel_max,
+                "candidate_sequence": [
+                    settings.to_dict() for settings in self.candidate_sequence or ()
+                ],
             },
         )
         receipt.mark_recovery(step="autoresearch", status="running")
@@ -234,11 +298,16 @@ class AutoresearchLoop:
         last_settings = best_settings
         last_result: AttemptResult | None = None
         failures: list[dict] = []
+        attempt_records: list[tuple[AutoresearchSettings, AttemptResult]] = []
         started = time.monotonic()
         attempt_index = 0
 
         while time.monotonic() - started < self.budget_seconds:
             if self.max_attempts is not None and attempt_index >= self.max_attempts:
+                break
+            if self.candidate_sequence is not None and attempt_index >= len(
+                self.candidate_sequence
+            ):
                 break
             suggestion = self.learner.suggest() if self.learner is not None else None
             settings = (
@@ -262,7 +331,8 @@ class AutoresearchLoop:
                 remaining_seconds = self.budget_seconds - (time.monotonic() - started)
                 result = self._with_benchmark_suite(result, settings, remaining_seconds)
             last_result = result
-            if suggestion is not None:
+            attempt_records.append((settings, result))
+            if suggestion is not None and self.learner is not None:
                 self.learner.tell(suggestion, result)
             decision = _decision_for_attempt(result, best_result)
             if not result.ok:
@@ -363,10 +433,19 @@ class AutoresearchLoop:
             self._write_context_profile(receipt, best_settings)
         if self.perplexity_runner is not None and self.perplexity_contexts:
             self._write_perplexity_profile(receipt, best_settings)
+        if self.candidate_sequence is not None:
+            _write_flag_ladder_comparison(
+                receipt=receipt,
+                model=self.model,
+                attempts=attempt_records,
+                champion_profile=best_settings.profile_name,
+            )
         write_itemized_run_report(receipt.path)
         return receipt
 
     def _candidate(self, best: AutoresearchSettings, attempt_index: int) -> AutoresearchSettings:
+        if self.candidate_sequence is not None:
+            return self.candidate_sequence[attempt_index]
         if attempt_index == 0:
             return best
         mutation = (attempt_index - 1) % 4
@@ -613,12 +692,127 @@ def _perplexity_profile_markdown(payload: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _tsv_float(value) -> str:
-    return "" if value is None else f"{float(value):.6g}"
-
-
 def _md_float(value) -> str:
     return "n/a" if value is None else f"{float(value):.2f}"
+
+
+def _write_flag_ladder_comparison(
+    *,
+    receipt: RunReceipt,
+    model: Path,
+    attempts: list[tuple[AutoresearchSettings, AttemptResult]],
+    champion_profile: str,
+) -> None:
+    baseline_tps = next(
+        (
+            result.generation_tokens_per_second
+            for settings, result in attempts
+            if settings.profile_name == "L0-baseline" and result.ok
+        ),
+        None,
+    )
+    rows = []
+    for settings, result in attempts:
+        tps = result.generation_tokens_per_second if result.ok else None
+        slowdown_percent = (
+            ((baseline_tps - tps) / baseline_tps) * 100.0
+            if baseline_tps and tps is not None
+            else None
+        )
+        warning_count = _attempt_warning_count(result.simple_bench_receipt)
+        rows.append(
+            {
+                "profile": settings.profile_name,
+                "ok": result.ok,
+                "champion": settings.profile_name == champion_profile,
+                "score": result.simple_bench_score,
+                "accuracy": result.simple_bench_accuracy,
+                "median_tps": tps,
+                "slowdown_vs_baseline_percent": slowdown_percent,
+                "median_ttft_ms": result.ttft_ms,
+                "warning_count": warning_count,
+                "failure": result.failure,
+                "settings": settings.to_dict(),
+                "command": result.launch_command,
+                "receipt": result.simple_bench_receipt,
+            }
+        )
+    payload = {
+        "model": str(model),
+        "champion_profile": champion_profile,
+        "baseline_profile": "L0-baseline",
+        "baseline_tps": baseline_tps,
+        "rows": rows,
+    }
+    receipt.write_json("flag-ladder-results.json", payload)
+    (receipt.path / "flag-ladder-results.tsv").write_text(_flag_ladder_tsv(rows), encoding="utf-8")
+    (receipt.path / "flag-ladder-results.md").write_text(
+        _flag_ladder_markdown(payload), encoding="utf-8"
+    )
+
+
+def _attempt_warning_count(receipt_path: str | None) -> int | None:
+    if not receipt_path:
+        return None
+    summary_path = Path(receipt_path) / "summary.json"
+    try:
+        payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    value = payload.get("warning_count")
+    return int(value) if value is not None else None
+
+
+def _flag_ladder_tsv(rows: list[dict]) -> str:
+    header = (
+        "profile\tok\tchampion\tscore\taccuracy\tmedian_tps\t"
+        "slowdown_vs_baseline_percent\tmedian_ttft_ms\twarning_count\tfailure\treceipt"
+    )
+    lines = [header]
+    for row in rows:
+        lines.append(
+            "\t".join(
+                [
+                    row["profile"],
+                    str(row["ok"]).lower(),
+                    str(row["champion"]).lower(),
+                    _tsv_float(row["score"]),
+                    _tsv_float(row["accuracy"]),
+                    _tsv_float(row["median_tps"]),
+                    _tsv_float(row["slowdown_vs_baseline_percent"]),
+                    _tsv_float(row["median_ttft_ms"]),
+                    "" if row["warning_count"] is None else str(row["warning_count"]),
+                    str(row["failure"]),
+                    str(row["receipt"] or ""),
+                ]
+            )
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _flag_ladder_markdown(payload: dict) -> str:
+    lines = [
+        f"# Flag Ladder Results: {Path(payload['model']).name}",
+        "",
+        f"Champion: `{payload['champion_profile']}`",
+        "",
+        "Positive slowdown means slower than L0; negative means faster.",
+        "",
+        "| Profile | OK | Champion | Accuracy | TPS | Slowdown vs L0 | TTFT ms | Warnings | Failure |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |",
+    ]
+    for row in payload["rows"]:
+        lines.append(
+            "| "
+            f"{row['profile']} | {str(row['ok']).lower()} | "
+            f"{str(row['champion']).lower()} | {_md_float(row['accuracy'])} | "
+            f"{_md_float(row['median_tps'])} | "
+            f"{_md_float(row['slowdown_vs_baseline_percent'])}% | "
+            f"{_md_float(row['median_ttft_ms'])} | "
+            f"{row['warning_count'] if row['warning_count'] is not None else 'n/a'} | "
+            f"{row['failure']} |"
+        )
+    return "\n".join(lines) + "\n"
 
 
 def build_autoresearch_llama_bench_command(
@@ -750,16 +944,23 @@ def _summary_lines(
         "## Best Settings",
         "",
         f"- Context: `{settings.context_size}`",
+        f"- Profile: `{settings.profile_name}`",
         f"- Parallel: `{settings.parallel}`",
         f"- GPU layers: `{settings.gpu_layers}`",
         f"- Batch / ubatch: `{settings.batch_size}` / `{settings.ubatch_size}`",
         f"- Flash attention: `{settings.flash_attention}`",
         f"- Unified KV cache: `{settings.kv_unified}`",
+        f"- Extra llama-server args: `{list(settings.extra_server_args)}`",
         "",
         "## Best Result",
         "",
         f"- Generation tokens/sec: `{result.generation_tokens_per_second}`",
         f"- Prompt tokens/sec: `{result.prompt_tokens_per_second}`",
+        f"- Flag profile: `{result.flag_profile or settings.profile_name}`",
+        f"- SimpleBench score: `{result.simple_bench_score}`",
+        f"- SimpleBench accuracy: `{result.simple_bench_accuracy}`",
+        f"- SimpleBench receipt: `{result.simple_bench_receipt or 'none'}`",
+        f"- SimpleBench failure: `{result.simple_bench_failure or 'none'}`",
         f"- Workflow score: `{result.workflow_score}`",
         f"- Agent bench score: `{result.agent_bench_score}`",
         f"- Benchmark suite general score: `{result.benchmark_suite_general_score}`",

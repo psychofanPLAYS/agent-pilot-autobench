@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import sys
 
+import pytest
 from typer.testing import CliRunner
 
 from gguf_limit_bench.autoresearch import AttemptResult, PerplexityResult
@@ -35,6 +36,52 @@ class FakeAttemptRunner:
             stderr="",
             returncode=0,
         )
+
+
+@pytest.mark.parametrize(
+    ("option", "value"),
+    [
+        ("--budget-minutes", "0"),
+        ("--max-attempts", "-1"),
+        ("--flag-context-size", "0"),
+        ("--simple-bench-max-tokens", "0"),
+    ],
+)
+def test_autoresearch_rejects_non_positive_numeric_options(monkeypatch, option, value):
+    def fail_run(*args, **kwargs):
+        raise AssertionError("invalid CLI input must fail before autoresearch starts")
+
+    monkeypatch.setattr("gguf_limit_bench.cli._run_one_autoresearch", fail_run)
+
+    result = runner.invoke(
+        app,
+        ["autoresearch", "--model", "model.gguf", option, value],
+    )
+
+    assert result.exit_code == 2
+    assert "Invalid value" in result.output
+
+
+@pytest.mark.parametrize("argument", ["--host=0.0.0.0", "--port", "--model=other.gguf"])
+def test_autoresearch_rejects_extra_args_that_override_managed_server_fields(monkeypatch, argument):
+    def fail_run(*args, **kwargs):
+        raise AssertionError("unsafe extra args must fail before autoresearch starts")
+
+    monkeypatch.setattr("gguf_limit_bench.cli._run_one_autoresearch", fail_run)
+
+    result = runner.invoke(
+        app,
+        [
+            "autoresearch",
+            "--model",
+            "model.gguf",
+            "--flag-ladder",
+            f"--llama-server-extra-arg={argument}",
+        ],
+        terminal_width=200,
+    )
+
+    assert result.exit_code == 2
 
 
 def test_autoresearch_command_writes_receipts(tmp_path, monkeypatch):
@@ -236,6 +283,43 @@ def test_autoresearch_command_accepts_benchmark_suite_plan(tmp_path, monkeypatch
     assert "agent_bench_score" in (tmp_path / "runs" / "autoresearch-attempts.tsv").read_text(
         encoding="utf-8"
     )
+
+
+def test_autoresearch_flag_ladder_dry_run_writes_plan_without_runner(tmp_path, monkeypatch):
+    def fail_runner(*args, **kwargs):
+        raise AssertionError("dry run should not create a benchmark runner")
+
+    monkeypatch.setattr("gguf_limit_bench.cli.LlamaServerSimpleBenchAttemptRunner", fail_runner)
+    model = tmp_path / "Qwen3-Test-Q4_K_M.gguf"
+    model.write_bytes(b"fake")
+
+    result = runner.invoke(
+        app,
+        [
+            "autoresearch",
+            "--model",
+            str(model),
+            "--runs-root",
+            str(tmp_path / "runs"),
+            "--llama-server",
+            str(tmp_path / "llama-server.exe"),
+            "--flag-ladder",
+            "--dry-run",
+            "--flag-context-size",
+            "8192",
+            "--parallel-max",
+            "4",
+            "--llama-server-extra-arg=--dry",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    run_dirs = list((tmp_path / "runs").iterdir())
+    plan = json.loads((run_dirs[0] / "flag-ladder-plan.json").read_text(encoding="utf-8"))
+    assert plan["dry_run"] is True
+    assert plan["context_size"] == 8192
+    assert plan["profiles"][0]["name"] == "L0-baseline"
+    assert "--dry" in plan["profiles"][0]["command"]
 
 
 def test_autoresearch_all_qwen_only_skips_non_qwen_models(tmp_path, monkeypatch):
