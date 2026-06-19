@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 import re
 
+from gguf_limit_bench.model_identity import ModelIdentity, resolve_path_identity
+
 
 QUANT_RE = re.compile(r"(IQ\d_[A-Z]+|Q\d_[A-Z](?:_[A-Z]+)?|Q8_0|MXFP4_MOE|TQ\d_\dS)", re.I)
 PARAM_RE = re.compile(r"(\d+(?:\.\d+)?B(?:-A\d+B?)?)", re.I)
@@ -20,6 +22,7 @@ class ModelInfo:
     is_moe: bool = False
     has_mtp: bool = False
     vision_mmproj: Path | None = None
+    identity: ModelIdentity | None = None
 
     @property
     def has_vision(self) -> bool:
@@ -76,6 +79,7 @@ def discover_models(roots: list[Path]) -> list[ModelInfo]:
                     is_moe=info.is_moe,
                     has_mtp=info.has_mtp,
                     vision_mmproj=mmproj,
+                    identity=resolve_path_identity(path),
                 )
             )
     return sorted(models, key=lambda model: (-model.size_bytes, str(model.path).lower()))
