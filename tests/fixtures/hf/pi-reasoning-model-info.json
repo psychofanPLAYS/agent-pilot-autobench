@@ -1,0 +1,16 @@
+{
+  "id": "bytkim/Qwen3.6-27B-MTP-pi-reasoning-GGUF",
+  "sha": "cc2a865cdb2dd229fbd0ee89d00f9dcb3db0c3bf",
+  "lastModified": "2026-06-15T07:15:44Z",
+  "pipeline_tag": "image-text-to-text",
+  "library_name": "gguf",
+  "cardData": {
+    "license": "apache-2.0",
+    "base_model": ["Qwen/Qwen3.6-27B"],
+    "datasets": ["bytkim/deepseek-v4-pro-pi-reasoning-sample-traces"]
+  },
+  "siblings": [
+    {"rfilename": "README.md"},
+    {"rfilename": "Qwen3.6-27B-MTP-pi-reasoning-Q5_K_M.gguf"}
+  ]
+}
