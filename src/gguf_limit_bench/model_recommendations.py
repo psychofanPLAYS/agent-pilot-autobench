@@ -5,6 +5,8 @@ import re
 import shlex
 from typing import Any, Callable
 
+from gguf_limit_bench.runtime_capabilities import LlamaCapabilities
+
 
 @dataclass(frozen=True)
 class RecommendationSource:
@@ -86,6 +88,28 @@ def recommendation_values(
         if not item.conflicted:
             values[item.key] = item.value
     return values
+
+
+def validate_recommendations(
+    recommendations: tuple[Recommendation, ...],
+    capabilities: LlamaCapabilities,
+) -> tuple[Recommendation, ...]:
+    validated: list[Recommendation] = []
+    for item in recommendations:
+        flag = item.evidence.split(maxsplit=1)[0]
+        if capabilities.supports(flag):
+            validated.append(
+                replace(
+                    item,
+                    confidence="locally_validated",
+                    local_validation="supported",
+                )
+            )
+        elif capabilities.is_removed(flag):
+            validated.append(replace(item, confidence="rejected", local_validation="removed"))
+        else:
+            validated.append(replace(item, confidence="rejected", local_validation="unsupported"))
+    return tuple(validated)
 
 
 def _parse_command_block(
