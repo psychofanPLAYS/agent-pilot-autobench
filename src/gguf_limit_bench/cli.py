@@ -6,7 +6,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import json
 import time
-from typing import Annotated
+from typing import Annotated, Callable
 import webbrowser
 
 import typer
@@ -54,9 +54,14 @@ from gguf_limit_bench.packs import load_benchmark_packs
 from gguf_limit_bench.flag_ladder import (
     build_core_flag_ladder,
     build_flag_ladder_plan,
+    filter_unsupported_profiles,
     validate_extra_server_args,
 )
 from gguf_limit_bench.receipts import RunReceipt
+from gguf_limit_bench.runtime_capabilities import (
+    LlamaRuntimeCapabilities,
+    collect_llama_capabilities,
+)
 from gguf_limit_bench.reports import write_leaderboard
 from gguf_limit_bench.runner import BenchmarkRunner
 from gguf_limit_bench.run_config import PRESETS, RunConfig
@@ -1297,8 +1302,11 @@ def _run_one_autoresearch(
     simple_bench_system_prompt: Path = DEFAULT_SIMPLE_BENCH_SYSTEM_PROMPT,
     simple_bench_max_tokens: int = 1024,
     llama_server_extra_args: tuple[str, ...] = (),
+    capability_collector: Callable[[Path], LlamaRuntimeCapabilities] = collect_llama_capabilities,
+    flag_ladder_attempt_runner: AttemptRunner | None = None,
 ):
     candidate_sequence = None
+    skipped_profiles: tuple[dict, ...] = ()
     attempt_runner: AttemptRunner
     if flag_ladder:
         candidate_sequence = build_core_flag_ladder(
@@ -1316,8 +1324,14 @@ def _run_one_autoresearch(
                 parallel_max=parallel_max,
                 extra_server_args=llama_server_extra_args,
                 enable_mtp=enable_mtp,
+                capability_collector=capability_collector,
             )
-        attempt_runner = LlamaServerSimpleBenchAttemptRunner(
+        if enable_mtp:
+            candidate_sequence, skipped_profiles = filter_unsupported_profiles(
+                candidate_sequence,
+                capability_collector(llama_server),
+            )
+        attempt_runner = flag_ladder_attempt_runner or LlamaServerSimpleBenchAttemptRunner(
             llama_server=llama_server,
             model=model,
             benchmark_path=simple_bench,
@@ -1402,6 +1416,7 @@ def _run_one_autoresearch(
         ),
         perplexity_contexts=perplexity_context,
         candidate_sequence=candidate_sequence,
+        skipped_profiles=skipped_profiles,
     )
     return loop.run()
 
@@ -1415,8 +1430,10 @@ def _write_flag_ladder_dry_run(
     parallel_max: int,
     extra_server_args: tuple[str, ...],
     enable_mtp: bool,
+    capability_collector: Callable[[Path], LlamaRuntimeCapabilities] = collect_llama_capabilities,
 ) -> RunReceipt:
     receipt = RunReceipt.create(runs_root, slug=f"{model.stem}-flag-ladder-dry-run")
+    runtime_capabilities = capability_collector(llama_server)
     plan = build_flag_ladder_plan(
         llama_server=llama_server,
         model=model,
@@ -1426,6 +1443,7 @@ def _write_flag_ladder_dry_run(
         parallel_max=parallel_max,
         extra_server_args=extra_server_args,
         enable_mtp=enable_mtp,
+        runtime_capabilities=runtime_capabilities,
     )
     receipt.write_json(
         "flag-ladder-plan.json",
@@ -1437,6 +1455,7 @@ def _write_flag_ladder_dry_run(
             "extra_server_args": list(extra_server_args),
             "mtp_heads_detected": enable_mtp,
             "mtp_detection": "model filename contains MTP" if enable_mtp else "not detected",
+            "runtime_capabilities": runtime_capabilities.to_dict(),
             "profiles": plan,
             "dry_run": True,
         },
@@ -1464,12 +1483,19 @@ def _flag_ladder_plan_markdown(*, model: Path, plan: list[dict]) -> str:
     lines = [
         f"# Flag Ladder Plan: {model.name}",
         "",
-        "| Profile | Hypothesis | Command |",
-        "| --- | --- | --- |",
+        "| Profile | Status | Reason | Hypothesis | Command |",
+        "| --- | --- | --- | --- | --- |",
     ]
     for row in plan:
-        command = " ".join(str(part) for part in row["command"])
-        lines.append(f"| {row['name']} | {row['hypothesis']} | `{command}` |")
+        supported = row.get("supported", True)
+        status = "Supported" if supported else "Unsupported"
+        reason = str(row.get("unsupported_reason") or "")
+        command_parts = row.get("command")
+        command = " ".join(str(part) for part in command_parts) if command_parts else ""
+        rendered_command = f"`{command}`" if command else "-"
+        lines.append(
+            f"| {row['name']} | {status} | {reason} | {row['hypothesis']} | {rendered_command} |"
+        )
     return "\n".join(lines) + "\n"
 
 

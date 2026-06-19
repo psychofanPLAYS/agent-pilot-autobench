@@ -1,7 +1,11 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from gguf_limit_bench.autoresearch import AttemptResult, AutoresearchSettings
+from gguf_limit_bench.runtime_capabilities import parse_llama_help
+from gguf_limit_bench import workflows
 from gguf_limit_bench.workflows import (
     WorkflowAugmentedAttemptRunner,
     WorkflowEvaluator,
@@ -32,17 +36,136 @@ def test_build_llama_cli_command_uses_low_token_agent_eval_flags():
 
 
 def test_build_llama_cli_command_can_enable_mtp_draft_probe():
+    capabilities = parse_llama_help("version: b9596", "--spec-type VALUES\n--spec-draft-n-max N")
     command = build_llama_cli_command(
         llama_cli=Path("llama-cli.exe"),
         model=Path("Qwen3.6-35B-A3B-MTP-Q4_K_M.gguf"),
         settings=AutoresearchSettings(),
         task=default_workflow_tasks()[0],
         enable_mtp=True,
-        mtp_draft_max=16,
+        mtp_spec_draft_n_max=3,
+        runtime_capabilities=capabilities,
     )
 
-    assert "--draft-max" in command
-    assert "16" in command
+    assert command[-4:] == ["--spec-type", "draft-mtp", "--spec-draft-n-max", "3"]
+    assert "--draft-max" not in command
+    assert "--draft-min" not in command
+
+
+def test_build_llama_cli_command_rejects_mtp_draft_max_above_four():
+    with pytest.raises(ValueError, match="between 1 and 4"):
+        build_llama_cli_command(
+            llama_cli=Path("llama-cli.exe"),
+            model=Path("Qwen-MTP.gguf"),
+            settings=AutoresearchSettings(),
+            task=default_workflow_tasks()[0],
+            enable_mtp=True,
+            mtp_spec_draft_n_max=5,
+        )
+
+
+def test_deprecated_workflow_mtp_keyword_emits_native_flags():
+    capabilities = parse_llama_help("version: b9596", "--spec-type VALUES\n--spec-draft-n-max N")
+    with pytest.warns(DeprecationWarning, match="mtp_draft_max"):
+        command = build_llama_cli_command(
+            llama_cli=Path("llama-cli.exe"),
+            model=Path("Qwen-MTP.gguf"),
+            settings=AutoresearchSettings(),
+            task=default_workflow_tasks()[0],
+            enable_mtp=True,
+            mtp_draft_max=3,
+            runtime_capabilities=capabilities,
+        )
+
+    assert command[-4:] == ["--spec-type", "draft-mtp", "--spec-draft-n-max", "3"]
+    assert "--draft-max" not in command
+
+
+def test_workflow_evaluator_accepts_deprecated_mtp_keyword_once():
+    capabilities = parse_llama_help("version: b9596", "--spec-type VALUES\n--spec-draft-n-max N")
+    with pytest.warns(DeprecationWarning, match="mtp_draft_max"):
+        evaluator = WorkflowEvaluator(
+            llama_cli=Path("llama-cli.exe"),
+            model=Path("Qwen-MTP.gguf"),
+            enable_mtp=True,
+            mtp_draft_max=2,
+            capability_collector=lambda path: capabilities,
+        )
+
+    assert evaluator.mtp_spec_draft_n_max == 2
+
+
+def test_workflow_mtp_draft_max_must_be_between_one_and_four():
+    capabilities = parse_llama_help("version: b9596", "--spec-type VALUES\n--spec-draft-n-max N")
+    for invalid in (0, 5):
+        with pytest.raises(ValueError, match="between 1 and 4"):
+            build_llama_cli_command(
+                llama_cli=Path("llama-cli.exe"),
+                model=Path("Qwen-MTP.gguf"),
+                settings=AutoresearchSettings(),
+                task=default_workflow_tasks()[0],
+                enable_mtp=True,
+                mtp_spec_draft_n_max=invalid,
+                runtime_capabilities=capabilities,
+            )
+
+
+def test_workflow_evaluator_skips_mtp_when_cli_capabilities_are_unknown(tmp_path, monkeypatch):
+    capabilities = parse_llama_help("version: b9596", "--model FNAME")
+    monkeypatch.setattr(
+        workflows.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("unsupported MTP must not launch llama-cli")
+        ),
+    )
+    evaluator = WorkflowEvaluator(
+        llama_cli=Path("llama-cli.exe"),
+        model=Path("Qwen-MTP.gguf"),
+        enable_mtp=True,
+        capability_collector=lambda path: capabilities,
+        receipt_path=tmp_path / "workflow.json",
+    )
+
+    result = evaluator.run(AutoresearchSettings())
+
+    assert result["score"] == 0
+    assert result["tasks"][0]["failure"] == "mtp_runtime_unsupported"
+    assert json.loads((tmp_path / "workflow.json").read_text(encoding="utf-8")) == result
+
+
+def test_workflow_evaluator_collects_cli_capabilities_once(monkeypatch):
+    capabilities = parse_llama_help("version: b9596", "--spec-type VALUES\n--spec-draft-n-max N")
+    collected = []
+    commands = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        return type(
+            "Completed",
+            (),
+            {
+                "returncode": 0,
+                "stdout": '{"action":"inspect_receipts","reason":"Need evidence"}',
+                "stderr": "",
+            },
+        )()
+
+    monkeypatch.setattr(workflows.subprocess, "run", fake_run)
+    tasks = [default_workflow_tasks()[0], default_workflow_tasks()[0]]
+    evaluator = WorkflowEvaluator(
+        llama_cli=Path("llama-cli.exe"),
+        model=Path("Qwen-MTP.gguf"),
+        tasks=tasks,
+        enable_mtp=True,
+        capability_collector=lambda path: collected.append(path) or capabilities,
+    )
+
+    evaluator.run(AutoresearchSettings())
+
+    assert collected == [Path("llama-cli.exe")]
+    assert len(commands) == 2
+    assert all("--spec-type" in command for command in commands)
 
 
 def test_evaluate_workflow_output_scores_valid_agent_json():

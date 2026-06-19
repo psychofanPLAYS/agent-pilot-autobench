@@ -6,8 +6,13 @@ from pathlib import Path
 import re
 import subprocess
 from typing import Callable
+import warnings
 
 from gguf_limit_bench.autoresearch import AttemptResult, AutoresearchSettings
+from gguf_limit_bench.runtime_capabilities import (
+    LlamaRuntimeCapabilities,
+    collect_llama_capabilities,
+)
 from gguf_limit_bench.telemetry import classify_failure
 
 
@@ -73,7 +78,11 @@ class WorkflowEvaluator:
         receipt_path: Path | None = None,
         timeout_seconds: int = 120,
         enable_mtp: bool = False,
-        mtp_draft_max: int = 16,
+        mtp_spec_draft_n_max: int | None = None,
+        capability_collector: Callable[[Path], LlamaRuntimeCapabilities] = (
+            collect_llama_capabilities
+        ),
+        mtp_draft_max: int | None = None,
     ) -> None:
         self.llama_cli = llama_cli
         self.model = model
@@ -81,9 +90,28 @@ class WorkflowEvaluator:
         self.receipt_path = receipt_path
         self.timeout_seconds = timeout_seconds
         self.enable_mtp = enable_mtp
-        self.mtp_draft_max = mtp_draft_max
+        self.mtp_spec_draft_n_max = _resolve_mtp_draft_max(mtp_spec_draft_n_max, mtp_draft_max)
+        self.runtime_capabilities = capability_collector(llama_cli) if enable_mtp else None
 
     def run(self, settings: AutoresearchSettings) -> dict:
+        if self.enable_mtp and not _supports_native_mtp(self.runtime_capabilities):
+            payload = {
+                "score": 0.0,
+                "evidence_level": "unsupported",
+                "tasks": [
+                    {
+                        "name": "mtp_capability",
+                        "passed": False,
+                        "score": 0.0,
+                        "failure": "mtp_runtime_unsupported",
+                        "evidence_level": "unsupported",
+                        "stderr": "llama-cli lacks --spec-type and/or --spec-draft-n-max",
+                        "stdout": "",
+                    }
+                ],
+            }
+            self._write_receipt(payload)
+            return payload
         task_results = []
         for task in self.tasks:
             command = build_llama_cli_command(
@@ -92,7 +120,8 @@ class WorkflowEvaluator:
                 settings,
                 task,
                 enable_mtp=self.enable_mtp,
-                mtp_draft_max=self.mtp_draft_max,
+                mtp_spec_draft_n_max=self.mtp_spec_draft_n_max,
+                runtime_capabilities=self.runtime_capabilities,
             )
             try:
                 completed = subprocess.run(
@@ -143,12 +172,16 @@ class WorkflowEvaluator:
             "evidence_level": "smoke",
             "tasks": task_results,
         }
-        if self.receipt_path is not None:
-            self.receipt_path.parent.mkdir(parents=True, exist_ok=True)
-            self.receipt_path.write_text(
-                json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8"
-            )
+        self._write_receipt(payload)
         return payload
+
+    def _write_receipt(self, payload: dict) -> None:
+        if self.receipt_path is None:
+            return
+        self.receipt_path.parent.mkdir(parents=True, exist_ok=True)
+        self.receipt_path.write_text(
+            json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8"
+        )
 
 
 class WorkflowAugmentedAttemptRunner:
@@ -178,8 +211,11 @@ def build_llama_cli_command(
     settings: AutoresearchSettings,
     task: WorkflowTask,
     enable_mtp: bool = False,
-    mtp_draft_max: int = 16,
+    mtp_spec_draft_n_max: int | None = None,
+    runtime_capabilities: LlamaRuntimeCapabilities | None = None,
+    mtp_draft_max: int | None = None,
 ) -> list[str]:
+    resolved_mtp_max = _resolve_mtp_draft_max(mtp_spec_draft_n_max, mtp_draft_max)
     command = [
         str(llama_cli),
         "--model",
@@ -215,8 +251,31 @@ def build_llama_cli_command(
         _agent_json_schema(),
     ]
     if enable_mtp:
-        command.extend(["--draft-max", str(mtp_draft_max)])
+        if not 1 <= resolved_mtp_max <= 4:
+            raise ValueError("MTP speculative draft maximum must be between 1 and 4")
+        if not _supports_native_mtp(runtime_capabilities):
+            raise ValueError("llama-cli runtime does not support native MTP options")
+        command.extend(["--spec-type", "draft-mtp", "--spec-draft-n-max", str(resolved_mtp_max)])
     return command
+
+
+def _supports_native_mtp(capabilities: LlamaRuntimeCapabilities | None) -> bool:
+    return capabilities is not None and all(
+        capabilities.supports(option) for option in ("--spec-type", "--spec-draft-n-max")
+    )
+
+
+def _resolve_mtp_draft_max(native_value: int | None, deprecated_value: int | None) -> int:
+    if deprecated_value is not None:
+        warnings.warn(
+            "mtp_draft_max is deprecated; use mtp_spec_draft_n_max",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        if native_value is not None and native_value != deprecated_value:
+            raise ValueError("conflicting MTP draft maximum values")
+        return deprecated_value
+    return 3 if native_value is None else native_value
 
 
 def evaluate_workflow_output(

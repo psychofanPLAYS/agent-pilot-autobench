@@ -4,9 +4,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from gguf_limit_bench.autoresearch import AutoresearchSettings
+from gguf_limit_bench.runtime_capabilities import LlamaRuntimeCapabilities
 
 
 MANAGED_SERVER_ARGS = frozenset({"--host", "--port", "--model", "-m"})
+MTP_REQUIRED_OPTIONS = ("--spec-type", "--spec-draft-n-max")
 
 
 @dataclass(frozen=True)
@@ -81,17 +83,14 @@ def build_core_flag_ladder(
             )
         )
     if enable_mtp:
-        mtp_base = comparison_base
-        for draft_max in (8, 16, 32):
-            ladder.append(
-                _copy(
-                    mtp_base,
-                    profile_name=f"MTP-draft-{draft_max}",
-                    draft_max=draft_max,
-                    draft_min=0,
-                    draft_p_min=0.75,
-                )
+        ladder.append(
+            _copy(
+                comparison_base,
+                profile_name="MTP-draft-3",
+                spec_type="draft-mtp",
+                spec_draft_n_max=3,
             )
+        )
     return tuple(ladder)
 
 
@@ -136,6 +135,7 @@ def profile_descriptions(
 
 
 def llama_server_args_for_settings(settings: AutoresearchSettings) -> list[str]:
+    validate_native_spec_settings(settings)
     args: list[str] = []
     if settings.cont_batching:
         args.append("--cont-batching")
@@ -159,14 +159,30 @@ def llama_server_args_for_settings(settings: AutoresearchSettings) -> list[str]:
         args.extend(["--threads", str(settings.threads)])
     if settings.threads_batch is not None:
         args.extend(["--threads-batch", str(settings.threads_batch)])
-    if settings.draft_max is not None:
-        args.extend(["--draft-max", str(settings.draft_max)])
-    if settings.draft_min is not None:
-        args.extend(["--draft-min", str(settings.draft_min)])
-    if settings.draft_p_min is not None:
-        args.extend(["--draft-p-min", str(settings.draft_p_min)])
+    if settings.spec_type is not None:
+        args.extend(["--spec-type", settings.spec_type])
+    if settings.spec_draft_n_max is not None:
+        args.extend(["--spec-draft-n-max", str(settings.spec_draft_n_max)])
+    if settings.spec_draft_n_min is not None:
+        args.extend(["--spec-draft-n-min", str(settings.spec_draft_n_min)])
+    if settings.spec_draft_p_min is not None:
+        args.extend(["--spec-draft-p-min", str(settings.spec_draft_p_min)])
     args.extend(settings.extra_server_args)
     return args
+
+
+def validate_native_spec_settings(settings: AutoresearchSettings) -> None:
+    n_max = settings.spec_draft_n_max
+    n_min = settings.spec_draft_n_min
+    p_min = settings.spec_draft_p_min
+    if settings.spec_type == "draft-mtp" and n_max is not None and not 1 <= n_max <= 4:
+        raise ValueError("draft-mtp spec_draft_n_max must be between 1 and 4")
+    if n_min is not None and n_min < 0:
+        raise ValueError("spec_draft_n_min must be nonnegative")
+    if n_min is not None and n_max is not None and n_min > n_max:
+        raise ValueError("spec_draft_n_min cannot exceed spec_draft_n_max")
+    if p_min is not None and not 0 <= p_min <= 1:
+        raise ValueError("spec_draft_p_min must be between 0 and 1")
 
 
 def validate_extra_server_args(args: tuple[str, ...]) -> tuple[str, ...]:
@@ -175,6 +191,37 @@ def validate_extra_server_args(args: tuple[str, ...]) -> tuple[str, ...]:
         if option in MANAGED_SERVER_ARGS:
             raise ValueError(f"{option} is managed by Agent Pilot Autobench")
     return args
+
+
+def filter_unsupported_profiles(
+    profiles: tuple[AutoresearchSettings, ...],
+    runtime_capabilities: LlamaRuntimeCapabilities,
+) -> tuple[tuple[AutoresearchSettings, ...], tuple[dict, ...]]:
+    supported = []
+    skipped = []
+    for settings in profiles:
+        missing_options = (
+            tuple(
+                option
+                for option in MTP_REQUIRED_OPTIONS
+                if not runtime_capabilities.supports(option)
+            )
+            if settings.spec_type == "draft-mtp"
+            else ()
+        )
+        if missing_options:
+            skipped.append(
+                {
+                    "profile": settings.profile_name,
+                    "reason": "runtime lacks required options: " + ", ".join(missing_options),
+                    "runtime_version": runtime_capabilities.version,
+                    "runtime_help_sha256": runtime_capabilities.help_sha256,
+                    "runtime_introspection_ok": runtime_capabilities.introspection_ok,
+                }
+            )
+        else:
+            supported.append(settings)
+    return tuple(supported), tuple(skipped)
 
 
 def build_flag_ladder_plan(
@@ -187,6 +234,7 @@ def build_flag_ladder_plan(
     parallel_max: int,
     extra_server_args: tuple[str, ...] = (),
     enable_mtp: bool = False,
+    runtime_capabilities: LlamaRuntimeCapabilities | None = None,
 ) -> list[dict]:
     from gguf_limit_bench.server_probe import build_llama_server_command
 
@@ -197,15 +245,35 @@ def build_flag_ladder_plan(
         extra_server_args=extra_server_args,
         enable_mtp=enable_mtp,
     ):
+        missing_options = (
+            tuple(
+                option
+                for option in MTP_REQUIRED_OPTIONS
+                if not runtime_capabilities.supports(option)
+            )
+            if runtime_capabilities is not None and profile.name.startswith("MTP-")
+            else ()
+        )
+        supported = not missing_options
         rows.append(
             {
                 **profile.to_dict(),
-                "command": build_llama_server_command(
-                    llama_server=llama_server,
-                    model=model,
-                    settings=profile.settings,
-                    host=host,
-                    port=port,
+                "supported": supported,
+                "unsupported_reason": (
+                    "runtime lacks required options: " + ", ".join(missing_options)
+                    if missing_options
+                    else None
+                ),
+                "command": (
+                    build_llama_server_command(
+                        llama_server=llama_server,
+                        model=model,
+                        settings=profile.settings,
+                        host=host,
+                        port=port,
+                    )
+                    if supported
+                    else None
                 ),
             }
         )

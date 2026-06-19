@@ -8,6 +8,7 @@ import re
 import subprocess
 import time
 from typing import Any, Callable
+import warnings
 
 from gguf_limit_bench.benchmark_suite import (
     BenchmarkSuitePlan,
@@ -41,9 +42,10 @@ EXTRA_SETTING_DEFAULTS = {
     "cache_type_v": None,
     "threads": None,
     "threads_batch": None,
-    "draft_max": None,
-    "draft_min": None,
-    "draft_p_min": None,
+    "spec_type": None,
+    "spec_draft_n_max": None,
+    "spec_draft_n_min": None,
+    "spec_draft_p_min": None,
     "extra_server_args": (),
 }
 
@@ -68,10 +70,36 @@ class AutoresearchSettings:
     cache_type_v: str | None = None
     threads: int | None = None
     threads_batch: int | None = None
+    spec_type: str | None = None
+    spec_draft_n_max: int | None = None
+    spec_draft_n_min: int | None = None
+    spec_draft_p_min: float | None = None
+    extra_server_args: tuple[str, ...] = ()
     draft_max: int | None = None
     draft_min: int | None = None
     draft_p_min: float | None = None
-    extra_server_args: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        deprecated = [
+            name
+            for name in ("draft_max", "draft_min", "draft_p_min")
+            if getattr(self, name) is not None
+        ]
+        if not deprecated:
+            return
+        warnings.warn(
+            f"{', '.join(deprecated)} are deprecated; use native spec_draft_* settings",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        if self.spec_type is None:
+            object.__setattr__(self, "spec_type", "draft-mtp")
+        if self.spec_draft_n_max is None and self.draft_max is not None:
+            object.__setattr__(self, "spec_draft_n_max", self.draft_max)
+        if self.spec_draft_n_min is None and self.draft_min is not None:
+            object.__setattr__(self, "spec_draft_n_min", self.draft_min)
+        if self.spec_draft_p_min is None and self.draft_p_min is not None:
+            object.__setattr__(self, "spec_draft_p_min", self.draft_p_min)
 
     def to_dict(self) -> dict:
         payload = {field_name: getattr(self, field_name) for field_name in BASE_SETTING_FIELDS}
@@ -262,6 +290,7 @@ class AutoresearchLoop:
         perplexity_runner: PerplexityRunner | None = None,
         perplexity_contexts: tuple[int, ...] | None = None,
         candidate_sequence: tuple[AutoresearchSettings, ...] | None = None,
+        skipped_profiles: tuple[dict, ...] = (),
     ) -> None:
         self.model = model
         self.runs_root = runs_root
@@ -275,6 +304,7 @@ class AutoresearchLoop:
         self.perplexity_runner = perplexity_runner
         self.perplexity_contexts = perplexity_contexts
         self.candidate_sequence = candidate_sequence
+        self.skipped_profiles = skipped_profiles
 
     def run(self) -> RunReceipt:
         receipt = RunReceipt.create(self.runs_root, slug=_safe_slug(self.model.stem))
@@ -292,6 +322,11 @@ class AutoresearchLoop:
                 ],
             },
         )
+        if self.skipped_profiles:
+            receipt.event(
+                "flag_ladder_profiles_skipped",
+                {"profiles": list(self.skipped_profiles)},
+            )
         receipt.mark_recovery(step="autoresearch", status="running")
 
         best_settings = AutoresearchSettings()
