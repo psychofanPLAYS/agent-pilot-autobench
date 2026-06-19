@@ -73,7 +73,7 @@ class WorkflowEvaluator:
         receipt_path: Path | None = None,
         timeout_seconds: int = 120,
         enable_mtp: bool = False,
-        mtp_draft_max: int = 16,
+        mtp_draft_n_max: int = 3,
     ) -> None:
         self.llama_cli = llama_cli
         self.model = model
@@ -81,7 +81,7 @@ class WorkflowEvaluator:
         self.receipt_path = receipt_path
         self.timeout_seconds = timeout_seconds
         self.enable_mtp = enable_mtp
-        self.mtp_draft_max = mtp_draft_max
+        self.mtp_draft_n_max = mtp_draft_n_max
 
     def run(self, settings: AutoresearchSettings) -> dict:
         task_results = []
@@ -92,7 +92,7 @@ class WorkflowEvaluator:
                 settings,
                 task,
                 enable_mtp=self.enable_mtp,
-                mtp_draft_max=self.mtp_draft_max,
+                mtp_draft_n_max=self.mtp_draft_n_max,
             )
             try:
                 completed = subprocess.run(
@@ -178,7 +178,7 @@ def build_llama_cli_command(
     settings: AutoresearchSettings,
     task: WorkflowTask,
     enable_mtp: bool = False,
-    mtp_draft_max: int = 16,
+    mtp_draft_n_max: int = 3,
 ) -> list[str]:
     command = [
         str(llama_cli),
@@ -215,7 +215,7 @@ def build_llama_cli_command(
         _agent_json_schema(),
     ]
     if enable_mtp:
-        command.extend(["--draft-max", str(mtp_draft_max)])
+        command.extend(["--spec-type", "draft-mtp", "--spec-draft-n-max", str(mtp_draft_n_max)])
     return command
 
 

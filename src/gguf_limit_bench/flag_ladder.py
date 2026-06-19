@@ -81,17 +81,15 @@ def build_core_flag_ladder(
             )
         )
     if enable_mtp:
-        mtp_base = comparison_base
-        for draft_max in (8, 16, 32):
-            ladder.append(
-                _copy(
-                    mtp_base,
-                    profile_name=f"MTP-draft-{draft_max}",
-                    draft_max=draft_max,
-                    draft_min=0,
-                    draft_p_min=0.75,
-                )
+        ladder.append(
+            _copy(
+                comparison_base,
+                profile_name="MTP-draft-mtp-3",
+                parallel=1,
+                spec_type="draft-mtp",
+                spec_draft_n_max=3,
             )
+        )
     return tuple(ladder)
 
 
@@ -159,12 +157,14 @@ def llama_server_args_for_settings(settings: AutoresearchSettings) -> list[str]:
         args.extend(["--threads", str(settings.threads)])
     if settings.threads_batch is not None:
         args.extend(["--threads-batch", str(settings.threads_batch)])
-    if settings.draft_max is not None:
-        args.extend(["--draft-max", str(settings.draft_max)])
-    if settings.draft_min is not None:
-        args.extend(["--draft-min", str(settings.draft_min)])
-    if settings.draft_p_min is not None:
-        args.extend(["--draft-p-min", str(settings.draft_p_min)])
+    if settings.spec_type is not None:
+        args.extend(["--spec-type", settings.spec_type])
+    if settings.spec_draft_n_max is not None:
+        args.extend(["--spec-draft-n-max", str(settings.spec_draft_n_max)])
+    if settings.spec_draft_n_min is not None:
+        args.extend(["--spec-draft-n-min", str(settings.spec_draft_n_min)])
+    if settings.spec_draft_p_min is not None:
+        args.extend(["--spec-draft-p-min", str(settings.spec_draft_p_min)])
     args.extend(settings.extra_server_args)
     return args
 

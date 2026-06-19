@@ -221,13 +221,10 @@ def test_core_flag_ladder_adds_native_mtp_draft_profiles_only_when_detected():
     mtp = build_core_flag_ladder(enable_mtp=True)
 
     assert not any(settings.profile_name.startswith("MTP-") for settings in plain)
-    assert [settings.profile_name for settings in mtp[-3:]] == [
-        "MTP-draft-8",
-        "MTP-draft-16",
-        "MTP-draft-32",
-    ]
-    assert mtp[-2].draft_max == 16
-    assert mtp[-2].draft_p_min == 0.75
+    assert [settings.profile_name for settings in mtp[-1:]] == ["MTP-draft-mtp-3"]
+    assert mtp[-1].spec_type == "draft-mtp"
+    assert mtp[-1].spec_draft_n_max == 3
+    assert mtp[-1].parallel == 1
 
 
 def test_flag_ladder_plan_contains_llama_server_commands():
@@ -260,16 +257,10 @@ def test_flag_ladder_plan_adds_mtp_commands_when_heads_are_detected():
     )
 
     mtp_rows = [row for row in plan if row["name"].startswith("MTP-")]
-    assert [row["name"] for row in mtp_rows] == [
-        "MTP-draft-8",
-        "MTP-draft-16",
-        "MTP-draft-32",
-    ]
-    assert [row["command"][row["command"].index("--draft-max") + 1] for row in mtp_rows] == [
-        "8",
-        "16",
-        "32",
-    ]
+    assert [row["name"] for row in mtp_rows] == ["MTP-draft-mtp-3"]
+    assert "--draft-max" not in mtp_rows[0]["command"]
+    assert mtp_rows[0]["command"][mtp_rows[0]["command"].index("--spec-type") + 1] == "draft-mtp"
+    assert mtp_rows[0]["command"][mtp_rows[0]["command"].index("--spec-draft-n-max") + 1] == "3"
 
 
 def test_autoresearch_settings_can_hold_flag_specific_fields():
@@ -296,14 +287,18 @@ def test_short_logs_keep_warning_lines_and_bounded_tail(tmp_path):
 
     warning_count = _write_short_logs(
         attempt_dir=tmp_path,
-        settings=AutoresearchSettings(profile_name="MTP-draft-16", draft_max=16),
+        settings=AutoresearchSettings(
+            profile_name="MTP-draft-mtp-3",
+            spec_type="draft-mtp",
+            spec_draft_n_max=3,
+        ),
         returncode=0,
     )
 
     assert warning_count == 2
     assert "cache fallback" in (tmp_path / "warnings.log").read_text(encoding="utf-8")
     tail = (tmp_path / "server-tail.log").read_text(encoding="utf-8")
-    assert "profile=MTP-draft-16" in tail
+    assert "profile=MTP-draft-mtp-3" in tail
     assert "warning_count=2" in tail
 
 

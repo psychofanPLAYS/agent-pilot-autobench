@@ -41,9 +41,10 @@ EXTRA_SETTING_DEFAULTS = {
     "cache_type_v": None,
     "threads": None,
     "threads_batch": None,
-    "draft_max": None,
-    "draft_min": None,
-    "draft_p_min": None,
+    "spec_type": None,
+    "spec_draft_n_max": None,
+    "spec_draft_n_min": None,
+    "spec_draft_p_min": None,
     "extra_server_args": (),
 }
 
@@ -68,9 +69,10 @@ class AutoresearchSettings:
     cache_type_v: str | None = None
     threads: int | None = None
     threads_batch: int | None = None
-    draft_max: int | None = None
-    draft_min: int | None = None
-    draft_p_min: float | None = None
+    spec_type: str | None = None
+    spec_draft_n_max: int | None = None
+    spec_draft_n_min: int | None = None
+    spec_draft_p_min: float | None = None
     extra_server_args: tuple[str, ...] = ()
 
     def to_dict(self) -> dict:

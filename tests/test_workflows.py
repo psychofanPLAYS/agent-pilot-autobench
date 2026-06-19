@@ -38,11 +38,11 @@ def test_build_llama_cli_command_can_enable_mtp_draft_probe():
         settings=AutoresearchSettings(),
         task=default_workflow_tasks()[0],
         enable_mtp=True,
-        mtp_draft_max=16,
     )
 
-    assert "--draft-max" in command
-    assert "16" in command
+    assert "--draft-max" not in command
+    assert command[command.index("--spec-type") + 1] == "draft-mtp"
+    assert command[command.index("--spec-draft-n-max") + 1] == "3"
 
 
 def test_evaluate_workflow_output_scores_valid_agent_json():
