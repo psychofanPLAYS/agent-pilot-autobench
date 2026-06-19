@@ -92,7 +92,9 @@ class ModelCatalog:
             schema_version=1,
             generated_at=datetime.now(UTC).isoformat(),
             cache_root=str(self.cache_root),
-            network_used=bool(enrich and self.hub is not None),
+            network_used=bool(
+                enrich and self.hub is not None and not getattr(self.hub, "offline", False)
+            ),
             entries=tuple(entries),
         )
 
@@ -170,6 +172,65 @@ def write_catalog(snapshot: CatalogSnapshot, output_dir: Path) -> CatalogPaths:
     )
     _atomic_write(markdown_path, _catalog_markdown(snapshot))
     return CatalogPaths(json=json_path, markdown=markdown_path)
+
+
+def load_catalog(cache_root: Path) -> CatalogSnapshot:
+    path = cache_root / "catalog.json"
+    if not path.exists():
+        raise FileNotFoundError(f"PilotBENCHY catalog was not found: {path}")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    entries = []
+    for row in payload.get("entries", []):
+        recommendations = tuple(Recommendation(**item) for item in row.get("recommendations", []))
+        entries.append(
+            CatalogEntry(
+                local_path=str(row["local_path"]),
+                name=str(row["name"]),
+                family=str(row["family"]),
+                parameters=str(row["parameters"]),
+                quant=str(row["quant"]),
+                size_bytes=int(row["size_bytes"]),
+                is_moe=bool(row["is_moe"]),
+                has_mtp=bool(row["has_mtp"]),
+                vision_mmproj=row.get("vision_mmproj"),
+                repo_id=row.get("repo_id"),
+                hub_filename=str(row["hub_filename"]),
+                revision=row.get("revision"),
+                identity_confidence=str(row["identity_confidence"]),
+                document_confidence=str(row["document_confidence"]),
+                license=row.get("license"),
+                base_models=tuple(row.get("base_models", [])),
+                datasets=tuple(row.get("datasets", [])),
+                recommendations=recommendations,
+                errors=tuple(row.get("errors", [])),
+            )
+        )
+    return CatalogSnapshot(
+        schema_version=int(payload["schema_version"]),
+        generated_at=str(payload["generated_at"]),
+        cache_root=str(payload["cache_root"]),
+        network_used=bool(payload["network_used"]),
+        entries=tuple(entries),
+    )
+
+
+def find_catalog_entry(snapshot: CatalogSnapshot, selector: str) -> CatalogEntry:
+    normalized = selector.casefold()
+    matches = [
+        entry
+        for entry in snapshot.entries
+        if normalized
+        in {
+            entry.name.casefold(),
+            entry.local_path.casefold(),
+            (entry.repo_id or "").casefold(),
+        }
+    ]
+    if not matches:
+        raise KeyError(f"Model was not found in the catalog: {selector}")
+    if len(matches) > 1:
+        raise KeyError(f"Model selector is ambiguous: {selector}")
+    return matches[0]
 
 
 def _catalog_markdown(snapshot: CatalogSnapshot) -> str:

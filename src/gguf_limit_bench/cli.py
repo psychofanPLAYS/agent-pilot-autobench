@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -49,7 +49,14 @@ from gguf_limit_bench.installer import (
     resolved_shim_dir,
     sync_project_environment,
 )
+from gguf_limit_bench.hf_catalog import HubCatalog, HuggingFaceGateway
 from gguf_limit_bench.learning import OptunaSettingsLearner
+from gguf_limit_bench.model_catalog import (
+    ModelCatalog,
+    find_catalog_entry,
+    load_catalog,
+    write_catalog,
+)
 from gguf_limit_bench.packs import load_benchmark_packs
 from gguf_limit_bench.flag_ladder import (
     build_core_flag_ladder,
@@ -58,6 +65,7 @@ from gguf_limit_bench.flag_ladder import (
 )
 from gguf_limit_bench.receipts import RunReceipt
 from gguf_limit_bench.reports import write_leaderboard
+from gguf_limit_bench.runtime_capabilities import inspect_llama_executable
 from gguf_limit_bench.runner import BenchmarkRunner
 from gguf_limit_bench.run_config import PRESETS, RunConfig
 from gguf_limit_bench.server_probe import DEFAULT_AGENT_TTFT_PROMPT, probe_llama_server_ttft
@@ -77,7 +85,125 @@ app = typer.Typer(
     invoke_without_command=True,
     rich_markup_mode="rich",
 )
+models_app = typer.Typer(help="Discover and explain local model evidence.", no_args_is_help=True)
+app.add_typer(models_app, name="models")
 console = Console()
+
+
+@models_app.command("scan")
+def models_scan(
+    model_roots: list[Path] | None = typer.Option(None, "--model-root"),
+    cache_root: Path = typer.Option(Path("_db/catalog"), "--cache-root"),
+    json_out: bool = typer.Option(False, "--json"),
+) -> None:
+    """Discover local GGUF files without contacting Hugging Face."""
+    roots = model_roots or list(load_config().paths.model_roots)
+    snapshot = ModelCatalog(cache_root=cache_root).build(discover_models(roots), enrich=False)
+    paths = write_catalog(snapshot, cache_root)
+    if json_out:
+        _print_json(snapshot.to_dict())
+        return
+    console.print(f"Cataloged {len(snapshot.entries)} models without network access.")
+    console.print(f"JSON: {paths.json}")
+    console.print(f"Markdown: {paths.markdown}")
+
+
+@models_app.command("enrich")
+def models_enrich(
+    model_roots: list[Path] | None = typer.Option(None, "--model-root"),
+    cache_root: Path = typer.Option(Path("_db/catalog"), "--cache-root"),
+    offline: bool = typer.Option(False, "--offline"),
+    llama_server: Path | None = typer.Option(None, "--llama-server"),
+    json_out: bool = typer.Option(False, "--json"),
+) -> None:
+    """Retrieve revision-pinned Hugging Face evidence or use the offline cache."""
+    roots = model_roots or list(load_config().paths.model_roots)
+    gateway = None if offline else HuggingFaceGateway(cache_dir=cache_root / "transport")
+    hub = HubCatalog(
+        gateway=gateway,
+        cache_root=cache_root / "hub",
+        offline=offline,
+    )
+    capabilities = inspect_llama_executable(llama_server) if llama_server is not None else None
+    snapshot = ModelCatalog(
+        cache_root=cache_root,
+        hub=hub,
+        capabilities=capabilities,
+    ).build(discover_models(roots), enrich=True)
+    paths = write_catalog(snapshot, cache_root)
+    if json_out:
+        _print_json(snapshot.to_dict())
+        return
+    console.print(f"Enriched {len(snapshot.entries)} models.")
+    console.print(f"JSON: {paths.json}")
+    console.print(f"Markdown: {paths.markdown}")
+
+
+@models_app.command("list")
+def models_list(
+    cache_root: Path = typer.Option(Path("_db/catalog"), "--cache-root"),
+    json_out: bool = typer.Option(False, "--json"),
+) -> None:
+    """List the latest persisted catalog."""
+    snapshot = load_catalog(cache_root)
+    if json_out:
+        _print_json(snapshot.to_dict())
+        return
+    table = Table(title="PilotBENCHY Model Catalog")
+    for column in ("Model", "Repository", "Quant", "Identity", "Documents"):
+        table.add_column(column)
+    for entry in snapshot.entries:
+        table.add_row(
+            entry.name,
+            entry.repo_id or "unresolved",
+            entry.quant,
+            entry.identity_confidence,
+            entry.document_confidence,
+        )
+    console.print(table)
+
+
+@models_app.command("show")
+def models_show(
+    selector: str,
+    cache_root: Path = typer.Option(Path("_db/catalog"), "--cache-root"),
+    json_out: bool = typer.Option(False, "--json"),
+) -> None:
+    """Explain one model's provenance and evidence."""
+    entry = find_catalog_entry(load_catalog(cache_root), selector)
+    if json_out:
+        _print_json(entry.to_dict())
+        return
+    console.print_json(data=entry.to_dict())
+
+
+@models_app.command("recommendations")
+def models_recommendations(
+    selector: str,
+    cache_root: Path = typer.Option(Path("_db/catalog"), "--cache-root"),
+    json_out: bool = typer.Option(False, "--json"),
+) -> None:
+    """Show publisher claims and local validation separately."""
+    entry = find_catalog_entry(load_catalog(cache_root), selector)
+    payload = [asdict(item) for item in entry.recommendations]
+    if json_out:
+        _print_json(payload)
+        return
+    if not payload:
+        console.print("No recommendations are available for this catalog entry.")
+        return
+    console.print_json(data=payload)
+
+
+@models_app.command("export")
+def models_export(
+    output_dir: Path,
+    cache_root: Path = typer.Option(Path("_db/catalog"), "--cache-root"),
+) -> None:
+    """Export the latest catalog as deterministic JSON and Markdown."""
+    paths = write_catalog(load_catalog(cache_root), output_dir)
+    console.print(f"JSON: {paths.json}")
+    console.print(f"Markdown: {paths.markdown}")
 
 
 @app.callback()
