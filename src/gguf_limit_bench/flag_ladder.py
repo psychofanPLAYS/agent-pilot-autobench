@@ -45,6 +45,12 @@ def build_core_flag_ladder(
         cont_batching=True,
         extra_server_args=extra_server_args,
     )
+    stripped = _copy(
+        base,
+        profile_name="Lmin-stripped",
+        flash_attention=False,
+        cont_batching=False,
+    )
     comparison_base = _copy(base, profile_name="L2-kv-unified", parallel=parallel, kv_unified=True)
     q8_profile = _copy(
         comparison_base,
@@ -53,6 +59,7 @@ def build_core_flag_ladder(
         cache_type_v="q8_0",
     )
     ladder = [
+        stripped,
         base,
         _copy(base, profile_name="L1-parallel", parallel=parallel),
         comparison_base,
@@ -102,6 +109,8 @@ def profile_descriptions(
     enable_mtp: bool = False,
 ) -> tuple[FlagLadderProfile, ...]:
     hypotheses = {
+        "Lmin-stripped": "Fewest flags: no flash-attn, no continuous batching. "
+        "Does removing flags help or hurt speed?",
         "L0-baseline": "Plain llama-server baseline for comparison.",
         "L1-parallel": "Measure throughput cost/benefit from parallel slots.",
         "L2-kv-unified": "Measure unified KV behavior against baseline.",

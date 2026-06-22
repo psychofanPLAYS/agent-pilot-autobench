@@ -320,7 +320,7 @@ def test_autoresearch_flag_ladder_dry_run_writes_plan_without_runner(tmp_path, m
     plan = json.loads((run_dirs[0] / "flag-ladder-plan.json").read_text(encoding="utf-8"))
     assert plan["dry_run"] is True
     assert plan["context_size"] == 8192
-    assert plan["profiles"][0]["name"] == "L0-baseline"
+    assert plan["profiles"][0]["name"] == "Lmin-stripped"
     assert "--dry" in plan["profiles"][0]["command"]
 
 

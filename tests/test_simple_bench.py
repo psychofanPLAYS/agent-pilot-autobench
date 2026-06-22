@@ -215,7 +215,8 @@ def test_core_flag_ladder_builds_ordered_profiles_and_extra_args():
         extra_server_args=("--dry-run",),
     )
 
-    assert [settings.profile_name for settings in ladder[:7]] == [
+    assert [settings.profile_name for settings in ladder[:8]] == [
+        "Lmin-stripped",
         "L0-baseline",
         "L1-parallel",
         "L2-kv-unified",
@@ -224,8 +225,13 @@ def test_core_flag_ladder_builds_ordered_profiles_and_extra_args():
         "L5-checkpoints",
         "L6-q8-kv",
     ]
+    # The stripped rung removes the standard flags so we can measure whether
+    # adding them helps or hurts (the "fewer flags = faster?" test).
+    assert ladder[0].profile_name == "Lmin-stripped"
+    assert ladder[0].flash_attention is False
+    assert ladder[0].cont_batching is False
     assert ladder[0].context_size == 8192
-    assert ladder[1].parallel == 6
+    assert ladder[2].parallel == 6
     assert ladder[-1].threads == 32
     assert all(settings.cache_type_k == "q8_0" for settings in ladder[7:])
     assert all(settings.cache_type_v == "q8_0" for settings in ladder[7:])
@@ -263,10 +269,10 @@ def test_flag_ladder_plan_contains_llama_server_commands():
         extra_server_args=("--dry-run",),
     )
 
-    assert plan[0]["name"] == "L0-baseline"
+    assert plan[0]["name"] == "Lmin-stripped"
     assert plan[0]["command"][:3] == ["llama-server.exe", "--model", "model.gguf"]
     assert "--dry-run" in plan[0]["command"]
-    assert "--cache-type-k" in plan[6]["command"]
+    assert "--cache-type-k" in plan[7]["command"]
     assert "--cache-idle-slots" not in [part for row in plan for part in row["command"]]
 
 
