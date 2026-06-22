@@ -1206,13 +1206,15 @@ def tui(
             llama_cli=config.paths.llama_cli,
             llama_server=config.paths.llama_server,
             runs_root=config.paths.runs_root,
-            budget_seconds=budget_minutes * 60,
+            budget_seconds=picker.run_mode.budget_minutes * 60,
             parallel_max=config.benchmark.parallel_max,
             max_attempts=max_attempts,
             learning=learning,
             workflow_eval=workflow_eval,
             ttft_probe=ttft_probe,
-            context_ladder=_context_ladder_or_none(context_ladder),
+            context_ladder=(
+                picker.run_mode.context_ladder or _context_ladder_or_none(context_ladder)
+            ),
             benchmark_suite_plan=benchmark_suite_plan,
             enable_mtp=model.has_mtp,
             evaluation=picker.evaluation_mode,

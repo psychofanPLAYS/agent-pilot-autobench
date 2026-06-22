@@ -10,6 +10,7 @@ from textual.widgets import DataTable, Footer, Header, ProgressBar, Static
 
 from gguf_limit_bench.discovery import ModelInfo, discover_models
 from gguf_limit_bench.evaluation_mode import EvaluationMode
+from gguf_limit_bench.modes import DEFAULT_RUN_MODE, next_mode
 from gguf_limit_bench.reports import write_leaderboard
 from gguf_limit_bench.run_history import truncated_previous_runs_text
 from gguf_limit_bench.run_config import PRESETS, RunConfig
@@ -91,7 +92,7 @@ class BenchTui(App):
         ("s", "cycle_sort", "Sort"),
         ("a", "select_all", "Select all"),
         ("c", "clear", "Clear"),
-        ("m", "toggle_evaluation", "Mode"),
+        ("m", "cycle_mode", "Mode"),
         ("q", "quit", "Quit"),
     ]
 
@@ -114,8 +115,12 @@ class BenchTui(App):
         self.sort_modes = ("size", "name", "family")
         self.sort_mode_index = 0
         self.run_config = RunConfig.from_preset("normal")
-        self.evaluation_mode = EvaluationMode.BENCHMARK
+        self.run_mode = DEFAULT_RUN_MODE
         self.telemetry_stats = TelemetryStats()
+
+    @property
+    def evaluation_mode(self) -> EvaluationMode:
+        return self.run_mode.evaluation
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -175,14 +180,10 @@ class BenchTui(App):
         self.selection.replace_models(self.models)
         self._refresh_table()
 
-    def action_toggle_evaluation(self) -> None:
+    def action_cycle_mode(self) -> None:
         if self.phase != "selecting":
             return
-        self.evaluation_mode = (
-            EvaluationMode.SPEED_SCOUT
-            if self.evaluation_mode is EvaluationMode.BENCHMARK
-            else EvaluationMode.BENCHMARK
-        )
+        self.run_mode = next_mode(self.run_mode)
         if self.is_running:
             self._refresh_table()
 
@@ -276,14 +277,9 @@ class BenchTui(App):
                 model.name,
             )
         selected = len(self.selection.selected_models())
-        mode_label = (
-            "benchmark (asks questions)"
-            if self.evaluation_mode is EvaluationMode.BENCHMARK
-            else "speed scout (no questions)"
-        )
         self.query_one("#status", Static).update(
             f"{len(self.models)} models found. {selected} selected. "
-            f"Sort: {self.sort_modes[self.sort_mode_index]}. Mode: {mode_label}. "
+            f"Sort: {self.sort_modes[self.sort_mode_index]}. Mode: {self.run_mode.label}. "
             "Space selects, Enter/R runs, S sort, A all, C clear, M mode, Esc cancel."
         )
         if self.models:
@@ -321,8 +317,8 @@ class BenchTui(App):
         return (
             "[blue]Run dashboard[/blue]\n"
             f"{message}\n"
-            f"Preset: {self.run_config.preset_id} | Budget: {self.run_config.budget_minutes} min/model | "
-            f"Packs: {', '.join(self.run_config.packs)}"
+            f"Mode: {self.run_mode.label} — {self.run_mode.description}\n"
+            f"Budget: {self.run_mode.budget_minutes} min/model (press M to change mode)"
         )
 
     def _update_run_dashboard(self, message: str, progress: int) -> None:
