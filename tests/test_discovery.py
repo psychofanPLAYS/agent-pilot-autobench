@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from gguf_limit_bench.discovery import discover_models, parse_model_name
+from gguf_limit_bench.model_identity import IdentityConfidence
 
 
 def test_parse_model_name_detects_qwen_family_quant_and_moe():
@@ -68,3 +69,16 @@ def test_discover_models_skips_mmproj_anywhere_in_name_and_deduplicates_nested_r
 
     assert [model.path for model in models] == [weight]
     assert models[0].vision_mmproj == mmproj
+
+
+def test_discover_models_attaches_path_identity(tmp_path):
+    model_dir = tmp_path / "LM_Studio-gguf" / "Publisher" / "Repo"
+    model_dir.mkdir(parents=True)
+    weight = model_dir / "Qwen3.6-7B-Q4_K_M.gguf"
+    weight.write_bytes(b"fake")
+
+    models = discover_models([tmp_path])
+
+    assert models[0].identity is not None
+    assert models[0].identity.repo_id == "Publisher/Repo"
+    assert models[0].identity.confidence is IdentityConfidence.CANDIDATE

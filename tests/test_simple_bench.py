@@ -83,6 +83,26 @@ def test_extract_final_answer_uses_latest_explicit_revision():
     assert extract_final_answer(response) == "B"
 
 
+def test_extract_final_answer_handles_varied_real_world_formats():
+    assert extract_final_answer("...lots of reasoning...\nThe answer is B.") == "B"
+    assert extract_final_answer("Therefore the answer is (D).") == "D"
+    assert extract_final_answer("**Final Answer:** A") == "A"
+    assert extract_final_answer("After the work, \\boxed{C}") == "C"
+    assert extract_final_answer("Answer: E") == "E"
+    assert extract_final_answer("The option F fits best") == "F"
+
+
+def test_extract_final_answer_reads_letter_alone_on_last_line():
+    assert extract_final_answer("long reasoning here\n\nC") == "C"
+    assert extract_final_answer("long reasoning here\n\n**E**") == "E"
+    assert extract_final_answer("long reasoning here\n\n(D).") == "D"
+
+
+def test_extract_final_answer_does_not_match_letters_inside_words():
+    assert extract_final_answer("Apples and bananas are Fine choices overall") is None
+    assert extract_final_answer("Reasoning mentions C but the model stops mid sentence") is None
+
+
 def test_simple_bench_completion_uses_openai_chat_messages(monkeypatch):
     captured: dict = {}
 

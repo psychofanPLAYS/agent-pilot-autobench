@@ -1004,10 +1004,10 @@ def autoresearch(
         help="System prompt prepended before each SimpleBench question.",
     ),
     simple_bench_max_tokens: int = typer.Option(
-        1024,
+        4096,
         "--simple-bench-max-tokens",
         min=1,
-        help="Maximum generated tokens per SimpleBench question.",
+        help="Maximum generated tokens per SimpleBench question (room for reasoning models to finish).",
     ),
     llama_server_extra_arg: list[str] | None = typer.Option(
         None,
@@ -1323,7 +1323,7 @@ def _run_one_autoresearch(
     flag_context_size: int = 4096,
     simple_bench: Path = DEFAULT_SIMPLE_BENCH_PATH,
     simple_bench_system_prompt: Path = DEFAULT_SIMPLE_BENCH_SYSTEM_PROMPT,
-    simple_bench_max_tokens: int = 1024,
+    simple_bench_max_tokens: int = 4096,
     llama_server_extra_args: tuple[str, ...] = (),
     capability_collector: Callable[[Path], LlamaRuntimeCapabilities] = collect_llama_capabilities,
     flag_ladder_attempt_runner: AttemptRunner | None = None,

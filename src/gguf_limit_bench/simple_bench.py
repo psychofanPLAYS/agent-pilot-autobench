@@ -120,15 +120,29 @@ def simple_bench_prompt(system_prompt: str, question: SimpleBenchQuestion) -> st
 
 
 def extract_final_answer(text: str) -> str | None:
-    patterns = [
-        r"final\s+answer\s*[:\-]\s*([A-F])\b",
-        r"\banswer\s*[:\-]\s*([A-F])\b",
-        r"\boption\s+([A-F])\b",
+    """Pull the chosen A-F letter out of a model response.
+
+    Small local models phrase the answer many ways and often run long, so we
+    accept the common explicit markers in priority order, then fall back to a
+    letter left alone on its own line. Letters embedded inside words never count.
+    """
+    if not text:
+        return None
+    priority_patterns = [
+        r"final\s*answer\s*(?:is)?\s*[:\-=]?[\s*()]*([A-F])\b",
+        r"\\boxed\{[\s*()]*([A-F])\b",
+        r"\banswer\s+is[\s*()]*:?[\s*()]*([A-F])\b",
+        r"\banswer\s*[:\-=][\s*()]*([A-F])\b",
+        r"\boption\s+[\s*()]*([A-F])\b",
     ]
-    for pattern in patterns:
+    for pattern in priority_patterns:
         matches = list(re.finditer(pattern, text, flags=re.IGNORECASE))
         if matches:
             return matches[-1].group(1).upper()
+    # Fallback: the answer letter alone on its own line, e.g. "C", "**E**", "(D).".
+    line_matches = list(re.finditer(r"(?m)^[\s*()]*([A-F])[\s*().]*$", text))
+    if line_matches:
+        return line_matches[-1].group(1).upper()
     return None
 
 

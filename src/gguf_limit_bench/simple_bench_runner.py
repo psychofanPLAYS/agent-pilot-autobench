@@ -52,7 +52,7 @@ class LlamaServerSimpleBenchAttemptRunner:
         benchmark_path: Path = DEFAULT_SIMPLE_BENCH_PATH,
         system_prompt_path: Path = DEFAULT_SIMPLE_BENCH_SYSTEM_PROMPT,
         timeout_seconds: int = 600,
-        max_tokens: int = 1024,
+        max_tokens: int = 4096,
         host: str = "127.0.0.1",
         port: int | None = None,
     ) -> None:

@@ -31,5 +31,6 @@ semantic versioning for published versions.
   project-wide champion promotion.
 - Thread-sweep profiles inherit the documented q8 KV settings.
 - Exact server launch arguments are stored as non-executable JSON instead of a `.cmd` file.
+- The optional benchmark dependency lock now uses patched `aiohttp 3.14.1`.
 - Built wheels include the default SimpleBench dataset and system prompt.
 - Duplicate helper definitions and new runner typing regressions were removed.
