@@ -55,6 +55,7 @@ from gguf_limit_bench.installer import (
     sync_project_environment,
 )
 from gguf_limit_bench.learning import OptunaSettingsLearner
+from gguf_limit_bench.modes import KARPATHY_ROUND_SECONDS
 from gguf_limit_bench.packs import load_benchmark_packs
 from gguf_limit_bench.flag_ladder import (
     build_core_flag_ladder,
@@ -1446,6 +1447,7 @@ def _run_one_autoresearch(
         perplexity_contexts=perplexity_context,
         candidate_sequence=candidate_sequence,
         skipped_profiles=skipped_profiles,
+        round_seconds=KARPATHY_ROUND_SECONDS if flag_ladder else None,
     )
     return loop.run()
 

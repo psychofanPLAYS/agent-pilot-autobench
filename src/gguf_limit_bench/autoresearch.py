@@ -291,11 +291,16 @@ class AutoresearchLoop:
         perplexity_contexts: tuple[int, ...] | None = None,
         candidate_sequence: tuple[AutoresearchSettings, ...] | None = None,
         skipped_profiles: tuple[dict, ...] = (),
+        round_seconds: int | None = None,
     ) -> None:
         self.model = model
         self.runs_root = runs_root
         self.attempt_runner = attempt_runner
         self.budget_seconds = budget_seconds
+        # Karpathy round cap: when set, no single attempt may exceed this, so the
+        # loop keeps the fixed-budget-per-round cadence instead of letting one
+        # profile eat the whole session.
+        self.round_seconds = round_seconds
         self.parallel_max = parallel_max
         self.max_attempts = max_attempts
         self.learner = learner
@@ -363,9 +368,12 @@ class AutoresearchLoop:
                 },
             )
             remaining_seconds = self.budget_seconds - (time.monotonic() - started)
+            attempt_seconds = remaining_seconds
+            if self.round_seconds is not None:
+                attempt_seconds = min(attempt_seconds, self.round_seconds)
             set_timeout = getattr(self.attempt_runner, "set_timeout_seconds", None)
             if callable(set_timeout):
-                set_timeout(max(1, math.ceil(remaining_seconds)))
+                set_timeout(max(1, math.ceil(attempt_seconds)))
             result = self.attempt_runner(settings)
             if result.ok and self.benchmark_suite_plan is not None:
                 remaining_seconds = self.budget_seconds - (time.monotonic() - started)

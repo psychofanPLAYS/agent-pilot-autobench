@@ -754,3 +754,40 @@ def test_autoresearch_loop_writes_perplexity_profile_when_runner_is_provided(tmp
         encoding="utf-8"
     )
     assert metrics["perplexity_falloff"]["status"] == "measured"
+
+
+def test_autoresearch_loop_caps_each_attempt_to_round_seconds(tmp_path):
+    # Karpathy's fixed 5-minute round: no single attempt may exceed round_seconds,
+    # even when the total budget is large.
+    timeouts: list[int] = []
+
+    class CappedRunner:
+        def set_timeout_seconds(self, seconds: int) -> None:
+            timeouts.append(seconds)
+
+        def __call__(self, settings: AutoresearchSettings) -> AttemptResult:
+            return AttemptResult(
+                ok=True,
+                generation_tokens_per_second=10.0,
+                prompt_tokens_per_second=100.0,
+                ttft_ms=None,
+                context_size=settings.context_size,
+                failure="none",
+                stdout="{}",
+                stderr="",
+                returncode=0,
+            )
+
+    loop = AutoresearchLoop(
+        model=Path("G:/AI/models/Qwen3-Test-Q4_K_M.gguf"),
+        runs_root=tmp_path,
+        attempt_runner=CappedRunner(),
+        budget_seconds=3600,
+        parallel_max=1,
+        max_attempts=2,
+        round_seconds=300,
+    )
+    loop.run()
+
+    assert timeouts, "the loop should set a per-attempt timeout"
+    assert all(timeout <= 300 for timeout in timeouts)

@@ -32,7 +32,6 @@ def build_core_flag_ladder(
     extra_server_args: tuple[str, ...] = (),
     enable_mtp: bool = False,
 ) -> tuple[AutoresearchSettings, ...]:
-    parallel = max(1, min(parallel_max, 6))
     base = AutoresearchSettings(
         profile_name="L0-baseline",
         context_size=context_size,
@@ -51,7 +50,9 @@ def build_core_flag_ladder(
         flash_attention=False,
         cont_batching=False,
     )
-    comparison_base = _copy(base, profile_name="L2-kv-unified", parallel=parallel, kv_unified=True)
+    # Speed flags are measured at single stream (parallel=1) so the comparison is a
+    # clean single-stream tok/s ranking, not confounded by concurrency.
+    comparison_base = _copy(base, profile_name="L2-kv-unified", kv_unified=True)
     q8_profile = _copy(
         comparison_base,
         profile_name="L6-q8-kv",
@@ -61,7 +62,6 @@ def build_core_flag_ladder(
     ladder = [
         stripped,
         base,
-        _copy(base, profile_name="L1-parallel", parallel=parallel),
         comparison_base,
         _copy(
             comparison_base,
@@ -98,6 +98,12 @@ def build_core_flag_ladder(
                 spec_draft_n_max=3,
             )
         )
+    # Parallel adds concurrent-request CAPABILITY, not single-stream speed, so it is
+    # tested LAST on the kv-unified base. Slot counts mirror a server that allows one
+    # heavy plus two light requests (1+2) without choking the GPU.
+    for slots in (2, 3):
+        if slots <= max(1, parallel_max):
+            ladder.append(_copy(comparison_base, profile_name=f"Lpar-{slots}", parallel=slots))
     return tuple(ladder)
 
 
@@ -112,8 +118,7 @@ def profile_descriptions(
         "Lmin-stripped": "Fewest flags: no flash-attn, no continuous batching. "
         "Does removing flags help or hurt speed?",
         "L0-baseline": "Plain llama-server baseline for comparison.",
-        "L1-parallel": "Measure throughput cost/benefit from parallel slots.",
-        "L2-kv-unified": "Measure unified KV behavior against baseline.",
+        "L2-kv-unified": "Measure unified KV behavior against baseline (single stream).",
         "L3-ram-cache": "Measure prompt RAM cache overhead against L2.",
         "L4-cache-reuse": "Measure cache reuse overhead against L2.",
         "L5-checkpoints": "Measure context checkpoint overhead against L2.",
@@ -135,7 +140,11 @@ def profile_descriptions(
                     (
                         "Measure native MTP self-draft overhead and throughput."
                         if settings.profile_name.startswith("MTP-")
-                        else "Thread sweep over the best q8 KV profile."
+                        else (
+                            "Concurrent-request capability (parallel slots), tested last."
+                            if settings.profile_name.startswith("Lpar-")
+                            else "Thread sweep over the best q8 KV profile."
+                        )
                     ),
                 ),
             )

@@ -5,6 +5,12 @@ from dataclasses import dataclass
 from gguf_limit_bench.evaluation_mode import EvaluationMode
 
 
+# Karpathy's autoresearch program uses a fixed time budget per round. We keep his
+# 5-minute round as the unit of work; a mode's budget is just a number of rounds.
+KARPATHY_ROUND_MINUTES = 5
+KARPATHY_ROUND_SECONDS = KARPATHY_ROUND_MINUTES * 60
+
+
 @dataclass(frozen=True)
 class RunMode:
     """A goal-shaped run preset the novice picks in the cockpit.
@@ -26,28 +32,28 @@ RUN_MODES: tuple[RunMode, ...] = (
         id="quick",
         label="Quick check",
         description="Does it load, and how fast? No questions asked.",
-        budget_minutes=2,
+        budget_minutes=5,
         evaluation=EvaluationMode.SPEED_SCOUT,
     ),
     RunMode(
         id="best_settings",
         label="Find best settings",
         description="Walk the flag ladder, ask the questions, crown the best settings.",
-        budget_minutes=10,
+        budget_minutes=30,
         evaluation=EvaluationMode.BENCHMARK,
     ),
     RunMode(
         id="flag_effect",
         label="How flags affect speed",
         description="See how each llama.cpp flag changes tok/s and TTFT for this model.",
-        budget_minutes=8,
+        budget_minutes=30,
         evaluation=EvaluationMode.BENCHMARK,
     ),
     RunMode(
         id="context_limits",
         label="Context limits",
         description="How much context fits, and how long context affects tok/s.",
-        budget_minutes=12,
+        budget_minutes=25,
         evaluation=EvaluationMode.BENCHMARK,
         context_ladder=(4096, 8192, 16384, 32768),
     ),
@@ -55,7 +61,7 @@ RUN_MODES: tuple[RunMode, ...] = (
         id="deep",
         label="Deep / overnight",
         description="Everything: full ladder, big budget, context ladder.",
-        budget_minutes=30,
+        budget_minutes=60,
         evaluation=EvaluationMode.BENCHMARK,
         context_ladder=(4096, 8192, 16384, 32768, 65536, 131072),
     ),

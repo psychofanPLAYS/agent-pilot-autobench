@@ -215,27 +215,34 @@ def test_core_flag_ladder_builds_ordered_profiles_and_extra_args():
         extra_server_args=("--dry-run",),
     )
 
-    assert [settings.profile_name for settings in ladder[:8]] == [
+    names = [settings.profile_name for settings in ladder]
+    # Speed flags first, all single stream; the stripped rung leads so we can
+    # measure whether adding the standard flags helps or hurts ("fewer = faster?").
+    assert names[:7] == [
         "Lmin-stripped",
         "L0-baseline",
-        "L1-parallel",
         "L2-kv-unified",
         "L3-ram-cache",
         "L4-cache-reuse",
         "L5-checkpoints",
         "L6-q8-kv",
     ]
-    # The stripped rung removes the standard flags so we can measure whether
-    # adding them helps or hurts (the "fewer flags = faster?" test).
     assert ladder[0].profile_name == "Lmin-stripped"
     assert ladder[0].flash_attention is False
     assert ladder[0].cont_batching is False
     assert ladder[0].context_size == 8192
-    assert ladder[2].parallel == 6
-    assert ladder[-1].threads == 32
-    assert all(settings.cache_type_k == "q8_0" for settings in ladder[7:])
-    assert all(settings.cache_type_v == "q8_0" for settings in ladder[7:])
     assert ladder[0].extra_server_args == ("--dry-run",)
+    # Every speed/thread profile runs single stream (parallel=1).
+    speed_and_threads = [s for s in ladder if not s.profile_name.startswith("Lpar-")]
+    assert all(s.parallel == 1 for s in speed_and_threads)
+    assert any(s.profile_name == "T32-threads" and s.threads == 32 for s in ladder)
+    # Parallel capability is tested LAST, matching a 1-heavy-plus-2-light server.
+    assert names[-2:] == ["Lpar-2", "Lpar-3"]
+    assert ladder[-2].parallel == 2
+    assert ladder[-1].parallel == 3
+    # q8 KV profiles carry the q8 cache types.
+    q8 = [s for s in ladder if s.profile_name == "L6-q8-kv" or s.profile_name.startswith("T")]
+    assert all(s.cache_type_k == "q8_0" and s.cache_type_v == "q8_0" for s in q8)
 
 
 def test_extra_server_args_cannot_override_managed_bindings():
@@ -253,9 +260,10 @@ def test_core_flag_ladder_adds_native_mtp_draft_profiles_only_when_detected():
     ] == [
         "MTP-draft-3",
     ]
-    assert mtp[-1].spec_type == "draft-mtp"
-    assert mtp[-1].spec_draft_n_max == 3
-    assert mtp[-1].spec_draft_n_max <= 4
+    mtp_profile = next(s for s in mtp if s.profile_name == "MTP-draft-3")
+    assert mtp_profile.spec_type == "draft-mtp"
+    assert mtp_profile.spec_draft_n_max == 3
+    assert mtp_profile.spec_draft_n_max <= 4
 
 
 def test_flag_ladder_plan_contains_llama_server_commands():
@@ -272,7 +280,7 @@ def test_flag_ladder_plan_contains_llama_server_commands():
     assert plan[0]["name"] == "Lmin-stripped"
     assert plan[0]["command"][:3] == ["llama-server.exe", "--model", "model.gguf"]
     assert "--dry-run" in plan[0]["command"]
-    assert "--cache-type-k" in plan[7]["command"]
+    assert "--cache-type-k" in plan[6]["command"]
     assert "--cache-idle-slots" not in [part for row in plan for part in row["command"]]
 
 
