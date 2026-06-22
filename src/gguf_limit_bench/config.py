@@ -40,6 +40,7 @@ class BenchmarkSettings:
     ttft_probe: bool = True
     perplexity_corpus: Path | None = None
     perplexity_contexts: tuple[int, ...] = DEFAULT_PERPLEXITY_CONTEXTS
+    forced_server_args: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,7 @@ class PilotbenchConfig:
                     else str(self.benchmark.perplexity_corpus)
                 ),
                 "perplexity_contexts": list(self.benchmark.perplexity_contexts),
+                "forced_server_args": list(self.benchmark.forced_server_args),
             },
         }
 
@@ -99,6 +101,7 @@ def load_config(config_path: Path | None = None) -> PilotbenchConfig:
             perplexity_contexts=_ints(
                 benchmark.get("perplexity_contexts"), DEFAULT_PERPLEXITY_CONTEXTS
             ),
+            forced_server_args=_strings(benchmark.get("forced_server_args"), ()),
         ),
     )
     return apply_env_overrides(config)
@@ -136,6 +139,9 @@ def apply_env_overrides(config: PilotbenchConfig) -> PilotbenchConfig:
             ),
             perplexity_contexts=_env_ints(
                 "PILOTBENCH_PERPLEXITY_CONTEXTS", benchmark.perplexity_contexts
+            ),
+            forced_server_args=_strings(
+                os.environ.get("PILOTBENCH_FORCED_SERVER_ARGS"), benchmark.forced_server_args
             ),
         ),
     )
@@ -183,6 +189,7 @@ def with_cli_overrides(
                 if perplexity_contexts is not None
                 else config.benchmark.perplexity_contexts
             ),
+            forced_server_args=config.benchmark.forced_server_args,
         ),
     )
     return apply_env_overrides(config)
@@ -243,3 +250,13 @@ def _ints(value: object, default: tuple[int, ...]) -> tuple[int, ...]:
 
 def _env_ints(name: str, default: tuple[int, ...]) -> tuple[int, ...]:
     return _ints(os.environ.get(name), default)
+
+
+def _strings(value: object, default: tuple[str, ...]) -> tuple[str, ...]:
+    if value in (None, ""):
+        return default
+    if isinstance(value, str):
+        return (value,)
+    if not isinstance(value, Iterable):
+        raise TypeError("Expected a string or iterable of strings")
+    return tuple(str(item) for item in value)

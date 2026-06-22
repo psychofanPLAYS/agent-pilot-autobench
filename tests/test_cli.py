@@ -1224,3 +1224,33 @@ def test_run_one_autoresearch_speed_scout_uses_no_candidate_sequence(monkeypatch
         evaluation=EvaluationMode.SPEED_SCOUT,
     )
     assert captured["candidate_sequence"] is None
+
+
+def test_forced_server_args_apply_to_every_flag_ladder_profile(tmp_path):
+    import gguf_limit_bench.cli as cli
+    from gguf_limit_bench.evaluation_mode import EvaluationMode
+
+    model = tmp_path / "m.gguf"
+    model.write_bytes(b"fake")
+    receipt = cli._run_one_autoresearch(
+        model=model,
+        llama_bench=tmp_path / "llama-bench.exe",
+        llama_cli=tmp_path / "llama-cli.exe",
+        llama_server=tmp_path / "llama-server.exe",
+        runs_root=tmp_path,
+        budget_seconds=60,
+        parallel_max=2,
+        max_attempts=None,
+        learning=False,
+        workflow_eval=False,
+        ttft_probe=False,
+        evaluation=EvaluationMode.BENCHMARK,
+        flag_ladder=True,
+        dry_run=True,
+        forced_server_args=("--no-mmap",),
+    )
+    plan = json.loads((receipt.path / "flag-ladder-plan.json").read_text(encoding="utf-8"))
+    commanded = [p for p in plan["profiles"] if p.get("command")]
+    assert commanded, "dry-run plan should contain commands"
+    for profile in commanded:
+        assert "--no-mmap" in profile["command"]

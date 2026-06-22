@@ -1064,6 +1064,7 @@ def autoresearch(
         simple_bench_max_tokens=simple_bench_max_tokens,
         llama_server_extra_args=extra_server_args,
         evaluation=evaluation,
+        forced_server_args=config.benchmark.forced_server_args,
     )
     _print_receipt_outputs(receipt.path)
 
@@ -1148,6 +1149,7 @@ def autoresearch_all(
             benchmark_suite_plan=benchmark_suite_plan,
             enable_mtp=model.has_mtp,
             evaluation=evaluation,
+            forced_server_args=config.benchmark.forced_server_args,
         )
         console.print(f"{model.name}: {receipt.path}")
         _print_receipt_outputs(receipt.path)
@@ -1219,6 +1221,7 @@ def tui(
             benchmark_suite_plan=benchmark_suite_plan,
             enable_mtp=model.has_mtp,
             evaluation=picker.evaluation_mode,
+            forced_server_args=config.benchmark.forced_server_args,
         ).path
     )
     picker.run()
@@ -1331,10 +1334,16 @@ def _run_one_autoresearch(
     capability_collector: Callable[[Path], LlamaRuntimeCapabilities] = collect_llama_capabilities,
     flag_ladder_attempt_runner: AttemptRunner | None = None,
     evaluation: EvaluationMode = EvaluationMode.BENCHMARK,
+    forced_server_args: tuple[str, ...] = (),
 ):
     # Benchmark mode asks the real questions via the flag-ladder SimpleBench engine.
     # The legacy --flag-ladder flag forces the same path.
     flag_ladder = flag_ladder or asks_questions(evaluation)
+    # Forced flags are applied on top of every profile's flags.
+    if forced_server_args:
+        llama_server_extra_args = validate_extra_server_args(
+            tuple(forced_server_args) + tuple(llama_server_extra_args)
+        )
     candidate_sequence = None
     skipped_profiles: tuple[dict, ...] = ()
     attempt_runner: AttemptRunner
