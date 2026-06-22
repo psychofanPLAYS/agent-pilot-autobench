@@ -9,6 +9,8 @@ from textual.containers import Vertical, VerticalScroll
 from textual.widgets import DataTable, Footer, Header, ProgressBar, Static
 
 from gguf_limit_bench.discovery import ModelInfo, discover_models
+from gguf_limit_bench.evaluation_mode import EvaluationMode
+from gguf_limit_bench.reports import write_leaderboard
 from gguf_limit_bench.run_history import truncated_previous_runs_text
 from gguf_limit_bench.run_config import PRESETS, RunConfig
 from gguf_limit_bench.selection import SelectionState
@@ -89,6 +91,7 @@ class BenchTui(App):
         ("s", "cycle_sort", "Sort"),
         ("a", "select_all", "Select all"),
         ("c", "clear", "Clear"),
+        ("m", "toggle_evaluation", "Mode"),
         ("q", "quit", "Quit"),
     ]
 
@@ -111,6 +114,7 @@ class BenchTui(App):
         self.sort_modes = ("size", "name", "family")
         self.sort_mode_index = 0
         self.run_config = RunConfig.from_preset("normal")
+        self.evaluation_mode = EvaluationMode.BENCHMARK
         self.telemetry_stats = TelemetryStats()
 
     def compose(self) -> ComposeResult:
@@ -170,6 +174,17 @@ class BenchTui(App):
         self.models = self._sorted_models(self.models)
         self.selection.replace_models(self.models)
         self._refresh_table()
+
+    def action_toggle_evaluation(self) -> None:
+        if self.phase != "selecting":
+            return
+        self.evaluation_mode = (
+            EvaluationMode.SPEED_SCOUT
+            if self.evaluation_mode is EvaluationMode.BENCHMARK
+            else EvaluationMode.BENCHMARK
+        )
+        if self.is_running:
+            self._refresh_table()
 
     def action_cancel(self) -> None:
         if self.phase == "selecting":
@@ -234,8 +249,18 @@ class BenchTui(App):
                     int(index / len(selected_models) * 100),
                 )
                 break
+        self._show_champion()
         self.phase = "finished"
         self.call_from_thread(self.exit)
+
+    def _show_champion(self) -> None:
+        board = write_leaderboard(self.runs_root)
+        name = board.champion.model_name if board.entries else None
+        score = board.champion.score if board.entries else None
+        self.call_from_thread(
+            self.query_one("#dashboard", Static).update,
+            self._dashboard_text(format_champion_line(name, score)),
+        )
 
     def _refresh_table(self, keep_row: int = 0) -> None:
         table = self.query_one("#models", DataTable)
@@ -251,10 +276,15 @@ class BenchTui(App):
                 model.name,
             )
         selected = len(self.selection.selected_models())
+        mode_label = (
+            "benchmark (asks questions)"
+            if self.evaluation_mode is EvaluationMode.BENCHMARK
+            else "speed scout (no questions)"
+        )
         self.query_one("#status", Static).update(
             f"{len(self.models)} models found. {selected} selected. "
-            f"Sort: {self.sort_modes[self.sort_mode_index]}. "
-            "Space selects, Enter/R runs, S sort, A all, C clear, Esc cancel."
+            f"Sort: {self.sort_modes[self.sort_mode_index]}. Mode: {mode_label}. "
+            "Space selects, Enter/R runs, S sort, A all, C clear, M mode, Esc cancel."
         )
         if self.models:
             table.move_cursor(row=min(keep_row, len(self.models) - 1))
@@ -309,6 +339,12 @@ class BenchTui(App):
         snapshot = sample_telemetry()
         self.telemetry_stats.add(snapshot)
         self.query_one("#telemetry", Static).update(_telemetry_text(snapshot, self.telemetry_stats))
+
+
+def format_champion_line(model_name: str | None, score: float | None) -> str:
+    if model_name is None or score is None:
+        return "Champion: not decided yet"
+    return f"Champion: {model_name} ({score:.2f})"
 
 
 def _telemetry_text(snapshot: TelemetrySnapshot, stats: TelemetryStats) -> str:

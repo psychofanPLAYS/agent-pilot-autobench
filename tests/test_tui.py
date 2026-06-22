@@ -2,7 +2,8 @@ import asyncio
 
 from textual.widgets import DataTable, Static
 
-from gguf_limit_bench.tui import BenchTui
+from gguf_limit_bench.evaluation_mode import EvaluationMode
+from gguf_limit_bench.tui import BenchTui, format_champion_line
 
 
 def test_tui_loads_models_and_supports_select_all(tmp_path):
@@ -128,3 +129,35 @@ def test_tui_s_key_cycles_sort_modes_and_keeps_selection(tmp_path):
             assert app.selection.selected_paths() == selected_before
 
     asyncio.run(run_tui_check())
+
+
+def test_tui_defaults_to_benchmark_mode(tmp_path):
+    app = BenchTui(root=tmp_path, runs_root=tmp_path)
+    assert app.evaluation_mode is EvaluationMode.BENCHMARK
+
+
+def test_tui_m_key_toggles_evaluation_mode(tmp_path):
+    model_dir = tmp_path / "models"
+    model_dir.mkdir()
+    (model_dir / "Qwen3-Test-Q4_K_M.gguf").write_bytes(b"fake")
+
+    async def run_tui_check():
+        app = BenchTui(root=model_dir)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app.evaluation_mode is EvaluationMode.BENCHMARK
+
+            await pilot.press("m")
+            await pilot.pause()
+            assert app.evaluation_mode is EvaluationMode.SPEED_SCOUT
+
+            await pilot.press("m")
+            await pilot.pause()
+            assert app.evaluation_mode is EvaluationMode.BENCHMARK
+
+    asyncio.run(run_tui_check())
+
+
+def test_champion_line_formats():
+    assert format_champion_line("QwenX", 950.0) == "Champion: QwenX (950.00)"
+    assert format_champion_line(None, None) == "Champion: not decided yet"

@@ -10,7 +10,9 @@ def test_default_is_benchmark():
 
 
 def test_speed_scout_opt_out():
-    assert resolve_evaluation_mode(speed_scout=True, flag_ladder=False) is EvaluationMode.SPEED_SCOUT
+    assert (
+        resolve_evaluation_mode(speed_scout=True, flag_ladder=False) is EvaluationMode.SPEED_SCOUT
+    )
 
 
 def test_flag_ladder_forces_benchmark():
