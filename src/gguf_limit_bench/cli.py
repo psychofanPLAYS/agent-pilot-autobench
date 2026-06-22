@@ -40,6 +40,11 @@ from gguf_limit_bench.config import (
 from gguf_limit_bench.deployment import export_champion_profile
 from gguf_limit_bench.discovery import discover_models
 from gguf_limit_bench.doctor import DoctorReport, build_doctor_report
+from gguf_limit_bench.evaluation_mode import (
+    EvaluationMode,
+    asks_questions,
+    resolve_evaluation_mode,
+)
 from gguf_limit_bench.installer import (
     DEFAULT_SHIM_DIR,
     add_shim_dir_to_user_path,
@@ -972,6 +977,11 @@ def autoresearch(
         "--flag-ladder",
         help="Run a fixed llama-server flag ladder through the 10-question SimpleBench batch.",
     ),
+    speed_scout: bool = typer.Option(
+        False,
+        "--speed-scout",
+        help="Fast synthetic llama-bench scout (does NOT ask the benchmark questions).",
+    ),
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
@@ -1005,8 +1015,12 @@ def autoresearch(
         help="Extra raw llama-server argument appended to every flag-ladder rung. Repeatable.",
     ),
 ) -> None:
-    if dry_run and not flag_ladder:
-        raise typer.BadParameter("--dry-run requires --flag-ladder", param_hint="--dry-run")
+    evaluation = resolve_evaluation_mode(speed_scout=speed_scout, flag_ladder=flag_ladder)
+    if dry_run and evaluation is EvaluationMode.SPEED_SCOUT:
+        raise typer.BadParameter(
+            "--dry-run needs benchmark mode; remove --speed-scout",
+            param_hint="--dry-run",
+        )
     try:
         extra_server_args = validate_extra_server_args(tuple(llama_server_extra_arg or ()))
     except ValueError as exc:
@@ -1048,6 +1062,7 @@ def autoresearch(
         simple_bench_system_prompt=simple_bench_system_prompt,
         simple_bench_max_tokens=simple_bench_max_tokens,
         llama_server_extra_args=extra_server_args,
+        evaluation=evaluation,
     )
     _print_receipt_outputs(receipt.path)
 
@@ -1084,7 +1099,13 @@ def autoresearch_all(
     ),
     finish_early_on: bool = False,
     target_score: float = 100.0,
+    speed_scout: bool = typer.Option(
+        False,
+        "--speed-scout",
+        help="Fast synthetic llama-bench scout (does NOT ask the benchmark questions).",
+    ),
 ) -> None:
+    evaluation = resolve_evaluation_mode(speed_scout=speed_scout, flag_ladder=False)
     config = with_cli_overrides(
         load_config(),
         model_roots=[root] if root is not None else None,
@@ -1125,6 +1146,7 @@ def autoresearch_all(
             context_ladder=_context_ladder_or_none(context_ladder),
             benchmark_suite_plan=benchmark_suite_plan,
             enable_mtp=model.has_mtp,
+            evaluation=evaluation,
         )
         console.print(f"{model.name}: {receipt.path}")
         _print_receipt_outputs(receipt.path)
@@ -1304,7 +1326,11 @@ def _run_one_autoresearch(
     llama_server_extra_args: tuple[str, ...] = (),
     capability_collector: Callable[[Path], LlamaRuntimeCapabilities] = collect_llama_capabilities,
     flag_ladder_attempt_runner: AttemptRunner | None = None,
+    evaluation: EvaluationMode = EvaluationMode.BENCHMARK,
 ):
+    # Benchmark mode asks the real questions via the flag-ladder SimpleBench engine.
+    # The legacy --flag-ladder flag forces the same path.
+    flag_ladder = flag_ladder or asks_questions(evaluation)
     candidate_sequence = None
     skipped_profiles: tuple[dict, ...] = ()
     attempt_runner: AttemptRunner

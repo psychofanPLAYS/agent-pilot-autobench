@@ -93,6 +93,7 @@ def test_autoresearch_command_writes_receipts(tmp_path, monkeypatch):
         app,
         [
             "autoresearch",
+            "--speed-scout",
             "--model",
             str(model),
             "--runs-root",
@@ -253,6 +254,7 @@ def test_autoresearch_command_accepts_benchmark_suite_plan(tmp_path, monkeypatch
         app,
         [
             "autoresearch",
+            "--speed-scout",
             "--model",
             str(model),
             "--runs-root",
@@ -322,14 +324,16 @@ def test_autoresearch_flag_ladder_dry_run_writes_plan_without_runner(tmp_path, m
     assert "--dry" in plan["profiles"][0]["command"]
 
 
-def test_autoresearch_dry_run_requires_flag_ladder(tmp_path, monkeypatch):
+def test_autoresearch_dry_run_rejects_speed_scout(tmp_path, monkeypatch):
     def fail_runner(*args, **kwargs):
         raise AssertionError("invalid dry run must not create a benchmark runner")
 
-    monkeypatch.setattr("gguf_limit_bench.cli.LlamaBenchAttemptRunner", fail_runner)
+    monkeypatch.setattr("gguf_limit_bench.cli.LlamaServerSimpleBenchAttemptRunner", fail_runner)
     model = tmp_path / "model.gguf"
     model.write_bytes(b"fake")
 
+    # Dry-run plans the flag ladder, which only exists in benchmark mode. Asking
+    # for the synthetic speed scout and a dry run at the same time is incoherent.
     result = runner.invoke(
         app,
         [
@@ -339,11 +343,12 @@ def test_autoresearch_dry_run_requires_flag_ladder(tmp_path, monkeypatch):
             "--runs-root",
             str(tmp_path / "runs"),
             "--dry-run",
+            "--speed-scout",
         ],
     )
 
-    assert result.exit_code != 0
-    assert "--dry-run requires --flag-ladder" in result.output
+    assert result.exit_code == 2
+    assert isinstance(result.exception, SystemExit)
 
 
 def test_autoresearch_all_qwen_only_skips_non_qwen_models(tmp_path, monkeypatch):
@@ -356,6 +361,7 @@ def test_autoresearch_all_qwen_only_skips_non_qwen_models(tmp_path, monkeypatch)
         app,
         [
             "autoresearch-all",
+            "--speed-scout",
             "--root",
             str(tmp_path),
             "--runs-root",
@@ -437,6 +443,7 @@ def test_autoresearch_all_honors_total_budget_and_finish_early(tmp_path, monkeyp
         app,
         [
             "autoresearch-all",
+            "--speed-scout",
             "--runs-root",
             str(tmp_path / "runs"),
             "--total-budget-minutes",
@@ -1147,3 +1154,73 @@ def test_benchmark_suite_plans_lists_bundled_plans():
     assert any(
         path.endswith("benchmarks/plans/local-bfcl-smoke.plan.json") for path in normalized_plans
     )
+
+
+def test_run_one_autoresearch_benchmark_mode_uses_simplebench_runner(monkeypatch, tmp_path):
+    import gguf_limit_bench.cli as cli
+    from gguf_limit_bench.evaluation_mode import EvaluationMode
+
+    captured = {}
+
+    class FakeLoop:
+        def __init__(self, **kwargs):
+            captured["candidate_sequence"] = kwargs.get("candidate_sequence")
+
+        def run(self):
+            class R:
+                path = tmp_path
+
+            return R()
+
+    monkeypatch.setattr(cli, "AutoresearchLoop", FakeLoop)
+    cli._run_one_autoresearch(
+        model=tmp_path / "m.gguf",
+        llama_bench=tmp_path / "llama-bench",
+        llama_cli=tmp_path / "llama-cli",
+        llama_server=tmp_path / "llama-server",
+        runs_root=tmp_path,
+        budget_seconds=60,
+        parallel_max=1,
+        max_attempts=1,
+        learning=True,
+        workflow_eval=False,
+        ttft_probe=False,
+        evaluation=EvaluationMode.BENCHMARK,
+    )
+    # Benchmark mode must route through the flag-ladder question engine, which
+    # supplies a candidate_sequence (the synthetic speed scout supplies none).
+    assert captured["candidate_sequence"] is not None
+
+
+def test_run_one_autoresearch_speed_scout_uses_no_candidate_sequence(monkeypatch, tmp_path):
+    import gguf_limit_bench.cli as cli
+    from gguf_limit_bench.evaluation_mode import EvaluationMode
+
+    captured = {}
+
+    class FakeLoop:
+        def __init__(self, **kwargs):
+            captured["candidate_sequence"] = kwargs.get("candidate_sequence")
+
+        def run(self):
+            class R:
+                path = tmp_path
+
+            return R()
+
+    monkeypatch.setattr(cli, "AutoresearchLoop", FakeLoop)
+    cli._run_one_autoresearch(
+        model=tmp_path / "m.gguf",
+        llama_bench=tmp_path / "llama-bench",
+        llama_cli=tmp_path / "llama-cli",
+        llama_server=tmp_path / "llama-server",
+        runs_root=tmp_path,
+        budget_seconds=60,
+        parallel_max=1,
+        max_attempts=1,
+        learning=False,
+        workflow_eval=False,
+        ttft_probe=False,
+        evaluation=EvaluationMode.SPEED_SCOUT,
+    )
+    assert captured["candidate_sequence"] is None

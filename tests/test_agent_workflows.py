@@ -113,6 +113,7 @@ def test_bulk_autoresearch_supports_total_budget_and_finish_early(tmp_path, monk
         app,
         [
             "autoresearch-all",
+            "--speed-scout",
             "--runs-root",
             str(tmp_path / "runs"),
             "--total-budget-minutes",
