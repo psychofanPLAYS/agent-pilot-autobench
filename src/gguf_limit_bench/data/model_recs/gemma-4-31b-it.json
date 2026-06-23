@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "model_family": "Gemma-4-31B-it",
+  "base_repo_id": "google/gemma-4-31B-it",
+  "aliases": ["gemma-4-31B-it", "gemma-4-31b-it", "gemma4-31b-it"],
+  "matched_local_dirs": [
+    "LM_Studio-gguf/lmstudio-community/gemma-4-31B-it-GGUF",
+    "LM_Studio-gguf/lmstudio-community/gemma-4-31B-it-QAT-GGUF"
+  ],
+  "release_estimate": "2025-Q2",
+  "architecture": {
+    "type": "dense",
+    "total_params": "31B",
+    "active_params": "31B",
+    "reasoning": true,
+    "sliding_window_attention": true
+  },
+  "recommended_sampling": {
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 64,
+    "min_p": null,
+    "presence_penalty": null,
+    "repetition_penalty": null,
+    "notes": "Google specifies these values as standardized across ALL use cases — including coding, which is unusual (most models prefer lower temp for code). Sampler order matters for llama.cpp: temperature → top_p → top_k. min_p and repetition_penalty not documented by Google; leave unset."
+  },
+  "recommended_context": {
+    "default": 8192,
+    "max": 262144,
+    "yarn_notes": "Native 256K (262144-token) context trained in. No YaRN/RoPE extension needed within that limit. Global attention layers use Proportional RoPE (p-RoPE) for memory efficiency at long context. Sliding-window local layers use 1024-token windows; KV for those layers does NOT grow with sequence length, reducing VRAM pressure for long contexts. For llama.cpp: use -c with values up to 262144; expect high KV cache usage at full context for global layers."
+  },
+  "chat_template": {
+    "family": "gemma4",
+    "jinja_recommended": true,
+    "system_prompt_support": true,
+    "notes": "Gemma 4 uses NEW token-style different from Gemma 3. Gemma 3 used <start_of_turn>/<end_of_turn>; Gemma 4 uses <|turn>role\\n … <turn|>\\n markers. System role is NATIVELY supported in Gemma 4 (breaking change vs Gemma 3, which folded system into first user turn). Template file: google/gemma-4-31B-it/chat_template.jinja. Format: <|turn>system\\n{system}<turn|>\\n<|turn>user\\n{user}<turn|>\\n<|turn>model\\n. Special thinking tokens: enable with <|think|> at start of system prompt; thinking output wrapped in <|channel>thought\\n{reasoning}\\n<channel|>. For llama.cpp/llama-server: --chat-template-kwargs '{\"enable_thinking\":false}' to disable thinking; Windows PowerShell: use escaped quotes. Always pull the embedded jinja from the GGUF or use the HF template — early GGUFs (pre May 2026) had broken templates and required re-download."
+  },
+  "thinking": {
+    "supported": true,
+    "how": "Add <|think|> token at the start of the system prompt to enable. Reasoning output appears as <|channel>thought\\n[reasoning]\\n<channel|> before the final answer. In multi-turn: strip thinking blocks from history — only keep final visible answer before the next user turn.",
+    "recommended": "Optional. Disable for routine tasks (--chat-template-kwargs '{\"enable_thinking\":false}'); enable for complex reasoning. When disabled, larger models may still emit empty thought blocks before responses — this is expected."
+  },
+  "llama_cpp_notes": "Sliding-window hybrid attention: 60 layers total; local SWA layers use 1024-token window (KV fixed size), global attention layers use full context (KV grows). Final layer is always global. For long-context (>32K) use --cache-type-k f16 or q8_0 for better quality. QAT variant (lmstudio-community/gemma-4-31B-it-QAT-GGUF) is trained at Q4_0 precision by Google — near-BF16 quality at 4-bit, ~3x memory reduction vs BF16. IMPORTANT: naive Q4_0 conversion degrades quality because llama.cpp Q4_0 uses F16 scales while Google's QAT used BF16 scales during training; prefer the lmstudio-community or unsloth UD-Q4_K_XL dynamic GGUFs which correctly handle this. The QAT GGUF from lmstudio-community is the purpose-built variant. Multimodal: requires --mmproj flag for vision encoder (~550M params); text-only inference works without it. Model parameters: 30.7B active, 32.7B total (includes ~550M vision encoder).",
+  "finetune_overrides": [
+    {
+      "local_dir": "LM_Studio-gguf/lmstudio-community/gemma-4-31B-it-QAT-GGUF",
+      "notes": "QAT (Quantization-Aware Training) variant. Google trained this specifically at Q4_0 precision — near-BF16 quality at ~18GB. Do NOT re-quantize; use as-is. Sampling params are identical to standard variant (temp=1.0, top_p=0.95, top_k=64). This is the recommended local deployment variant for 24GB VRAM (RTX 4090).",
+      "override_quant_label": "QAT-Q4_0",
+      "memory_note": "~18GB VRAM for weights; add KV cache on top. Full 256K context requires significant additional VRAM for global attention layers."
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://huggingface.co/google/gemma-4-31B-it",
+      "label": "Official HF model card — google/gemma-4-31B-it",
+      "accessed": "2026-06-23"
+    },
+    {
+      "url": "https://huggingface.co/google/gemma-4-31B-it/blob/main/chat_template.jinja",
+      "label": "Official Jinja chat template — google/gemma-4-31B-it",
+      "accessed": "2026-06-23"
+    },
+    {
+      "url": "https://unsloth.ai/docs/models/gemma-4",
+      "label": "Unsloth Gemma 4 local inference guide",
+      "accessed": "2026-06-23"
+    },
+    {
+      "url": "https://huggingface.co/unsloth/gemma-4-31B-it-GGUF",
+      "label": "Unsloth GGUF repo — inference params and quantization options",
+      "accessed": "2026-06-23"
+    },
+    {
+      "url": "https://lushbinary.com/blog/gemma-4-qat-self-hosting-guide-ollama-llama-cpp-vllm/",
+      "label": "Gemma 4 QAT self-hosting guide — QAT quality and llama.cpp scale mismatch warning",
+      "accessed": "2026-06-23"
+    },
+    {
+      "url": "https://ollama.com/library/gemma4:31b-it-qat",
+      "label": "Ollama gemma4:31b-it-qat — QAT variant specs (Q4_0, 256K, 60 layers, 1024 SWA)",
+      "accessed": "2026-06-23"
+    },
+    {
+      "url": "https://ai.google.dev/gemma/docs/core/prompt-structure",
+      "label": "Google AI Gemma prompt structure docs (Gemma 3/4 template reference)",
+      "accessed": "2026-06-23"
+    }
+  ],
+  "confidence": "strong",
+  "gaps": "1. Exact global vs local layer count ratio not confirmed from first-party source (60 total layers known, split unknown). 2. min_p not documented by Google — likely 0.0 (unset) but unverified. 3. repetition_penalty not documented. 4. The ai.google.dev prompt-structure page still describes Gemma 3-style (no system role, start_of_turn/end_of_turn); it may be outdated for Gemma 4 — the HF model card and Jinja template confirm native system role and new token style. 5. Audio modality confirmed unsupported in 31B (only E2B/E4B have audio). 6. LM Studio community GGUF chat_template patch status (pre/post May 2026 re-download) not verified for these specific local files.",
+  "researched_by": "claude-sonnet via HF lookup + WebFetch + WebSearch",
+  "researched_on": "2026-06-23"
+}

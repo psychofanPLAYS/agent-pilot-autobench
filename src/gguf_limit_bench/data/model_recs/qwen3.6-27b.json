@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "model_family": "Qwen3.6-27B",
+  "base_repo_id": "Qwen/Qwen3.6-27B",
+  "aliases": [
+    "Qwen3.6-27B",
+    "qwen3.6-27b",
+    "Qwen3.6 27B"
+  ],
+  "matched_local_dirs": [
+    "LM_Studio-gguf/Brian6145/Qwen3.6-27B-Claude-Opus-Sonnet-DistilledV2-MTP-GGUF",
+    "LM_Studio-gguf/llmfan46/Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-GGUF",
+    "LM_Studio-gguf/bytkim/Qwen3.6-27B-MTP-pi-reasoning-GGUF",
+    "LM_Studio-gguf/bytkim/Qwen3.6-27B-MTP-pi-tune-GGUF",
+    "LM_Studio-gguf/DavidAU/Qwen3.6-27B-NEO-CODE-Di-IMatrix-MAX-GGUF",
+    "LM_Studio-gguf/mradermacher/Huihui-Qwen3.6-27B-abliterated-Athanorlite-ORPO-GGUF",
+    "LM_Studio-gguf/qwen3.6/Qwen3.6-27B-MTP-GGUF"
+  ],
+  "release_estimate": "2026-04-24",
+  "architecture": {
+    "type": "dense",
+    "total_params": "27B",
+    "active_params": "27B",
+    "reasoning": true,
+    "mtp_speculative": true,
+    "notes": "Architecture tag on HF is qwen3_5 (internal naming); 64 layers, hidden dim 5120; also a vision model (multimodal, requires mmproj for image use). MTP draft heads are embedded in the model — no second model needed."
+  },
+  "recommended_sampling": {
+    "thinking_mode_general": {
+      "temperature": 1.0,
+      "top_p": 0.95,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 0.0,
+      "repetition_penalty": 1.0
+    },
+    "thinking_mode_coding": {
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 0.0,
+      "repetition_penalty": 1.0,
+      "notes": "Use for precise coding, web dev, refactoring tasks"
+    },
+    "non_thinking_instruct": {
+      "temperature": 0.7,
+      "top_p": 0.8,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 1.5,
+      "repetition_penalty": 1.0
+    },
+    "notes": "Official card explicitly warns: do NOT use greedy decoding in thinking mode (leads to endless repetitions). presence_penalty 1.5 is recommended for non-thinking/instruct mode to reduce repetitions. The 27B dense uses presence_penalty=0.0 in thinking-general mode, unlike the 35B-A3B MoE which uses 1.5 there — this is a documented per-model difference confirmed in HF discussion #10.",
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 20,
+    "min_p": 0.0,
+    "presence_penalty": 0.0,
+    "repetition_penalty": 1.0,
+    "canonical_preset": "thinking_mode_general"
+  },
+  "recommended_context": {
+    "default": 32768,
+    "max": 262144,
+    "extended_max": 1010000,
+    "max_output_general": 32768,
+    "max_output_complex": 81920,
+    "yarn_notes": "Native context is 262,144 tokens. Extended to ~1,010,000 tokens via YaRN scaling. YaRN config: rope_type=yarn, rope_theta=10000000, factor=4.0, original_max_position_embeddings=262144. Adjust factor proportionally (e.g. factor=2.0 for ~524K tokens). Set in config.json rope_parameters."
+  },
+  "chat_template": {
+    "family": "chatml",
+    "jinja_recommended": true,
+    "system_prompt_support": true,
+    "thinking_toggle": "enable_thinking parameter in chat template (True=thinking on, False=thinking off)",
+    "thinking_preservation": "Set enable_thinking=True in all turns to preserve <think> blocks across multi-turn conversations (prevents redundant recalculation in agent workflows)",
+    "notes": "Standard ChatML with Qwen3 thinking extensions. Toggle thinking mode per-call via enable_thinking flag. Thinking output is wrapped in <think>...</think> blocks. MTP-Preserved variants retain these blocks across context."
+  },
+  "thinking": {
+    "supported": true,
+    "how": "Built-in via single checkpoint; controlled by enable_thinking flag in chat template or /think and /no_think tokens in user messages",
+    "recommended": "Enable for complex reasoning, math, and coding tasks; disable for low-latency instruct workloads. For coding use temperature=0.6; for general reasoning use temperature=1.0."
+  },
+  "llama_cpp_notes": "MTP native speculative decoding requires llama.cpp build 9200+ (merged 2026-05-16). Use flag --spec-type draft-mtp --spec-draft-n-max 2 (2 is the safe max; confirmed bug with n-max=3+ that changes deterministic output, issue #23302 status: unconfirmed but reproducible on macOS Metal). Typical speedup: ~1.5-1.9x on RTX 3090-class GPUs (38 tok/s → 65 tok/s reported). Limitations: MTP does NOT support -np > 1 (parallel sequences) or --mmproj (vision). Recommended llama-server example: llama-server -hf unsloth/Qwen3.6-27B-MTP-GGUF:UD-Q4_K_XL -ngl 99 -c 8192 -fa on -np 1 --spec-type draft-mtp --spec-draft-n-max 2",
+  "finetune_overrides": [
+    {
+      "repo_id": "DavidAU/Qwen3.6-27B-NEO-CODE-Di-IMatrix-MAX-GGUF",
+      "source_url": "https://huggingface.co/DavidAU/Qwen3.6-27B-NEO-CODE-Di-IMatrix-MAX-GGUF",
+      "confidence": "candidate",
+      "notes": "DavidAU's model card publishes the same official Qwen sampling tables (thinking-general temp=1.0, coding temp=0.6, instruct temp=0.7/presence_penalty=1.5) — no proprietary overrides documented beyond official defaults. Dual imatrix quantization using NEO+NEO-CODE datasets. Also supports vision via mmproj. IQ4_XS (15.4GB) recommended for balanced 4-bit; Q8_0 (29.9GB) for max fidelity.",
+      "sampler_overrides": null
+    },
+    {
+      "repo_id": "mradermacher/Huihui-Qwen3.6-27B-abliterated-Athanorlite-ORPO-GGUF",
+      "source_url": "https://huggingface.co/mradermacher/Huihui-Qwen3.6-27B-abliterated-Athanorlite-ORPO-GGUF",
+      "confidence": "low",
+      "notes": "mradermacher model card contained no documented sampler overrides — thin readme directing to TheBloke's docs. No proprietary sampler parameters found. Assume base Qwen3.6-27B official settings apply.",
+      "sampler_overrides": null
+    }
+  ],
+  "sources": [
+    {
+      "label": "Official HF model card",
+      "url": "https://huggingface.co/Qwen/Qwen3.6-27B",
+      "notes": "Primary source for sampling params, context, YaRN, thinking mode"
+    },
+    {
+      "label": "HF Discussion #10 — sampling param differences 27B vs 35B-A3B",
+      "url": "https://huggingface.co/Qwen/Qwen3.6-27B/discussions/10",
+      "notes": "Confirms 27B uses presence_penalty=0.0 in thinking-general mode unlike 35B-A3B"
+    },
+    {
+      "label": "Unsloth Qwen3.6-27B-MTP-GGUF card",
+      "url": "https://huggingface.co/unsloth/Qwen3.6-27B-MTP-GGUF",
+      "notes": "llama.cpp MTP command example, confirms spec-draft-n-max 2 and -np 1 constraint"
+    },
+    {
+      "label": "DavidAU NEO-CODE GGUF card",
+      "url": "https://huggingface.co/DavidAU/Qwen3.6-27B-NEO-CODE-Di-IMatrix-MAX-GGUF",
+      "notes": "Sampler tables, quant benchmark data"
+    },
+    {
+      "label": "mradermacher GGUF card",
+      "url": "https://huggingface.co/mradermacher/Huihui-Qwen3.6-27B-abliterated-Athanorlite-ORPO-GGUF",
+      "notes": "Checked — no sampler overrides documented"
+    },
+    {
+      "label": "llama.cpp issue #23302 — MTP draft-n-max=3 bug",
+      "url": "https://github.com/ggml-org/llama.cpp/issues/23302",
+      "notes": "Bug report confirming spec-draft-n-max=3+ alters output; recommend staying at 2"
+    },
+    {
+      "label": "mer.vin MTP llama.cpp guide",
+      "url": "https://mer.vin/2026/05/run-qwen-3-6-mtp-in-llama-cpp-faster-local-inference-with-built-in-speculative-decoding/",
+      "notes": "llama.cpp build requirement (>=9200), MTP flag usage, performance data"
+    },
+    {
+      "label": "Qwen readthedocs quickstart",
+      "url": "https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html",
+      "notes": "General Qwen3 family sampling guidance; confirms do-not-use greedy in thinking mode"
+    }
+  ],
+  "confidence": "strong",
+  "gaps": "1. Heretic/uncensored finetune variants (Brian6145, llmfan46, bytkim pi-reasoning/pi-tune) not individually checked for sampler overrides — assumed to follow base Qwen3.6-27B defaults unless their cards document otherwise. 2. DavidAU card does not appear to publish proprietary sampler deviations from official Qwen tables (unlike some DavidAU releases for other model families). 3. llama.cpp MTP bug #23302 is still 'unconfirmed' status as of research date — safe cap of spec-draft-n-max=2 is a workaround, not an official fix. 4. YaRN factor table for all intermediate context lengths not fully documented — only factor=4.0 (1M) and factor=2.0 (524K) referenced.",
+  "researched_by": "claude-sonnet via HF lookup + WebFetch + WebSearch",
+  "researched_on": "2026-06-23"
+}

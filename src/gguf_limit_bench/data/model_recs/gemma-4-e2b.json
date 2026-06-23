@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "model_family": "Gemma-4-E2B",
+  "base_repo_id": "google/gemma-4-E2B",
+  "aliases": ["Gemma-4-E2B", "gemma-4-e2b", "Gemma4-E2B", "gemma4-e2b"],
+  "matched_local_dirs": [
+    "LM_Studio-gguf/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive"
+  ],
+  "release_estimate": "2026-Q2",
+  "architecture": {
+    "type": "dense-efficient",
+    "total_params": "~5.1B (incl. per-layer embeddings)",
+    "active_params": "~2.3B effective (advertised as E2B)",
+    "reasoning": true,
+    "sliding_window_attention": true,
+    "multimodal": true,
+    "notes": "E in 'E2B' stands for 'effective' — model has 5.1B total parameters but only ~2.3B are active weights in the standard sense; the remainder is Per-Layer Embeddings (PLE) stored and retrieved once per forward pass, designed for flash-memory / on-device deployment with reduced VRAM pressure. Architecture: gemma4. Attention: hybrid interleaved local/global pattern with 4:1 ratio (4 local sliding-window layers then 1 global), UNLIKE larger Gemma 4 variants which use 5:1. Sliding window size: 512 tokens for E2B/E4B (vs 1024 for 26B/31B). Global layers use Grouped Query Attention (GQA) at 8:1 query:KV ratio; local (sliding window) layers use 2:1 GQA. Keys = Values optimization on global attention layers only. p-RoPE (pruned rotary positional encoding, p=0.25) applied to embeddings. 35 total layers. Vision encoder ~150M params; audio encoder ~300M params. Not a MatFormer/Matryoshka model (that is Gemma 3n); Gemma 4 E-series uses PLE for efficiency, not nested sub-models. Multimodal: text + image + audio input."
+  },
+  "recommended_sampling": {
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 64,
+    "min_p": null,
+    "presence_penalty": null,
+    "repetition_penalty": null,
+    "notes": "Official Google recommendation (from google/gemma-4-E2B-it model card and ai.google.dev/gemma/docs/core/model_card_4): temperature=1.0, top_p=0.95, top_k=64. No min_p, presence_penalty, or repetition_penalty values documented by Google. HauhauCS finetune card defers to these base values verbatim — no overrides. These are single-mode settings; Google does not publish separate thinking vs non-thinking sampling presets for Gemma 4 (unlike Qwen3 which has distinct presets)."
+  },
+  "recommended_context": {
+    "default": 8192,
+    "max": 131072,
+    "yarn_notes": "Native context window is 128K tokens (131,072). The HauhauCS finetune card recommends '-c 8192' for practical llama.cpp use (-c 8192 is the default in their example commands). Full 128K is supported natively — no YaRN extension needed for up to 128K. For interactive use gemma4.dev recommends '-n 512'; for thinking mode '-n 1024' (these refer to generation length, not context). The 512-token sliding window in local attention layers means KV memory for those layers is bounded at 512 regardless of full context size — only the global attention layers accumulate full-context KV. This significantly reduces KV cache VRAM vs a pure full-attention model at long contexts."
+  },
+  "chat_template": {
+    "family": "gemma4",
+    "jinja_recommended": true,
+    "system_prompt_support": true,
+    "notes": "Gemma 4 uses a NEW template format — NOT the legacy Gemma 1/2/3 '<start_of_turn>' / '<end_of_turn>' tokens. Gemma 4 uses '<|turn>' and '<turn|>' as turn delimiters with role names (system/user/model). Example structure: '<|turn>system\\n[system text]<turn|><|turn>user\\n[user text]<turn|><|turn>model\\n'. The template requires '--jinja' flag in llama.cpp to parse correctly (complex Jinja template with macros, namespaces, dictsort). Alternatively: '--chat-template gemma' flag. Thinking control is via '<|think|>' token placed at start of the system prompt to enable; remove to disable. Thinking output uses '<|channel>thought\\n[reasoning]<channel|>' tags. Strip thinking content from prior turns in multi-turn conversations (except during function calls). HauhauCS finetune notes: no template modifications from base — use '--jinja' flag exactly as base model."
+  },
+  "thinking": {
+    "supported": true,
+    "how": "Include '<|think|>' token at start of system prompt to enable thinking mode. Remove to disable. When enabled, model outputs internal reasoning wrapped in '<|channel>thought\\n[reasoning]<channel|>' before the final answer. In llama.cpp, pass system prompt via '-sys' flag; llama.cpp must be recent enough to handle Gemma 4 Jinja template (re-download template as of April 2026 for bug fixes). Strip thought blocks from multi-turn history before passing back to model.",
+    "recommended": "For reasoning/complex tasks: enable thinking via '<|think|>' in system prompt. For latency-sensitive chat: omit '<|think|>' for direct response. Temperature=1.0 applies to both modes per Google's single-preset recommendation."
+  },
+  "llama_cpp_notes": "Critical: use '--jinja' flag (or '--chat-template gemma') — Gemma 4 has a complex Jinja template that standard non-jinja handling cannot parse correctly. GPU offload: '-ngl 99' for full VRAM offload; reduce if OOM. KV cache note: local (sliding-window) attention layers only need 512-token KV window regardless of context size; global attention layers accumulate full context. Net KV memory at long context is substantially lower than a full-attention model due to 4:1 local:global ratio (4 of every 5 layers are local). Flash attention ('-fa') recommended for efficiency. Multimodal: requires mmproj projector file for vision/audio — 'llama-cli -m model.gguf --mmproj mmproj-file.gguf --jinja -c 8192 -ngl 99'. Text-only: 'llama-cli -m model.gguf --jinja -c 8192 -ngl 99'. HauhauCS K_P quants use model-specific analysis to preserve quality at ~5-15% larger file size vs base quant tier. No special llama.cpp build needed for K_P quants. Template bug (thinking generation prompt) was fixed in llama.cpp circa April 2026 — ensure llama.cpp is up to date.",
+  "finetune_overrides": [
+    {
+      "repo_id": "HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive",
+      "source_url": "https://huggingface.co/HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive",
+      "sampling_delta": "None — model card explicitly defers to official Google Gemma 4 sampling settings (temp=1.0, top_p=0.95, top_k=64). No overrides documented.",
+      "uncensoring_notes": "Advertised as 0/465 refusals. Based on google/gemma-4-e2b-it without dataset or capability changes per the card. 'Aggressive' variant implies more permissive uncensoring than a 'Balanced' tier would. No system prompt override documented — standard Gemma 4 system prompt applies.",
+      "llama_cpp_flags": "--jinja -c 8192 -ngl 99 (text-only); add --mmproj <file> for vision/audio",
+      "quant_notes": "HauhauCS K_P ('Perfect') quantization: model-specific analysis selectively preserves quality where it matters most. Effectively 1-2 quant levels higher quality at ~5-15% larger file than base quant. Compatible with standard llama.cpp/LM Studio — no special build needed.",
+      "other": "Uncensored finetune — no architectural changes. All Gemma 4 E2B architectural properties (sliding window, PLE, hybrid attention) apply identically. No thinking-mode changes from base."
+    }
+  ],
+  "sources": [
+    "https://huggingface.co/google/gemma-4-E2B-it",
+    "https://huggingface.co/google/gemma-4-E2B",
+    "https://huggingface.co/HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive",
+    "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF",
+    "https://ai.google.dev/gemma/docs/core/model_card_4",
+    "https://ai.google.dev/gemma/docs/core/prompt-formatting-gemma4",
+    "https://newsletter.maartengrootendorst.com/p/a-visual-guide-to-gemma-4",
+    "https://gemma4.dev/run-local/gemma-4-llama-cpp",
+    "https://complete.tech/blog/llamacpp-gemma4-thinking-prompt-local-fix/",
+    "https://lmstudio.ai/models/gemma-4"
+  ],
+  "confidence": "strong",
+  "gaps": "min_p and repetition_penalty not documented by Google for Gemma 4 — left null; safe to omit or use runtime defaults. HauhauCS Aggressive model card is thin on detail (no ablation metrics, no method description beyond 'uncensored'); no sampling overrides were documented so base values are used. The Gemma 4 template token format ('<|turn>' vs legacy '<start_of_turn>') differs from Gemma 1/2/3 — confirm llama.cpp version supports Gemma 4 Jinja template (April 2026+ required for thinking-mode fix). Exact global:local layer indices not published (only the 4:1 ratio and 'final layer is always global' rule). Architecture verified as PLE-based efficiency (NOT MatFormer/Matryoshka — that is Gemma 3n); initial task prompt assumption about MatFormer was incorrect for Gemma 4 E-series.",
+  "researched_by": "claude-sonnet via HF lookup",
+  "researched_on": "2026-06-23"
+}

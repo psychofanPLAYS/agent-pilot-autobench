@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "model_family": "Gemma-4-26B-A4B-it",
+  "base_repo_id": "google/gemma-4-26B-A4B-it",
+  "aliases": [
+    "gemma-4-26B-A4B-it",
+    "gemma-4-26b-a4b-it"
+  ],
+  "matched_local_dirs": [
+    "LM_Studio-gguf/unsloth/gemma-4-26B-A4B-it-GGUF",
+    "LM_Studio-gguf/lmstudio-community/gemma-4-26B-A4B-it-QAT-GGUF",
+    "LM_Studio-gguf/TrevorJS/gemma-4-26B-A4B-it-uncensored-GGUF"
+  ],
+  "release_estimate": "2025-Q2",
+  "architecture": {
+    "type": "moe",
+    "total_params": "26B",
+    "active_params": "4B",
+    "num_experts_total": 128,
+    "num_experts_active": 8,
+    "num_experts_shared": 1,
+    "num_layers": 30,
+    "hidden_size": 2816,
+    "attention_heads": 16,
+    "kv_heads": 8,
+    "head_dim": 256,
+    "global_head_dim": 512,
+    "reasoning": true,
+    "sliding_window_attention": true,
+    "sliding_window_size": 1024,
+    "attention_pattern": "hybrid: sliding-window local attention alternating with full global attention; 5:1 local:global ratio across 30 layers; pattern repeats every 5 layers with 1 global layer",
+    "rope_sliding": "theta=10000, default type",
+    "rope_global": "theta=1000000, partial_rotary_factor=0.25, proportional type",
+    "max_position_embeddings": 262144,
+    "vision_encoder": "~550M params, 27 layers, hidden_size=1152; multimodal (image+text); not relevant to text-only GGUF inference"
+  },
+  "recommended_sampling": {
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 64,
+    "min_p": 0.0,
+    "presence_penalty": null,
+    "repetition_penalty": null,
+    "sampler_order_llama_cpp": "temperature;top_p;top_k",
+    "notes": "Google official defaults: temp=1.0, top_p=0.95, top_k=64, confirmed by Unsloth docs and llama.cpp discussions. min_p=0 (disabled) per community usage. Sampler order matters in llama.cpp — explicitly pass --samplers 'temperature;top_p;top_k'. Some users report temp=1.5 improves coding tasks but 1.0 is the official baseline. No repetition_penalty documented by Google."
+  },
+  "recommended_context": {
+    "default": 8192,
+    "max": 262144,
+    "yarn_notes": "Native 256K context via dual RoPE (standard for sliding layers, pruned for global layers). No YaRN extension required or documented. Sliding-window layers only need last 1024 tokens in KV cache — full 256K KV cost applies only to global attention layers. llama.cpp SWA KV cache compression (ik_llama.cpp issue #1607) is an active optimization area but not yet mainstream."
+  },
+  "chat_template": {
+    "family": "gemma",
+    "jinja_recommended": true,
+    "bos_token": "<bos>",
+    "turn_start": "<start_of_turn>",
+    "turn_end": "<end_of_turn>",
+    "system_prompt_support": true,
+    "system_prompt_notes": "Gemma 4 adds NATIVE system role support (unlike Gemma 1/2/3 which folded system into first user turn). Use the model's built-in chat template via processor.apply_chat_template() or llama.cpp's --chat-template gemma. Do NOT manually construct prompts.",
+    "thinking_token": "<|think|>",
+    "thinking_output_format": "<|channel>thought\n[reasoning]<channel|>",
+    "notes": "Gemma 4 is multimodal; text-only GGUF variants drop the vision encoder. Images go before text, audio after text in multimodal turn ordering. System role is natively supported — a significant change from earlier Gemma generations."
+  },
+  "thinking": {
+    "supported": true,
+    "how": "Pass <|think|> control token in system prompt to enable reasoning mode. Use llama-server (not llama-cli) for reliable thinking control.",
+    "recommended": "Disable for benchmarking unless testing reasoning capability. llama.cpp flag: --chat-template-kwargs '{\"enable_thinking\":false}' (PowerShell: --chat-template-kwargs \"{\\\"enable_thinking\\\":false}\")"
+  },
+  "llama_cpp_notes": "Sliding-window attention (window=1024) means local layers only need 1024-token KV window — significantly reduces KV cache memory vs full-attention models at large contexts. Global attention layers still require full KV. Use llama-server over llama-cli for thinking/template control. Recommended flags: --temp 1.0 --top-p 0.95 --top-k 64 --samplers 'temperature;top_p;top_k'. For vision (mmproj files): --mmproj <path> — not applicable to text-only GGUF builds. Architecture is gemma4 in llama.cpp (distinct from gemma3).",
+  "finetune_overrides": [
+    {
+      "repo_id": "TrevorJS/gemma-4-26B-A4B-it-uncensored-GGUF",
+      "description": "Uncensored abliterated finetune; no documented sampler overrides in model card. Card shows -c 8192 usage example but this is not a recommended max — base model supports 256K. Use base sampling settings.",
+      "sampler_overrides": null,
+      "confidence": "low"
+    },
+    {
+      "repo_id": "lmstudio-community/gemma-4-26B-A4B-it-QAT-GGUF",
+      "description": "Google official QAT (Quantization-Aware Training) weights converted to GGUF Q4_0 by LM Studio team. QAT integrates quantization during training rather than post-hoc — Google claims near-BF16 quality at Q4_0 precision. However, Unsloth benchmarks show naive BF16→Q4_0 GGUF conversion loses significant quality (70.2% top-1 accuracy vs 85.6% with proper lattice alignment). Verify whether lmstudio-community used Google's native QAT GGUF release or re-converted from BF16. File size ~14.4GB.",
+      "sampler_overrides": null,
+      "confidence": "candidate"
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://huggingface.co/google/gemma-4-26B-A4B-it",
+      "role": "official model card — architecture, context, system prompt support",
+      "accessed": "2026-06-23"
+    },
+    {
+      "url": "https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF",
+      "role": "GGUF model card — sampling params, context, sliding window, architecture details from config.json",
+      "accessed": "2026-06-23"
+    },
+    {
+      "url": "https://unsloth.ai/docs/models/gemma-4",
+      "role": "Unsloth official docs — confirmed temp=1.0/top_p=0.95/top_k=64, llama.cpp flags, thinking toggle",
+      "accessed": "2026-06-23"
+    },
+    {
+      "url": "https://unsloth.ai/docs/models/gemma-4/qat",
+      "role": "QAT quality analysis — naive Q4_0 accuracy loss, Unsloth UD-Q4_K_XL recommendation",
+      "accessed": "2026-06-23"
+    },
+    {
+      "url": "https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/discussions/21",
+      "role": "Community discussion — sampler order importance, min_p=0 confirmation, coding temp notes",
+      "accessed": "2026-06-23"
+    },
+    {
+      "url": "https://huggingface.co/blog/gemma4",
+      "role": "HF Gemma 4 launch blog — context windows, SWA sizes, MoE active params, chat template guidance",
+      "accessed": "2026-06-23"
+    },
+    {
+      "url": "https://github.com/ikawrakow/ik_llama.cpp/issues/1607",
+      "role": "SWA KV cache compression issue — confirms SWA KV optimization opportunity for Gemma 4",
+      "accessed": "2026-06-23"
+    }
+  ],
+  "confidence": "strong",
+  "gaps": "1) Exact local:global attention layer indices not confirmed (5:1 ratio from community analysis, not official doc). 2) TrevorJS uncensored card is thin — no sampler overrides documented, can only inherit base. 3) lmstudio-community QAT conversion fidelity vs Google native QAT GGUF unclear — Q4_0 via naive conversion may have accuracy penalty per Unsloth research. 4) repetition_penalty: no Google recommendation found; likely not needed given temp=1.0 with top_k=64. 5) Vision encoder GGUF compatibility in text-only builds needs per-file verification.",
+  "researched_by": "claude-sonnet via HF lookup",
+  "researched_on": "2026-06-23"
+}

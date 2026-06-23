@@ -1,0 +1,195 @@
+{
+  "schema_version": 1,
+  "model_family": "Qwen3.5-4B",
+  "base_repo_id": "Qwen/Qwen3.5-4B",
+  "aliases": ["Qwen3.5-4B", "qwen3.5-4b", "Qwen3.5-4B-Instruct"],
+  "matched_local_dirs": [
+    "LM_Studio-gguf/mradermacher/Qwen3.5-4B-Claude-4.6-OS-Auto-Variable-HERETIC-UNCENSORED-THINKING-GGUF",
+    "LM_Studio-gguf/mradermacher/Qwopus3.5-4B-v3-heretic-GGUF"
+  ],
+  "release_estimate": "2026-03",
+  "architecture": {
+    "type": "dense",
+    "total_params": "4.66B",
+    "active_params": "4.66B",
+    "reasoning": true
+  },
+  "recommended_sampling": {
+    "_comment": "Four Qwen-official presets; use thinking_general as default for reasoning-capable use",
+    "thinking_general": {
+      "temperature": 1.0,
+      "top_p": 0.95,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 1.5,
+      "repetition_penalty": 1.0
+    },
+    "thinking_coding": {
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 0.0,
+      "repetition_penalty": 1.0
+    },
+    "instruct_general": {
+      "temperature": 0.7,
+      "top_p": 0.8,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 1.5,
+      "repetition_penalty": 1.0
+    },
+    "instruct_reasoning": {
+      "temperature": 1.0,
+      "top_p": 1.0,
+      "top_k": 40,
+      "min_p": 0.0,
+      "presence_penalty": 2.0,
+      "repetition_penalty": 1.0
+    },
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 20,
+    "min_p": 0.0,
+    "presence_penalty": 1.5,
+    "repetition_penalty": 1.0,
+    "notes": "Default values are for thinking_general mode. Qwen publishes 4 presets (see nested objects). presence_penalty 0-2 reduces repetition; higher values may cause language-mixing. Small models (≤9B) have thinking DISABLED by default in standard deployments — enable via chat_template_kwargs enable_thinking:true. Qwen official model page shows thinking enabled by default; llama.cpp/LM Studio behavior may differ — verify per runtime."
+  },
+  "recommended_context": {
+    "default": 32768,
+    "max": 262144,
+    "extended_max": 1010000,
+    "recommended_output_standard": 32768,
+    "recommended_output_complex": 81920,
+    "yarn_notes": "YaRN RoPE scaling supported. To extend beyond 262,144 tokens set rope_type=yarn, factor=4.0, original_max_position_embeddings=262144 in config. llama.cpp: --rope-scaling yarn --rope-scale 4.0 for extended context. 'Context: 256k (default)' confirmed in DavidAU card."
+  },
+  "chat_template": {
+    "family": "chatml",
+    "jinja_recommended": true,
+    "system_prompt_support": true,
+    "enable_thinking_flag": "chat_template_kwargs: {\"enable_thinking\": true}",
+    "disable_thinking_flag": "chat_template_kwargs: {\"enable_thinking\": false}",
+    "notes": "Uses Qwen3.5 ChatML variant. Thinking generates <think>...</think> blocks before response. Small sizes (≤9B) may have thinking OFF by default in some runtimes; pass enable_thinking:true to activate. llama.cpp: --chat-template-kwargs '{\"enable_thinking\":true}'. Multi-turn: exclude thinking content from history."
+  },
+  "thinking": {
+    "supported": true,
+    "how": "Generates <think>...</think> reasoning block before final answer. Enabled/disabled via chat_template_kwargs enable_thinking flag. No soft-switch (/think /no_think) unlike Qwen3.",
+    "recommended": "Enable for reasoning/complex tasks; disable (enable_thinking:false) for fast instruct/chat use. For llama.cpp: --chat-template-kwargs '{\"enable_thinking\":true}'. Use thinking_general preset (temp=1.0, top_p=0.95, top_k=20, presence_penalty=1.5) when thinking is active. Do NOT use greedy decoding — causes degradation and repetition loops."
+  },
+  "llama_cpp_notes": "Recommended quant: Q4_K_M or better for vanilla GGUF; DavidAU minimum is Q4_KS (non-imatrix) or IQ3S (imatrix). Use --cache-type-k bf16 --cache-type-v bf16 if seeing gibberish. For thinking: --chat-template-kwargs '{\"enable_thinking\":true}'. For YaRN at extended context: --rope-scaling yarn --rope-scale 4.0. mradermacher GGUF repo is static quant of DavidAU source (HERETIC variant) and Jackrong/tvall43 source (Qwopus v3 heretic variant).",
+  "finetune_overrides": [
+    {
+      "name": "DavidAU/Qwen3.5-4B-Claude-4.6-OS-Auto-Variable-HERETIC-UNCENSORED-THINKING",
+      "source_url": "https://huggingface.co/DavidAU/Qwen3.5-4B-Claude-4.6-OS-Auto-Variable-HERETIC-UNCENSORED-THINKING",
+      "gguf_repo_url": "https://huggingface.co/mradermacher/Qwen3.5-4B-Claude-4.6-OS-Auto-Variable-HERETIC-UNCENSORED-THINKING-GGUF",
+      "description": "DavidAU finetune of Qwen3.5-4B trained on Claude 4.6-OS dataset, uncensored via Heretic abliteration. 'Auto-Variable' refers to adaptive variable thinking integration via custom Jinja template.",
+      "sampling_overrides": {
+        "thinking_general": {
+          "temperature": 1.0,
+          "top_p": 0.95,
+          "top_k": 20,
+          "min_p": 0.0,
+          "presence_penalty": 1.5,
+          "repetition_penalty": 1.0
+        },
+        "thinking_coding": {
+          "temperature": 0.6,
+          "top_p": 0.95,
+          "top_k": 20,
+          "min_p": 0.0,
+          "presence_penalty": 0.0,
+          "repetition_penalty": 1.0
+        },
+        "instruct_general": {
+          "temperature": 0.7,
+          "top_p": 0.8,
+          "top_k": 20,
+          "min_p": 0.0,
+          "presence_penalty": 1.5,
+          "repetition_penalty": 1.0
+        },
+        "instruct_reasoning": {
+          "temperature": 1.0,
+          "top_p": 1.0,
+          "top_k": 40,
+          "min_p": 0.0,
+          "presence_penalty": 2.0,
+          "repetition_penalty": 1.0
+        }
+      },
+      "davidau_specific": {
+        "smoothing_factor": 1.5,
+        "smoothing_note": "Set smoothing_factor=1.5 in compatible UIs (KoboldCpp: Settings>Samplers>Advanced>Smooth_F; SillyTavern: Smoothing; text-gen-webui: Parameters lower right). Alternative: raise repetition_penalty to 1.1-1.15.",
+        "repetition_penalty_range": "1.1 to 1.15 recommended as alternative to smoothing_factor",
+        "davidau_global_baseline": {
+          "top_k": 40,
+          "min_p": 0.05,
+          "top_p": 0.95,
+          "repeat_last_n": 64,
+          "temperature_range": "0 to 5 (test by 0.1 increments)"
+        },
+        "dry_sampler": {
+          "note": "DavidAU guide recommends DRY sampler for Class 3/4 models",
+          "multiplier": 0.8,
+          "allowed_length": 2,
+          "base": 1.0
+        },
+        "context": "256K default",
+        "min_quant": "Q4_KS (non-imatrix) or IQ3S (imatrix)"
+      },
+      "notes": "Sampling presets mirror base Qwen3.5 recommendations. DavidAU adds smoothing_factor=1.5 and rep_pen 1.1-1.15 as key differentiators. Verified from 9B sibling card — 4B card content appeared to repeat same parameters."
+    },
+    {
+      "name": "tvall43/Qwopus3.5-4B-v3-heretic",
+      "source_url": "https://huggingface.co/tvall43/Qwopus3.5-4B-v3-heretic",
+      "gguf_repo_url": "https://huggingface.co/mradermacher/Qwopus3.5-4B-v3-heretic-GGUF",
+      "description": "Qwopus3.5-4B is a Qwen3.5-4B finetune trained on curated reasoning chains (Claude/Opus-style). v3-heretic adds abliteration via Heretic v1.2.0, direction_index=16.93, KL divergence 0.0336 from base, refusal rate 4/100 (vs 100/100 original).",
+      "sampling_overrides": null,
+      "davidau_specific": null,
+      "notes": "No explicit sampler settings published in tvall43 or mradermacher model cards. Use base Qwen3.5 presets. Qwopus is NOT a DavidAU model — separate lineage (tvall43 author). Chain-of-thought via <think> tokens; response-only training masked on '<|im_start|>assistant\\n<think>'. Thinking mode expected ON by default (trained for it). Context length increased vs v2 but exact max not stated in card — assume 262144 inherited from Qwen3.5-4B base."
+    }
+  ],
+  "sources": [
+    {
+      "label": "Qwen/Qwen3.5-4B HuggingFace (official)",
+      "url": "https://huggingface.co/Qwen/Qwen3.5-4B"
+    },
+    {
+      "label": "Qwen3.5 thinking mode parameters guide (bswen.com)",
+      "url": "https://docs.bswen.com/blog/2026-03-24-qwen35-thinking-mode-parameters/"
+    },
+    {
+      "label": "Qwen readthedocs quickstart (Qwen3 inference settings reference)",
+      "url": "https://qwen.readthedocs.io/en/latest/getting_started/quickstart.html"
+    },
+    {
+      "label": "DavidAU/Qwen3.5-4B-Claude-4.6-OS-Auto-Variable-HERETIC-UNCENSORED-THINKING HuggingFace",
+      "url": "https://huggingface.co/DavidAU/Qwen3.5-4B-Claude-4.6-OS-Auto-Variable-HERETIC-UNCENSORED-THINKING"
+    },
+    {
+      "label": "DavidAU/Qwen3.5-9B-Claude-4.6-OS-Auto-Variable-HERETIC-UNCENSORED-THINKING (9B sibling, same sampler table)",
+      "url": "https://huggingface.co/DavidAU/Qwen3.5-9B-Claude-4.6-OS-Auto-Variable-HERETIC-UNCENSORED-THINKING"
+    },
+    {
+      "label": "mradermacher GGUF of DavidAU 4B HERETIC",
+      "url": "https://huggingface.co/mradermacher/Qwen3.5-4B-Claude-4.6-OS-Auto-Variable-HERETIC-UNCENSORED-THINKING-GGUF"
+    },
+    {
+      "label": "tvall43/Qwopus3.5-4B-v3-heretic HuggingFace",
+      "url": "https://huggingface.co/tvall43/Qwopus3.5-4B-v3-heretic"
+    },
+    {
+      "label": "mradermacher/Qwopus3.5-4B-v3-heretic-GGUF HuggingFace",
+      "url": "https://huggingface.co/mradermacher/Qwopus3.5-4B-v3-heretic-GGUF"
+    },
+    {
+      "label": "DavidAU Maximizing-Model-Performance sampler guide",
+      "url": "https://huggingface.co/DavidAU/Maximizing-Model-Performance-All-Quants-Types-And-Full-Precision-by-Samplers_Parameters"
+    }
+  ],
+  "confidence": "strong",
+  "gaps": "1) DavidAU 4B card was not fetched directly (HF page returned same content as 9B sibling — likely same template); sampler params confirmed identical across DavidAU Qwen3.5 family. 2) Qwopus3.5-4B-v3-heretic has NO published sampler recommendations — using base Qwen3.5 presets as fallback. 3) Auto-Variable technical definition not documented beyond inferred 'adaptive thinking via custom Jinja'. 4) Qwen3.5-4B is officially multimodal (image-text-to-text per HF tags); vision inference params not researched. 5) Exact context max for Qwopus v3 not stated in card.",
+  "researched_by": "claude-sonnet via HF lookup",
+  "researched_on": "2026-06-23"
+}

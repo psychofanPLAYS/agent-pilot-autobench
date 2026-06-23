@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "model_family": "Qwen3.6-35B-A3B",
+  "base_repo_id": "Qwen/Qwen3.6-35B-A3B",
+  "aliases": [
+    "Qwen3.6-35B-A3B",
+    "qwen3.6-35b-a3b"
+  ],
+  "matched_local_dirs": [
+    "LM_Studio-gguf/lmstudio-community/Qwen3.6-35B-A3B-GGUF",
+    "LM_Studio-gguf/unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
+    "LM_Studio-gguf/mudler/Qwen3.6-35B-A3B-APEX-MTP-GGUF",
+    "LM_Studio-gguf/mudler/Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled-APEX-GGUF",
+    "LM_Studio-gguf/llmfan46/Qwen3.6-35B-A3B-uncensored-heretic-Native-MTP-Preserved-GGUF",
+    "LM_Studio-gguf/LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Wasserstein-GGUF"
+  ],
+  "release_estimate": "2026-Q2",
+  "architecture": {
+    "type": "moe",
+    "total_params": "35.95B",
+    "active_params": "~3B",
+    "reasoning": true,
+    "mtp_speculative": true,
+    "notes": "qwen3_5_moe architecture; image-text-to-text (vision-capable); MTP heads preserved in MTP-GGUF variants enable self-speculative decoding (~1.5-2x speedup); requires llama.cpp >= commit 255582687 for --draft-mtp flag"
+  },
+  "recommended_sampling": {
+    "thinking_general": {
+      "temperature": 1.0,
+      "top_p": 0.95,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 1.5,
+      "repetition_penalty": 1.0
+    },
+    "thinking_precise_coding": {
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 0.0,
+      "repetition_penalty": 1.0
+    },
+    "non_thinking_instruct": {
+      "temperature": 0.7,
+      "top_p": 0.8,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 1.5,
+      "repetition_penalty": 1.0
+    },
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 20,
+    "min_p": 0.0,
+    "presence_penalty": 1.5,
+    "repetition_penalty": 1.0,
+    "notes": "Three official sampling presets exist. (1) Thinking/general: temp=1.0, top_p=0.95, top_k=20, presence_penalty=1.5. (2) Thinking/precise-coding: temp=0.6, top_p=0.95, top_k=20, presence_penalty=0.0. (3) Non-thinking/instruct: temp=0.7, top_p=0.80, top_k=20, presence_penalty=1.5. Top-level fields show thinking-general as the primary default. Note: model card had a brief inconsistency between sections that was resolved; values above reflect the corrected unified card. Presence_penalty=1.5 in non-thinking mode helps reduce repetition; set to 0.0 for coding to avoid penalizing repeated syntax tokens.",
+    "canonical_preset": "thinking_general"
+  },
+  "recommended_context": {
+    "default": 8192,
+    "max_native": 262144,
+    "max_extended": 1010000,
+    "recommended_output_general": 32768,
+    "recommended_output_complex": 81920,
+    "yarn_notes": "Native context is 262,144 tokens. Extendable to 1,010,000 tokens via YaRN. Enable with: rope_type='yarn', factor=4.0, original_max_position_embeddings=262144. Adjust factor proportionally to target context length. For llama.cpp: --rope-scale / --yarn-orig-ctx flags. Minimum 128K recommended for complex multi-step reasoning tasks.",
+    "max": 262144
+  },
+  "chat_template": {
+    "family": "chatml",
+    "jinja_recommended": true,
+    "system_prompt_support": true,
+    "notes": "Uses ChatML format (<|im_start|> / <|im_end|>). Thinking mode enabled by default — model generates <think>\\n...\\n</think>\\n\\n blocks before final response. Disable via chat_template_kwargs: {enable_thinking: false}. Preserve prior thinking context via {preserve_thinking: true}. Vision projector (mmproj.gguf) required for image inputs on vision-capable quants."
+  },
+  "thinking": {
+    "supported": true,
+    "how": "Model defaults to thinking-on. Set enable_thinking=false in chat_template_kwargs (OpenAI-compat API or llama.cpp server) to suppress <think> blocks. Alternatively, inject /think or /no_think tokens at start of user turn for per-turn control.",
+    "recommended": "Use thinking-on for reasoning/math/code tasks with temp=1.0 or temp=0.6 (coding). Use thinking-off (non-thinking instruct mode) for latency-sensitive chat with temp=0.7. Extend max_new_tokens to 81920 for hard problems."
+  },
+  "llama_cpp_notes": "MTP speculative decoding (for MTP-GGUF variants): requires llama.cpp >= commit 255582687. Use --draft-mtp flag (mudler APEX) or --spec-type draft-mtp --spec-draft-n-max 2 (unsloth). Enable flash attention: -fa. Typical launch: llama-server -m <model>.gguf -ngl 99 -c 8192 -fa on -np 1 --spec-type draft-mtp --spec-draft-n-max 2. For extended context: add --yarn-orig-ctx 262144 --rope-scale <factor>. MTP head in APEX variant uses Q8_0; blk.40.nextn.eh_proj pinned to Q4_K in I-Nano tier. No imatrix calibration data for MTP head — static K-quant compensates.",
+  "finetune_overrides": [
+    {
+      "repo_id": "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
+      "source_url": "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
+      "sampling_delta": "None — mirrors official Qwen3.6 card sampling presets verbatim.",
+      "mtp_notes": "MTP heads included; enables --spec-type draft-mtp --spec-draft-n-max 2 in llama.cpp server for ~1.5-2x throughput with no accuracy loss. Flash attention required (-fa on).",
+      "other": "imatrix calibrated quants available (UD-* series). Unsloth docs note MTP head lacks imatrix data."
+    },
+    {
+      "repo_id": "mudler/Qwen3.6-35B-A3B-APEX-MTP-GGUF",
+      "source_url": "https://huggingface.co/mudler/Qwen3.6-35B-A3B-APEX-MTP-GGUF",
+      "sampling_delta": "None — no sampling overrides documented; defer to base Qwen3.6 card.",
+      "mtp_notes": "Self-speculative decoding via --draft-mtp flag. MTP head is Q8_0 precision in most tiers; I-Nano uses trunk-tier precision with blk.40.nextn.eh_proj pinned to Q4_K. ~2.5% file size overhead for MTP block.",
+      "other": "Requires llama.cpp >= commit 255582687. APEX designation indicates mudler's APEX quantization pipeline."
+    },
+    {
+      "repo_id": "llmfan46/Qwen3.6-35B-A3B-uncensored-heretic-Native-MTP-Preserved-GGUF",
+      "source_url": "https://huggingface.co/llmfan46/Qwen3.6-35B-A3B-uncensored-heretic-Native-MTP-Preserved-GGUF",
+      "sampling_delta": "None documented — sampling recommendations mirror official Qwen3.6 card presets verbatim.",
+      "uncensoring_notes": "Heretic v1.3.0 MPOA (Magnitude-Preserving Orthogonal Ablation) method applied to attn.o_proj, attn.out_proj, mlp.down_proj. 88% fewer refusals (10/100 vs 83/100 base). KL divergence from base: 0.0015 (minimal quality loss). MMLU: 83.71% → 83.39%. All 20 original MTP tensor parameters preserved intact.",
+      "other": "Vision projector remains compatible. No system prompt override documented."
+    },
+    {
+      "repo_id": "mudler/Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled-APEX-GGUF",
+      "source_url": "https://huggingface.co/mudler/Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled-APEX-GGUF",
+      "sampling_delta": "None documented — no sampling overrides specified in model card.",
+      "distill_notes": "Reasoning distillation from Claude 4.7 Opus by lordx64. MoE with 8 active experts per token from 256 routed experts. Hybrid attention (full attention every 4th layer; linear/Mamba otherwise — NOTE: this description may reflect a misread of the card; verify before relying on it). Requires mmproj.gguf for vision inputs.",
+      "other": "APEX quantization pipeline. Inference settings otherwise inherit base Qwen3.6 recommendations."
+    }
+  ],
+  "sources": [
+    "https://huggingface.co/Qwen/Qwen3.6-35B-A3B",
+    "https://huggingface.co/Qwen/Qwen3.6-35B-A3B#usage-guidance",
+    "https://huggingface.co/Qwen/Qwen3.6-35B-A3B/discussions/23",
+    "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
+    "https://huggingface.co/mudler/Qwen3.6-35B-A3B-APEX-MTP-GGUF",
+    "https://huggingface.co/llmfan46/Qwen3.6-35B-A3B-uncensored-heretic-Native-MTP-Preserved-GGUF",
+    "https://huggingface.co/mudler/Qwen3.6-35B-A3B-Claude-4.7-Opus-Reasoning-Distilled-APEX-GGUF",
+    "https://huggingface.co/Qwen/Qwen3.6-27B/discussions/10",
+    "https://lmstudio.ai/models/qwen/qwen3.6-35b-a3b"
+  ],
+  "confidence": "strong",
+  "gaps": "LuffyTheFox/Qwen3.6-35B-A3B-Uncensored-Wasserstein-GGUF card was not fetched (not in HF search results; Wasserstein-method uncensoring likely has no sampling overrides — treat as base defaults until verified). The mudler Claude-4.7-Opus-Reasoning-Distilled card description of 'hybrid attention / linear-Mamba' may be a card misread — the base qwen3_5_moe architecture does not use Mamba; flag for manual verification. Model card had a documented inconsistency in sampling params (discussion #23) that was resolved; current values confirmed from updated card. Release date inferred from HF 'Updated: 24 Apr, 2026' metadata.",
+  "researched_by": "claude-sonnet via HF lookup",
+  "researched_on": "2026-06-23"
+}

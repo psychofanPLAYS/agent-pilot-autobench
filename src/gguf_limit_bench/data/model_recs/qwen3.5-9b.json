@@ -1,0 +1,174 @@
+{
+  "schema_version": 1,
+  "model_family": "Qwen3.5-9B",
+  "base_repo_id": "Qwen/Qwen3.5-9B",
+  "aliases": ["Qwen3.5-9B", "qwen3.5-9b", "Qwen3.5-9B-Instruct"],
+  "matched_local_dirs": [
+    "LM_Studio-gguf/unsloth/Qwen3.5-9B-GGUF",
+    "LM_Studio-gguf/DavidAU/Qwen3.5-9B-Claude-4.6-OS-Auto-Variable-HERETIC-UNCENSORED"
+  ],
+  "release_estimate": "2026-03",
+  "architecture": {
+    "type": "dense",
+    "total_params": "9B",
+    "active_params": "9B",
+    "reasoning": true
+  },
+  "recommended_sampling": {
+    "_comment": "Four Qwen-official presets; use thinking_general as default for reasoning-capable use",
+    "thinking_general": {
+      "temperature": 1.0,
+      "top_p": 0.95,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 1.5,
+      "repetition_penalty": 1.0
+    },
+    "thinking_coding": {
+      "temperature": 0.6,
+      "top_p": 0.95,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 0.0,
+      "repetition_penalty": 1.0
+    },
+    "instruct_general": {
+      "temperature": 0.7,
+      "top_p": 0.8,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 1.5,
+      "repetition_penalty": 1.0
+    },
+    "instruct_reasoning": {
+      "temperature": 1.0,
+      "top_p": 1.0,
+      "top_k": 40,
+      "min_p": 0.0,
+      "presence_penalty": 2.0,
+      "repetition_penalty": 1.0
+    },
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 20,
+    "min_p": 0.0,
+    "presence_penalty": 1.5,
+    "repetition_penalty": 1.0,
+    "notes": "Default values are for thinking_general mode. Qwen publishes 4 presets (see nested objects). presence_penalty 0-2 reduces repetition; higher values may cause language-mixing. Small models (0.8B-9B) have thinking disabled by default — enable via chat_template_kwargs enable_thinking:true."
+  },
+  "recommended_context": {
+    "default": 32768,
+    "max": 262144,
+    "extended_max": 1010000,
+    "recommended_output_standard": 32768,
+    "recommended_output_complex": 81920,
+    "yarn_notes": "YaRN RoPE scaling supported. To extend beyond 262,144 tokens set rope_type=yarn, factor=4.0, original_max_position_embeddings=262144 in config. Unsloth card recommends minimum 128K context to preserve thinking capability. llama.cpp: --rope-scaling yarn --rope-scale 4.0 for extended context."
+  },
+  "chat_template": {
+    "family": "chatml",
+    "jinja_recommended": true,
+    "system_prompt_support": true,
+    "enable_thinking_flag": "chat_template_kwargs: {\"enable_thinking\": true}",
+    "disable_thinking_flag": "chat_template_kwargs: {\"enable_thinking\": false}",
+    "notes": "Uses Qwen3.5 ChatML variant. Thinking generates <think>...</think> blocks before response. Small sizes (≤9B) have thinking OFF by default; pass enable_thinking:true to activate. llama.cpp: --chat-template-kwargs '{\"enable_thinking\":true}'"
+  },
+  "thinking": {
+    "supported": true,
+    "how": "Generates <think>...</think> reasoning block before final answer. Enabled/disabled via chat_template_kwargs enable_thinking flag.",
+    "recommended": "Enable for reasoning/complex tasks; disable (enable_thinking:false) for fast instruct/chat use. For llama.cpp: --chat-template-kwargs '{\"enable_thinking\":true}'. Use thinking_general preset (temp=1.0, top_p=0.95, top_k=20, presence_penalty=1.5) when thinking is active."
+  },
+  "llama_cpp_notes": "Load with: llama-server -hf unsloth/Qwen3.5-9B-GGUF:UD-Q4_K_XL. Recommended quant: Q4_K_XL (imatrix) or Q4_K_S minimum. Use --cache-type-k bf16 --cache-type-v bf16 if seeing gibberish output. For thinking: --chat-template-kwargs '{\"enable_thinking\":true}'. For YaRN at extended context: --rope-scaling yarn --rope-scale 4.0. BF16 KV cache helps stability. DavidAU GGUF minimum: Q4_KS (non-imatrix) or IQ3S (imatrix).",
+  "finetune_overrides": [
+    {
+      "name": "DavidAU/Qwen3.5-9B-Claude-4.6-OS-Auto-Variable-HERETIC-UNCENSORED-THINKING",
+      "source_url": "https://huggingface.co/DavidAU/Qwen3.5-9B-Claude-4.6-OS-Auto-Variable-HERETIC-UNCENSORED-THINKING",
+      "gguf_repo_url": "https://huggingface.co/DavidAU/Qwen3.5-9B-Claude-4.6-OS-Auto-Variable-HERETIC-UNCENSORED-THINKING-MAX-NEOCODE-Imatrix-GGUF",
+      "description": "DavidAU finetune trained on four Claude 4.6-OS datasets. Uncensored/heretic variant. KL divergence 0.0793 from base; refusal rate drops from 100/100 to 6/100.",
+      "sampling_overrides": {
+        "thinking_general": {
+          "temperature": 1.0,
+          "top_p": 0.95,
+          "top_k": 20,
+          "min_p": 0.0,
+          "presence_penalty": 1.5,
+          "repetition_penalty": 1.0
+        },
+        "thinking_coding": {
+          "temperature": 0.6,
+          "top_p": 0.95,
+          "top_k": 20,
+          "min_p": 0.0,
+          "presence_penalty": 0.0,
+          "repetition_penalty": 1.0
+        },
+        "instruct_general": {
+          "temperature": 0.7,
+          "top_p": 0.8,
+          "top_k": 20,
+          "min_p": 0.0,
+          "presence_penalty": 1.5,
+          "repetition_penalty": 1.0
+        },
+        "instruct_reasoning": {
+          "temperature": 1.0,
+          "top_p": 1.0,
+          "top_k": 40,
+          "min_p": 0.0,
+          "presence_penalty": 2.0,
+          "repetition_penalty": 1.0
+        }
+      },
+      "davidau_specific": {
+        "smoothing_factor": 1.5,
+        "smoothing_note": "Set smoothing_factor=1.5 in compatible UIs (KoboldCpp: Settings>Samplers>Advanced>Smooth_F; SillyTavern: Smoothing; text-gen-webui: Parameters lower right). Alternative: raise repetition_penalty to 1.1-1.15.",
+        "repetition_penalty_range": "1.1 to 1.15 recommended as alternative to smoothing_factor",
+        "davidau_global_baseline": {
+          "top_k": 40,
+          "min_p": 0.05,
+          "top_p": 0.95,
+          "repeat_last_n": 64,
+          "temperature_range": "0 to 5 (test by 0.1 increments)"
+        },
+        "dry_sampler": {
+          "note": "DavidAU guide recommends DRY sampler for Class 3/4 models",
+          "multiplier": 0.8,
+          "allowed_length": 2,
+          "base": 1.0
+        },
+        "context": "256K default",
+        "min_quant": "Q4_KS (non-imatrix) or IQ3S (imatrix)"
+      },
+      "notes": "Sampling presets mirror base Qwen3.5 recommendations. DavidAU adds smoothing_factor=1.5 and rep_pen 1.1-1.15 as key differentiators. Auto-Variable refers to variable context/thinking integration via custom Jinja template. GGUF available at separate MAX-NEOCODE-Imatrix-GGUF repo."
+    }
+  ],
+  "sources": [
+    {
+      "label": "Qwen/Qwen3.5-9B HuggingFace (official)",
+      "url": "https://huggingface.co/Qwen/Qwen3.5-9B"
+    },
+    {
+      "label": "unsloth/Qwen3.5-9B-GGUF HuggingFace",
+      "url": "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF"
+    },
+    {
+      "label": "Unsloth Qwen3.5 documentation",
+      "url": "https://unsloth.ai/docs/models/qwen3.5"
+    },
+    {
+      "label": "DavidAU THINKING variant HuggingFace",
+      "url": "https://huggingface.co/DavidAU/Qwen3.5-9B-Claude-4.6-OS-Auto-Variable-HERETIC-UNCENSORED-THINKING"
+    },
+    {
+      "label": "DavidAU GGUF MAX-NEOCODE variant",
+      "url": "https://huggingface.co/DavidAU/Qwen3.5-9B-Claude-4.6-OS-Auto-Variable-HERETIC-UNCENSORED-THINKING-MAX-NEOCODE-Imatrix-GGUF"
+    },
+    {
+      "label": "DavidAU Maximizing-Model-Performance sampler guide",
+      "url": "https://huggingface.co/DavidAU/Maximizing-Model-Performance-All-Quants-Types-And-Full-Precision-by-Samplers_Parameters"
+    }
+  ],
+  "confidence": "strong",
+  "gaps": "1) The specific 'OS' (Open Source) variant that matches local dir 'Qwen3.5-9B-Claude-4.6-OS-Auto-Variable-HERETIC-UNCENSORED' (non-THINKING, non-INSTRUCT suffix) was not found directly — closest THINKING and INSTRUCT variants were used; settings appear identical. 2) Auto-Variable technical definition not documented beyond 'custom Jinja + variable thinking'. 3) DavidAU smoothing_factor source verified from GGUF card but full sampler table may have more detail in Maximizing-Model-Performance README not fully parsed. 4) Qwen3.5-9B is multimodal (image-text-to-text) — vision inference params not researched.",
+  "researched_by": "claude-sonnet via HF lookup",
+  "researched_on": "2026-06-23"
+}
