@@ -518,6 +518,8 @@ class AutoresearchLoop:
             best_settings,
             best_result,
         )
+        if attempt_records:
+            _write_recommendation(receipt, attempt_records)
         if self.context_ladder:
             self._write_context_profile(receipt, best_settings)
         if self.perplexity_runner is not None and self.perplexity_contexts:
@@ -825,6 +827,39 @@ def _perplexity_profile_markdown(payload: dict) -> str:
 
 def _md_float(value) -> str:
     return "n/a" if value is None else f"{float(value):.2f}"
+
+
+def _write_recommendation(
+    receipt: RunReceipt,
+    attempts: list[tuple[AutoresearchSettings, AttemptResult]],
+) -> None:
+    """Emit the Pareto flag recommendation as markdown + json receipts.
+
+    Turns the leaderboard of attempts into the buyer's answer: "use these flags,
+    here is the tradeoff." Honest when nothing is usable.
+    """
+    # Local import avoids a circular dependency: recommendation imports
+    # AttemptResult / _is_partial_result from this module.
+    from gguf_limit_bench.recommendation import (
+        recommend_settings,
+        render_recommendation_markdown,
+    )
+
+    results = [result for _settings, result in attempts]
+    rec = recommend_settings(results)
+    (receipt.path / "recommendation.md").write_text(
+        render_recommendation_markdown(rec), encoding="utf-8"
+    )
+    receipt.write_json(
+        "recommendation.json",
+        {
+            "recommended": rec.recommended.label if rec.recommended is not None else None,
+            "considered": rec.considered,
+            "total": rec.total,
+            "frontier": [candidate.label for candidate in rec.frontier],
+            "rationale": rec.rationale,
+        },
+    )
 
 
 def _write_flag_ladder_comparison(
