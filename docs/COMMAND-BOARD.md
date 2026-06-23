@@ -78,6 +78,47 @@ Learning is on by default. To avoid updating the local Optuna memory:
 agent-autobench autoresearch --model "path\to\model.gguf" --no-learning
 ```
 
+## Corrected Program Order
+
+This is the target order for the next useful pilotBENCHY campaign. The current
+legacy commands are still listed below, but the 2026-06-23 9B run proved that a
+single 4k SimpleBench flag ladder is not a useful benchmark program.
+
+1. **Preflight**: capture model slug, machine snapshot, llama.cpp version, GPU,
+   RAM/VRAM, Git state, standard flags, and template signature.
+2. **Fit**: start at `32k`, climb by `32k`, and run a gradable generation probe
+   at every tier. After OOM, try `failed_context - 16k`; if needed, refine from
+   the last working context by `8k`.
+3. **Speed**: use repeatable generation prompts, not SimpleBench. Measure TTFT,
+   prompt eval TPS, decode TPS, generated tokens, wall time, GPU/RAM/VRAM, and
+   llama.cpp `/metrics` when available.
+4. **Intelligence**: run SimpleBench and question packs at `64k`, one question
+   per fresh server/session/window, with the pack's system prompt loaded and
+   reasoning left untruncated.
+5. **Flag ablation**: keep the standard flags on and change one variable at a
+   time. Template choice remains locked unless the program is explicitly testing
+   templates.
+6. **Long-context dropoff**: run matched speed/intelligence probes across
+   fit-proven context tiers and report retention curves instead of picking a
+   single champion.
+7. **Report**: answer what context/settings to use, whether the data is complete
+   or partial, what insight was gained, and whether it beat manual trial and
+   error.
+
+Standard baseline flags:
+
+```text
+--flash-attn on
+--kv-unified
+--cache-type-k q8_0
+--cache-type-v q8_0
+--jinja
+--gpu-layers 99
+```
+
+If the user supplies a custom Jinja/template argument, lock it into the baseline
+for the whole campaign. Template testing is a separate future program.
+
 ## Context & VRAM
 
 Predict which context sizes fit in VRAM before running (sliding-window aware):
@@ -86,12 +127,30 @@ Predict which context sizes fit in VRAM before running (sliding-window aware):
 apb vram-plan --model "path\to\model.gguf" --kv-bits 8
 ```
 
-Find the largest context the model can actually serve — climbs from 16k upward,
-q8_0 KV by default, recognises an out-of-memory crash and backs off, and
-remembers the ceiling for next time:
+Find the largest context the model can actually serve. The current fit finder
+starts at `32k`, climbs by `32k`, uses `q8_0` KV by default, runs a gradable
+generation probe at each launched tier, recognises out-of-memory failures, then
+backs off/refines with the `16k`/`8k` rule and remembers the ceiling:
 
 ```powershell
 apb context-limit --model "path\to\model.gguf" --llama-server "path\to\llama-server.exe"
+```
+
+## Speed Probe
+
+Run the repeatable speed program at a serious context floor. If you ask for less
+than `16k`, the command bumps the run to `16k` instead of wasting a model load.
+It uses the 2026 standard server baseline (`flash-attn`, unified `q8_0` KV,
+Jinja) and writes a receipt under `_runs`:
+
+```powershell
+apb serve-probe --model "path\to\model.gguf" --llama-server "path\to\llama-server.exe" --context-size 16384
+```
+
+Lock a custom template into the speed probe:
+
+```powershell
+apb serve-probe --model "path\to\model.gguf" --llama-server-extra-arg=--chat-template-file --llama-server-extra-arg="path\to\template.jinja"
 ```
 
 ## SimpleBench Flag Ladder
@@ -114,6 +173,11 @@ scores accuracy first and speed second, then writes the best observed profile to
 `best-settings.json`. A completed ladder names a champion; a budget-limited or
 attempt-limited ladder is explicitly marked partial and names only a provisional best.
 Partial ladders are not eligible for promotion to the project-wide `champion.json`.
+
+Transition note: this legacy ladder is no longer the recommended full benchmark
+program. It should be split into separate fit, speed, intelligence, and ablation
+programs before the next buyer-style 9B acceptance run.
+
 Add experimental llama.cpp flags without changing code:
 
 ```powershell
