@@ -1,0 +1,331 @@
+{
+  "pack_id": "easy-mc",
+  "title": "Easy multiple-choice (ARC-Easy / OpenBookQA / CommonsenseQA sample)",
+  "tier": "easy",
+  "answer_type": "multiple_choice",
+  "system_prompt_ref": "system_prompt.txt",
+  "source": "frozen sample: ARC-Easy (allenai/ai2_arc, ARC-Easy/train, rows 0-24), OpenBookQA (allenai/openbookqa, main/train, rows 0-24), CommonsenseQA (tau/commonsense_qa, default/train, rows 0-14)",
+  "license": "see LICENSES.md",
+  "questions": [
+    {
+      "question_id": "arc-easy-0001",
+      "prompt": "Which factor will most likely cause a person to develop a fever?",
+      "answer": "B",
+      "choices": [
+        "a leg muscle relaxing after exercise",
+        "a bacterial population in the bloodstream",
+        "several viral particles on the skin",
+        "carbohydrates being digested in the stomach"
+      ],
+      "tags": ["arc-easy", "science", "biology"]
+    },
+    {
+      "question_id": "arc-easy-0002",
+      "prompt": "Lichens are symbiotic organisms made of green algae and fungi. What do the green algae supply to the fungi in this symbiotic relationship?",
+      "answer": "B",
+      "choices": [
+        "carbon dioxide",
+        "food",
+        "protection",
+        "water"
+      ],
+      "tags": ["arc-easy", "science", "biology"]
+    },
+    {
+      "question_id": "arc-easy-0003",
+      "prompt": "When a switch is used in an electrical circuit, the switch can",
+      "answer": "D",
+      "choices": [
+        "cause the charge to build.",
+        "increase and decrease the voltage.",
+        "cause the current to change direction.",
+        "stop and start the flow of current."
+      ],
+      "tags": ["arc-easy", "science", "physics"]
+    },
+    {
+      "question_id": "arc-easy-0004",
+      "prompt": "A chewable calcium carbonate tablet is a common treatment for stomach discomfort. Calcium carbonate is most likely used as this type of medicine because calcium carbonate",
+      "answer": "C",
+      "choices": [
+        "has a pleasant flavor.",
+        "is inexpensive to produce.",
+        "neutralizes digestive acid.",
+        "occurs naturally in the body."
+      ],
+      "tags": ["arc-easy", "science", "chemistry"]
+    },
+    {
+      "question_id": "arc-easy-0005",
+      "prompt": "Which two body systems are directly involved in movement?",
+      "answer": "A",
+      "choices": [
+        "muscular and skeletal",
+        "digestive and muscular",
+        "skeletal and respiratory",
+        "respiratory and digestive"
+      ],
+      "tags": ["arc-easy", "science", "biology"]
+    },
+    {
+      "question_id": "arc-easy-0006",
+      "prompt": "Which change in the state of water particles causes the particles to become arranged in a fixed position?",
+      "answer": "C",
+      "choices": [
+        "boiling",
+        "melting",
+        "freezing",
+        "evaporating"
+      ],
+      "tags": ["arc-easy", "science", "chemistry"]
+    },
+    {
+      "question_id": "arc-easy-0007",
+      "prompt": "Earth's core is primarily composed of which of the following materials?",
+      "answer": "B",
+      "choices": [
+        "basalt",
+        "iron",
+        "magma",
+        "quartz"
+      ],
+      "tags": ["arc-easy", "science", "earth-science"]
+    },
+    {
+      "question_id": "arc-easy-0008",
+      "prompt": "In humans, the digestion process begins in",
+      "answer": "B",
+      "choices": [
+        "the intestine, with squeezing.",
+        "the mouth, with chewing and saliva.",
+        "the stomach, with churning and acid.",
+        "the esophagus, with pushing towards the stomach."
+      ],
+      "tags": ["arc-easy", "science", "biology"]
+    },
+    {
+      "question_id": "arc-easy-0009",
+      "prompt": "A population of small, plant-eating beetles lives in a forest. About half of the beetles are light brown and the others are dark green. If years of drought cause the area to become dry with few trees, what would the beetle population most likely look like after several generations?",
+      "answer": "A",
+      "choices": [
+        "It would be mostly light brown beetles.",
+        "It would be mostly dark green beetles.",
+        "It would be mostly carnivorous beetles.",
+        "It would be mostly very large beetles."
+      ],
+      "tags": ["arc-easy", "science", "evolution"]
+    },
+    {
+      "question_id": "obqa-0001",
+      "prompt": "The sun is responsible for",
+      "answer": "D",
+      "choices": [
+        "puppies learning new tricks",
+        "children growing up and getting old",
+        "flowers wilting in a vase",
+        "plants sprouting, blooming and wilting"
+      ],
+      "tags": ["openbookqa", "science"]
+    },
+    {
+      "question_id": "obqa-0002",
+      "prompt": "Stars are",
+      "answer": "C",
+      "choices": [
+        "warm lights that float",
+        "made out of nitrate",
+        "great balls of gas burning billions of miles away",
+        "lights in the sky"
+      ],
+      "tags": ["openbookqa", "science", "astronomy"]
+    },
+    {
+      "question_id": "obqa-0003",
+      "prompt": "Poison causes harm to which of the following?",
+      "answer": "A",
+      "choices": [
+        "a Tree",
+        "a robot",
+        "a house",
+        "a car"
+      ],
+      "tags": ["openbookqa", "science", "biology"]
+    },
+    {
+      "question_id": "obqa-0004",
+      "prompt": "As a car approaches you in the night",
+      "answer": "A",
+      "choices": [
+        "the headlights become more intense",
+        "the headlights recede into the dark",
+        "the headlights remain at a constant",
+        "the headlights turn off"
+      ],
+      "tags": ["openbookqa", "science", "physics"]
+    },
+    {
+      "question_id": "obqa-0005",
+      "prompt": "Using mirrors to focus collected light from heavenly bodies allows",
+      "answer": "A",
+      "choices": [
+        "detailed observation",
+        "foregone conclusions",
+        "radiation experiments",
+        "celestial music"
+      ],
+      "tags": ["openbookqa", "science", "astronomy"]
+    },
+    {
+      "question_id": "obqa-0006",
+      "prompt": "Which of these things will supplement a squirrel's caloric needs?",
+      "answer": "C",
+      "choices": [
+        "fish",
+        "tree bark",
+        "nuts",
+        "leaves"
+      ],
+      "tags": ["openbookqa", "science", "biology"]
+    },
+    {
+      "question_id": "obqa-0007",
+      "prompt": "What happens when mercury is placed in water?",
+      "answer": "B",
+      "choices": [
+        "it dissolves",
+        "it sinks",
+        "it floats",
+        "it hardens"
+      ],
+      "tags": ["openbookqa", "science", "chemistry"]
+    },
+    {
+      "question_id": "obqa-0008",
+      "prompt": "A magnet will stick to",
+      "answer": "A",
+      "choices": [
+        "a belt buckle",
+        "a wooden table",
+        "a plastic cup",
+        "a paper plate"
+      ],
+      "tags": ["openbookqa", "science", "physics"]
+    },
+    {
+      "question_id": "obqa-0009",
+      "prompt": "In the desert, a hawk may enjoy an occasional",
+      "answer": "B",
+      "choices": [
+        "coyote",
+        "reptile",
+        "bat",
+        "scorpion"
+      ],
+      "tags": ["openbookqa", "science", "biology"]
+    },
+    {
+      "question_id": "csqa-0001",
+      "prompt": "Sammy wanted to go to where the people were. Where might he go?",
+      "answer": "B",
+      "choices": [
+        "race track",
+        "populated areas",
+        "the desert",
+        "apartment",
+        "roadblock"
+      ],
+      "tags": ["csqa", "commonsense"]
+    },
+    {
+      "question_id": "csqa-0002",
+      "prompt": "Google Maps and other highway and street GPS services have replaced what?",
+      "answer": "D",
+      "choices": [
+        "united states",
+        "mexico",
+        "countryside",
+        "atlas",
+        "oceans"
+      ],
+      "tags": ["csqa", "commonsense"]
+    },
+    {
+      "question_id": "csqa-0003",
+      "prompt": "The fox walked from the city into the forest, what was it looking for?",
+      "answer": "C",
+      "choices": [
+        "pretty flowers.",
+        "hen house",
+        "natural habitat",
+        "storybook",
+        "dense forest"
+      ],
+      "tags": ["csqa", "commonsense"]
+    },
+    {
+      "question_id": "csqa-0004",
+      "prompt": "What home entertainment equipment requires cable?",
+      "answer": "D",
+      "choices": [
+        "radio shack",
+        "substation",
+        "cabinet",
+        "television",
+        "desk"
+      ],
+      "tags": ["csqa", "commonsense"]
+    },
+    {
+      "question_id": "csqa-0005",
+      "prompt": "The forgotten leftovers had gotten quite old, he found it covered in mold in the back of his what?",
+      "answer": "B",
+      "choices": [
+        "carpet",
+        "refrigerator",
+        "breadbox",
+        "fridge",
+        "coach"
+      ],
+      "tags": ["csqa", "commonsense"]
+    },
+    {
+      "question_id": "csqa-0006",
+      "prompt": "What do people use to absorb extra ink from a fountain pen?",
+      "answer": "E",
+      "choices": [
+        "shirt pocket",
+        "calligrapher's hand",
+        "inkwell",
+        "desk drawer",
+        "blotter"
+      ],
+      "tags": ["csqa", "commonsense"]
+    },
+    {
+      "question_id": "csqa-0007",
+      "prompt": "Where do you put your grapes just before checking out?",
+      "answer": "B",
+      "choices": [
+        "mouth",
+        "grocery cart",
+        "super market",
+        "fruit basket",
+        "fruit market"
+      ],
+      "tags": ["csqa", "commonsense"]
+    },
+    {
+      "question_id": "csqa-0008",
+      "prompt": "Of all the rooms in a house it was his favorite, the aromas always drew him to the what?",
+      "answer": "C",
+      "choices": [
+        "yard",
+        "basement",
+        "kitchen",
+        "living room",
+        "garden"
+      ],
+      "tags": ["csqa", "commonsense"]
+    }
+  ]
+}

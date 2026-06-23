@@ -79,6 +79,7 @@ class PackQuestion:
     question_id: int | str
     prompt: str
     answer: str                  # canonical expected answer (letter, or normalized token)
+    answer_source: str           # provenance: "dataset_label:<name>" | "curated_fact"
     choices: list[str] | None = None   # present for MULTIPLE_CHOICE rendering
     tags: tuple[str, ...] = ()
 
