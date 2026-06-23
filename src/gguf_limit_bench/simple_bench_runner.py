@@ -40,6 +40,7 @@ class CompletionMeasurement:
     tokens_per_second: float
     generated_tokens: int
     output_chars: int
+    prompt_tokens_per_second: float = 0.0
     failure: str = "none"
 
 
@@ -115,6 +116,7 @@ class LlamaServerSimpleBenchAttemptRunner:
         stdout = ""
         try:
             ready_at = _wait_until_ready(base_url, process, timeout_seconds=self.timeout_seconds)
+            _warmup_server(base_url, self.system_prompt, timeout_seconds=self.timeout_seconds)
             for index, question in enumerate(self.questions, start=1):
                 measurement = measure_simple_bench_completion(
                     base_url=base_url,
@@ -135,6 +137,7 @@ class LlamaServerSimpleBenchAttemptRunner:
                     output_chars=measurement.output_chars,
                     prompt_chars=len(simple_bench_prompt(self.system_prompt, question)),
                     response=measurement.response,
+                    prompt_tokens_per_second=measurement.prompt_tokens_per_second,
                     failure=measurement.failure,
                 )
                 question_results.append(question_result)
@@ -147,7 +150,7 @@ class LlamaServerSimpleBenchAttemptRunner:
             return AttemptResult(
                 ok=batch.ok,
                 generation_tokens_per_second=batch.median_tps,
-                prompt_tokens_per_second=0.0,
+                prompt_tokens_per_second=batch.median_prompt_tps,
                 ttft_ms=batch.median_ttft_ms,
                 context_size=settings.context_size,
                 failure="none" if batch.ok else batch.failure,
@@ -271,6 +274,33 @@ class LlamaServerSimpleBenchAttemptRunner:
         )
 
 
+def _warmup_server(base_url: str, system_prompt: str, timeout_seconds: int) -> None:
+    """Best-effort warmup so the first scored question is not penalized by cold
+    CUDA kernels and allocator warmup. Any failure is ignored on purpose."""
+    payload = json.dumps(
+        {
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": "Warmup only. Reply with OK."},
+            ],
+            "stream": False,
+            "max_tokens": 8,
+            "temperature": 0,
+        }
+    ).encode("utf-8")
+    request = Request(
+        f"{base_url}/v1/chat/completions",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=min(max(1, timeout_seconds), 120)) as response:
+            response.read()
+    except (OSError, URLError):
+        return
+
+
 def measure_simple_bench_completion(
     *,
     base_url: str,
@@ -302,6 +332,7 @@ def measure_simple_bench_completion(
     fallback_chunks = 0
     content_parts: list[str] = []
     server_tokens_per_second: float | None = None
+    server_prompt_tokens_per_second: float | None = None
     usage_completion_tokens: int | None = None
     try:
         with urlopen(request, timeout=timeout_seconds) as response:
@@ -309,6 +340,8 @@ def measure_simple_bench_completion(
                 timings = event.get("timings")
                 if isinstance(timings, dict) and timings.get("predicted_per_second") is not None:
                     server_tokens_per_second = float(timings["predicted_per_second"])
+                if isinstance(timings, dict) and timings.get("prompt_per_second") is not None:
+                    server_prompt_tokens_per_second = float(timings["prompt_per_second"])
                 usage = event.get("usage")
                 if isinstance(usage, dict) and usage.get("completion_tokens") is not None:
                     usage_completion_tokens = int(usage["completion_tokens"])
@@ -360,6 +393,7 @@ def measure_simple_bench_completion(
         tokens_per_second=server_tokens_per_second or measured_tokens / generation_seconds,
         generated_tokens=measured_tokens,
         output_chars=len(response_text),
+        prompt_tokens_per_second=server_prompt_tokens_per_second or 0.0,
     )
 
 

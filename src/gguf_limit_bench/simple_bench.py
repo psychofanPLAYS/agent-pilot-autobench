@@ -38,6 +38,7 @@ class SimpleBenchQuestionResult:
     output_chars: int
     prompt_chars: int
     response: str
+    prompt_tokens_per_second: float = 0.0
     failure: str = "none"
 
     def to_dict(self) -> dict:
@@ -55,6 +56,10 @@ class SimpleBenchBatchResult:
     min_tps: float
     median_ttft_ms: float | None
     results: list[SimpleBenchQuestionResult]
+    median_prompt_tps: float = 0.0
+    gen_tps_stddev: float = 0.0
+    ttft_p90_ms: float | None = None
+    ttft_p99_ms: float | None = None
     failure: str = "none"
 
     def to_dict(self) -> dict:
@@ -157,6 +162,9 @@ def combine_simple_bench_results(
         for result in results
         if result.tokens_per_second > 0 and result.output_chars > 0
     ]
+    prompt_tps_values = [
+        result.prompt_tokens_per_second for result in results if result.prompt_tokens_per_second > 0
+    ]
     ttft_values = [result.ttft_ms for result in results if result.ttft_ms is not None]
     median_tps = _median(tps_values) or 0.0
     min_tps = min(tps_values) if tps_values else 0.0
@@ -176,6 +184,10 @@ def combine_simple_bench_results(
         min_tps=min_tps,
         median_ttft_ms=median_ttft,
         results=results,
+        median_prompt_tps=_median(prompt_tps_values) or 0.0,
+        gen_tps_stddev=_stddev(tps_values),
+        ttft_p90_ms=_percentile(ttft_values, 90),
+        ttft_p99_ms=_percentile(ttft_values, 99),
         failure=";".join(failures) if failures else "none",
     )
 
@@ -188,3 +200,25 @@ def _median(values: list[float]) -> float | None:
     if len(ordered) % 2:
         return ordered[middle]
     return (ordered[middle - 1] + ordered[middle]) / 2.0
+
+
+def _stddev(values: list[float]) -> float:
+    if len(values) < 2:
+        return 0.0
+    mean = sum(values) / len(values)
+    variance = sum((value - mean) ** 2 for value in values) / len(values)
+    return math.sqrt(variance)
+
+
+def _percentile(values: list[float], percentile: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return ordered[0]
+    rank = (percentile / 100.0) * (len(ordered) - 1)
+    low = math.floor(rank)
+    high = math.ceil(rank)
+    if low == high:
+        return ordered[int(rank)]
+    return ordered[low] + (ordered[high] - ordered[low]) * (rank - low)

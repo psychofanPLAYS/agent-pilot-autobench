@@ -496,3 +496,66 @@ def test_partial_candidate_sequence_is_labeled_and_has_no_champion(tmp_path):
     best = json.loads((receipt.path / "best-settings.json").read_text(encoding="utf-8"))
     assert best["status"] == "partial"
     assert best["promotion_eligible"] is False
+
+
+def _question_result(tps, ttft, prompt_tps):
+    from gguf_limit_bench.simple_bench import SimpleBenchQuestionResult
+
+    return SimpleBenchQuestionResult(
+        question_id=1,
+        expected_answer="A",
+        predicted_answer="A",
+        correct=True,
+        ttft_ms=ttft,
+        tokens_per_second=tps,
+        generated_tokens=10,
+        output_chars=20,
+        prompt_chars=50,
+        response="ok",
+        prompt_tokens_per_second=prompt_tps,
+    )
+
+
+def test_combine_reports_prefill_variance_and_tail_latency():
+    from gguf_limit_bench.simple_bench import combine_simple_bench_results
+
+    batch = combine_simple_bench_results(
+        [
+            _question_result(100.0, 50.0, 500.0),
+            _question_result(120.0, 80.0, 600.0),
+            _question_result(140.0, 200.0, 700.0),
+        ]
+    )
+    assert batch.median_prompt_tps == 600.0
+    assert batch.gen_tps_stddev > 0
+    assert batch.ttft_p90_ms is not None and batch.ttft_p99_ms is not None
+    assert batch.ttft_p99_ms >= batch.ttft_p90_ms >= (batch.median_ttft_ms or 0)
+
+
+def test_measure_captures_server_prompt_per_second(monkeypatch):
+    from io import BytesIO
+
+    class FakeResponse(BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+    def fake_urlopen(request, timeout):
+        return FakeResponse(
+            b'data: {"choices":[{"delta":{"content":"Final Answer: A"}}],'
+            b'"timings":{"predicted_per_second":42.5,"prompt_per_second":350.0}}\n\n'
+            b"data: [DONE]\n\n"
+        )
+
+    monkeypatch.setattr("gguf_limit_bench.simple_bench_runner.urlopen", fake_urlopen)
+
+    result = measure_simple_bench_completion(
+        base_url="http://127.0.0.1:8080",
+        question=SimpleBenchQuestion(question_id=1, prompt="Pick one", answer="A"),
+        system_prompt="Use Final Answer: X",
+        max_tokens=32,
+        timeout_seconds=10,
+    )
+    assert result.prompt_tokens_per_second == 350.0
