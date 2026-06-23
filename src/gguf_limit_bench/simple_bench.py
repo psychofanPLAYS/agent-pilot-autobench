@@ -40,6 +40,7 @@ class SimpleBenchQuestionResult:
     response: str
     prompt_tokens_per_second: float = 0.0
     failure: str = "none"
+    outcome: str = "wrong"
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -61,6 +62,8 @@ class SimpleBenchBatchResult:
     ttft_p90_ms: float | None = None
     ttft_p99_ms: float | None = None
     failure: str = "none"
+    incomplete: int = 0
+    completion_rate: float = 0.0
 
     def to_dict(self) -> dict:
         payload = asdict(self)

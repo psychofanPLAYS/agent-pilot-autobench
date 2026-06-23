@@ -13,6 +13,7 @@ from gguf_limit_bench.flag_ladder import (
     validate_extra_server_args,
 )
 from gguf_limit_bench.simple_bench import (
+    SimpleBenchBatchResult,
     SimpleBenchQuestionResult,
     SimpleBenchQuestion,
     combine_simple_bench_results,
@@ -559,3 +560,82 @@ def test_measure_captures_server_prompt_per_second(monkeypatch):
         timeout_seconds=10,
     )
     assert result.prompt_tokens_per_second == 350.0
+
+
+# --- Task 4: outcome taxonomy fields ---
+
+
+def test_question_result_outcome_field_default_and_custom():
+    result = SimpleBenchQuestionResult(
+        question_id=1,
+        expected_answer="A",
+        predicted_answer=None,
+        correct=False,
+        ttft_ms=None,
+        tokens_per_second=0.0,
+        generated_tokens=0,
+        output_chars=0,
+        prompt_chars=0,
+        response="",
+        outcome="incomplete",
+    )
+    assert result.outcome == "incomplete"
+    d = result.to_dict()
+    assert "outcome" in d
+    assert d["outcome"] == "incomplete"
+
+
+def test_question_result_outcome_defaults_to_wrong():
+    result = SimpleBenchQuestionResult(
+        question_id=2,
+        expected_answer="B",
+        predicted_answer="B",
+        correct=True,
+        ttft_ms=50.0,
+        tokens_per_second=30.0,
+        generated_tokens=10,
+        output_chars=20,
+        prompt_chars=100,
+        response="Final Answer: B",
+    )
+    assert result.outcome == "wrong"
+    assert result.to_dict()["outcome"] == "wrong"
+
+
+def test_batch_result_incomplete_and_completion_rate_fields():
+    batch = SimpleBenchBatchResult(
+        ok=True,
+        score=800.0,
+        accuracy=0.8,
+        correct=4,
+        total=5,
+        median_tps=40.0,
+        min_tps=30.0,
+        median_ttft_ms=100.0,
+        results=[],
+        incomplete=1,
+        completion_rate=0.8,
+    )
+    assert batch.incomplete == 1
+    assert batch.completion_rate == 0.8
+    d = batch.to_dict()
+    assert "incomplete" in d
+    assert d["incomplete"] == 1
+    assert "completion_rate" in d
+    assert d["completion_rate"] == 0.8
+
+
+def test_batch_result_new_fields_default_to_zero():
+    batch = SimpleBenchBatchResult(
+        ok=True,
+        score=500.0,
+        accuracy=0.5,
+        correct=1,
+        total=2,
+        median_tps=50.0,
+        min_tps=40.0,
+        median_ttft_ms=None,
+        results=[],
+    )
+    assert batch.incomplete == 0
+    assert batch.completion_rate == 0.0
