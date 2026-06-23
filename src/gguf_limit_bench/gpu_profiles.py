@@ -6,6 +6,7 @@ wins, so order matters – put more specific substrings first.
 """
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass
 
 
@@ -84,3 +85,25 @@ def describe(gpu_name: str) -> str:
     """Return a human-readable one-liner describing the recommended settings."""
     profile = _match(gpu_name)
     return profile.description_template.format(gpu_name=gpu_name)
+
+
+def detect_gpu_name() -> str:
+    """Best-effort detection of the primary GPU name via ``nvidia-smi``.
+
+    Returns the first GPU's name (e.g. ``"NVIDIA GeForce RTX 4090"``) or an empty
+    string when ``nvidia-smi`` is unavailable or fails. Never raises.
+    """
+    try:
+        completed = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if completed.returncode != 0:
+        return ""
+    first_line = completed.stdout.strip().splitlines()
+    return first_line[0].strip() if first_line else ""

@@ -7,6 +7,25 @@ semantic versioning for published versions.
 
 ### Added
 
+- **Phase A — multi-pack LLM evaluation with visible results.** Question packs beyond
+  SimpleBench via a `QuestionPack` interface and registry: `simple-bench` (10, hard),
+  `easy-gotcha` (~24 verified gotchas, exact-answer with accept-variants), and `easy-mc`
+  (~26 frozen ARC-Easy/OpenBookQA/CommonsenseQA questions with authoritative answer keys;
+  see `data/packs/LICENSES.md`). Two answer types (`multiple_choice`, `exact` with
+  number-word normalization and phrase/containment scoring).
+- "Let the model think": a correct/wrong/**incomplete** outcome taxonomy with one cheap
+  forced-final follow-up, so a reasoner that runs out of token budget mid-thought is
+  scored `incomplete` rather than silently `wrong`.
+- Per-run `results.md` / `results.json` showing the model's actual answer for every
+  question across packs, plus a 5-per-pack `sequential`/seeded-`random` selection setting
+  (`--sample-size`, `--selection`, `PILOTBENCH_QUESTION_*`) and per-model lifetime stats
+  in the experiment DB (a sequential cursor accumulates coverage across runs).
+- GPU-aware recommended-always-on flags (`gpu_profiles.py`): RTX 4090 → `--cache-type-k/v
+  q8_0` (Ada fp8 KV), flash-attn, 4 parallel slots, surfaced in results.
+- TUI per-pack scoreboard + lifetime line; non-blank `--help` for the `survey`, `quick`,
+  `autoresearch`, `autoresearch-all`, and `tui` commands.
+- Non-generative GGUFs (embedding/reranker/query-expansion/imatrix/mmproj) are excluded
+  from model discovery so they can never be benchmarked as chat models.
 - Independent llama-server flag ablations with SimpleBench accuracy, TTFT, throughput,
   slowdown, warning, command, and receipt evidence.
 - MTP draft-profile experiments for models explicitly identified as MTP-capable.

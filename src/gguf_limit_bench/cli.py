@@ -38,6 +38,7 @@ from gguf_limit_bench.config import (
     with_cli_overrides,
 )
 from gguf_limit_bench.deployment import export_champion_profile
+from gguf_limit_bench.gpu_profiles import detect_gpu_name
 from gguf_limit_bench.discovery import discover_models
 from gguf_limit_bench.doctor import DoctorReport, build_doctor_report
 from gguf_limit_bench.evaluation_mode import (
@@ -1461,6 +1462,11 @@ def _run_one_autoresearch(
 
         attempt_runner = ttft_attempt_runner
 
+    # Resolve champion-eval defaults: detect the GPU for recommended flags and
+    # persist lifetime stats to the shared experiment DB (not an in-memory one).
+    resolved_gpu_name = champion_gpu_name or detect_gpu_name()
+    resolved_state_db_path = champion_state_db_path or DEFAULT_DB_PATH
+
     loop = AutoresearchLoop(
         model=model,
         runs_root=runs_root,
@@ -1500,8 +1506,8 @@ def _run_one_autoresearch(
         champion_pack_ids=champion_pack_ids,
         champion_sample_size=champion_sample_size,
         champion_selection=champion_selection,
-        champion_state_db_path=champion_state_db_path,
-        champion_gpu_name=champion_gpu_name,
+        champion_state_db_path=resolved_state_db_path,
+        champion_gpu_name=resolved_gpu_name,
         is_benchmark_mode=flag_ladder,
     )
     return loop.run()

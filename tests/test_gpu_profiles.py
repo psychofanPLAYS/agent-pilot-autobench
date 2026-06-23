@@ -88,3 +88,25 @@ class TestDescribe:
     def test_returns_string(self):
         assert isinstance(describe("RTX 4090"), str)
         assert isinstance(describe("Unknown GPU XYZ"), str)
+
+
+def test_detect_gpu_name_parses_nvidia_smi(monkeypatch):
+
+    from gguf_limit_bench import gpu_profiles
+
+    class _R:
+        returncode = 0
+        stdout = "NVIDIA GeForce RTX 4090\n"
+
+    monkeypatch.setattr(gpu_profiles.subprocess, "run", lambda *a, **k: _R())
+    assert gpu_profiles.detect_gpu_name() == "NVIDIA GeForce RTX 4090"
+
+
+def test_detect_gpu_name_returns_empty_when_missing(monkeypatch):
+    from gguf_limit_bench import gpu_profiles
+
+    def _boom(*a, **k):
+        raise FileNotFoundError("nvidia-smi")
+
+    monkeypatch.setattr(gpu_profiles.subprocess, "run", _boom)
+    assert gpu_profiles.detect_gpu_name() == ""
