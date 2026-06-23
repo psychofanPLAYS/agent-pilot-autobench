@@ -23,6 +23,13 @@ from gguf_limit_bench.autoresearch import (
     LlamaPerplexityRunner,
 )
 from gguf_limit_bench.bench_plan import BenchProfile
+from gguf_limit_bench.context_search import context_ladder
+from gguf_limit_bench.gguf_metadata import read_model_arch
+from gguf_limit_bench.vram import (
+    detect_vram_mb,
+    max_fitting_context,
+    plan_context_fit,
+)
 from gguf_limit_bench.benchmark_suite import (
     BenchmarkSuitePlan,
     benchmark_suite_run_to_dict,
@@ -949,6 +956,87 @@ def quick(
     runner = BenchmarkRunner(llama_bench=config.paths.llama_bench, runs_root=config.paths.runs_root)
     receipt = runner.run_model(model=model, profile=BenchProfile.quick())
     console.print(f"Receipt: {receipt.path}")
+
+
+@app.command("vram-plan")
+def vram_plan(
+    model: Annotated[Path, typer.Option(help="GGUF model path.")],
+    min_context: int = typer.Option(16_384, "--min-context", min=256),
+    max_context: int = typer.Option(262_144, "--max-context", min=256),
+    kv_bits: int = typer.Option(
+        8, "--kv-bits", help="KV cache bits per element: 8 (q8_0, recommended) or 16 (f16)."
+    ),
+    budget_mb: int | None = typer.Option(
+        None, "--budget-mb", help="VRAM budget in MB (default: detected total GPU VRAM)."
+    ),
+    json_out: bool = False,
+) -> None:
+    """Predict which context sizes fit in VRAM for a model, before running it.
+
+    A conservative (dense upper-bound) guard so the context ladder skips tiers
+    that would OOM-crash llama-server. Sliding-window models will use less.
+    """
+    arch = read_model_arch(model)
+    if arch is None:
+        console.print(f"Could not read GGUF architecture metadata from: {model}")
+        raise typer.Exit(1)
+    try:
+        size_bytes = model.stat().st_size
+    except OSError as exc:
+        console.print(f"Could not read model file: {exc}")
+        raise typer.Exit(1) from exc
+
+    vram = detect_vram_mb()
+    budget = budget_mb if budget_mb is not None else (vram.total_mb if vram else None)
+    if budget is None:
+        console.print("Could not detect GPU VRAM. Pass --budget-mb to plan anyway.")
+        raise typer.Exit(1)
+
+    ladder = [tier for tier in context_ladder(max_context) if tier >= min_context]
+    plan = plan_context_fit(arch, size_bytes, ladder, budget, k_bits=kv_bits, v_bits=kv_bits)
+    best = max_fitting_context(plan)
+
+    if json_out:
+        _print_json(
+            {
+                "model": str(model),
+                "architecture": arch.architecture,
+                "weights_mb": int(size_bytes / (1024 * 1024)),
+                "vram_total_mb": vram.total_mb if vram else None,
+                "vram_free_mb": vram.free_mb if vram else None,
+                "budget_mb": budget,
+                "kv_bits": kv_bits,
+                "max_fitting_context": best,
+                "tiers": [
+                    {"context": fit.context_size, "needed_mb": fit.needed_mb, "fits": fit.fits}
+                    for fit in plan
+                ],
+            }
+        )
+        return
+
+    console.print(
+        f"{arch.architecture}: {arch.n_layers} layers, {arch.n_heads_kv} KV heads, "
+        f"k/v length {arch.key_length}/{arch.value_length}"
+    )
+    if vram:
+        console.print(f"GPU VRAM: {vram.total_mb} MB total, {vram.free_mb} MB free")
+    console.print(f"Budget: {budget} MB | KV cache: {kv_bits}-bit")
+    table = Table(title=f"Context fit for {model.name}")
+    table.add_column("Context", justify="right")
+    table.add_column("Fits")
+    table.add_column("VRAM needed", justify="right")
+    for fit in plan:
+        table.add_row(
+            f"{fit.context_size // 1024}k",
+            "yes" if fit.fits else "no",
+            f"~{fit.needed_mb} MB",
+        )
+    console.print(table)
+    if best is not None:
+        console.print(f"Largest context predicted to fit: {best // 1024}k")
+    else:
+        console.print("No context tier in range is predicted to fit. Try --kv-bits 8.")
 
 
 @app.command("serve-probe")

@@ -7,6 +7,16 @@ semantic versioning for published versions.
 
 ### Added
 
+- **Phase B (foundation): VRAM-headroom guard for the context ladder.** A new
+  dependency-free GGUF header reader (`gguf_metadata.py`) extracts the real
+  architecture fields (block count, GQA KV-head count, explicit key/value lengths —
+  e.g. Gemma's 512, not embedding/heads) needed to size a KV cache, and `vram.py`
+  estimates per-tier VRAM and plans which context sizes fit. New `apb vram-plan
+  --model X [--kv-bits 8|16]` prints, for the detected GPU, which context tiers
+  (16k→256k) are predicted to fit — so the ladder can skip tiers that would OOM-crash
+  llama-server. The estimate is a conservative dense upper bound (sliding-window
+  attention not yet modelled, so SWA models use less). Verified on a real RTX 4090:
+  Gemma-4-E2B reaches 256k at q8_0 KV vs 224k at f16.
 - **First-run path auto-detection.** On a fresh machine `apb` setup now scans common
   locations (PATH, LM Studio dirs, `?:\AI\models`, `?:\AI\llama.cpp`, ...) for GGUF model
   folders and llama.cpp binaries it cannot already resolve, and saves what it finds to

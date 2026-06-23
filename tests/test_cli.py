@@ -792,6 +792,54 @@ def test_bare_apb_self_installs_on_first_run_then_launches(monkeypatch):
     assert "First run detected" in result.output
 
 
+def test_vram_plan_reports_fitting_contexts(tmp_path, monkeypatch):
+    from gguf_limit_bench.gguf_metadata import ModelArch
+    from gguf_limit_bench.vram import VramInfo
+
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"x" * 1024)
+
+    monkeypatch.setattr(
+        "gguf_limit_bench.cli.read_model_arch",
+        lambda _path: ModelArch(
+            architecture="gemma4",
+            n_layers=35,
+            n_heads=8,
+            n_heads_kv=1,
+            embedding_length=1536,
+            key_length=512,
+            value_length=512,
+            train_context_length=131072,
+        ),
+    )
+    monkeypatch.setattr(
+        "gguf_limit_bench.cli.detect_vram_mb",
+        lambda: VramInfo(total_mb=24564, free_mb=22000),
+    )
+
+    result = runner.invoke(
+        app,
+        ["vram-plan", "--model", str(model), "--kv-bits", "8", "--json-out"],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["architecture"] == "gemma4"
+    assert payload["max_fitting_context"] == 262144
+    assert payload["vram_total_mb"] == 24564
+
+
+def test_vram_plan_errors_when_metadata_unreadable(tmp_path, monkeypatch):
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"x")
+    monkeypatch.setattr("gguf_limit_bench.cli.read_model_arch", lambda _path: None)
+
+    result = runner.invoke(app, ["vram-plan", "--model", str(model)])
+
+    assert result.exit_code == 1
+    assert "Could not read GGUF" in result.output
+
+
 def test_autoconfigure_detects_and_persists_missing_paths(tmp_path):
     from gguf_limit_bench.cli import _autoconfigure_paths
 
