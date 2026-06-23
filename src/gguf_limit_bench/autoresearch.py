@@ -143,6 +143,8 @@ class AttemptResult:
     simple_bench_accuracy: float | None = None
     simple_bench_receipt: str | None = None
     simple_bench_failure: str | None = None
+    completed_questions: int = 0
+    attempted_questions: int = 0
 
     def score(self) -> float:
         if not self.ok:
@@ -468,6 +470,12 @@ class AutoresearchLoop:
             len(self.candidate_sequence) if self.candidate_sequence is not None else None
         )
         ladder_complete = planned_profiles is None or len(attempt_records) >= planned_profiles
+        promotion_eligible = ladder_complete and best_result.ok
+        result_status = (
+            "partial"
+            if not ladder_complete or _is_partial_result(best_result)
+            else _status_for_result(best_result)
+        )
 
         receipt.write_json(
             "best-settings.json",
@@ -476,8 +484,8 @@ class AutoresearchLoop:
                 "settings": best_settings.to_dict(),
                 "result": best_result.to_dict(),
                 "score": best_result.score(),
-                "status": _status_for_result(best_result) if ladder_complete else "partial",
-                "promotion_eligible": ladder_complete,
+                "status": result_status,
+                "promotion_eligible": promotion_eligible,
                 "learner_best": self.learner.best() if self.learner is not None else None,
             },
         )
@@ -520,7 +528,7 @@ class AutoresearchLoop:
                 receipt=receipt,
                 model=self.model,
                 attempts=attempt_records,
-                champion_profile=best_settings.profile_name if ladder_complete else None,
+                champion_profile=best_settings.profile_name if promotion_eligible else None,
                 provisional_best_profile=best_settings.profile_name,
                 planned_profiles=planned_profiles,
             )
@@ -832,13 +840,14 @@ def _write_flag_ladder_comparison(
         (
             result.generation_tokens_per_second
             for settings, result in attempts
-            if settings.profile_name == "L0-baseline" and result.ok
+            if settings.profile_name == "L0-baseline" and (result.ok or _is_partial_result(result))
         ),
         None,
     )
     rows = []
     for settings, result in attempts:
-        tps = result.generation_tokens_per_second if result.ok else None
+        partial = _is_partial_result(result)
+        tps = result.generation_tokens_per_second if result.ok or partial else None
         slowdown_percent = (
             ((baseline_tps - tps) / baseline_tps) * 100.0
             if baseline_tps and tps is not None
@@ -849,13 +858,16 @@ def _write_flag_ladder_comparison(
             {
                 "profile": settings.profile_name,
                 "ok": result.ok,
+                "partial": partial,
                 "champion": settings.profile_name == champion_profile,
                 "score": result.simple_bench_score,
                 "accuracy": result.simple_bench_accuracy,
                 "median_tps": tps,
-                "prefill_tps": result.prompt_tokens_per_second if result.ok else None,
+                "prefill_tps": result.prompt_tokens_per_second if result.ok or partial else None,
                 "slowdown_vs_baseline_percent": slowdown_percent,
                 "median_ttft_ms": result.ttft_ms,
+                "completed_questions": result.completed_questions,
+                "attempted_questions": result.attempted_questions,
                 "warning_count": warning_count,
                 "failure": result.failure,
                 "settings": settings.to_dict(),
@@ -895,8 +907,9 @@ def _attempt_warning_count(receipt_path: str | None) -> int | None:
 
 def _flag_ladder_tsv(rows: list[dict]) -> str:
     header = (
-        "profile\tok\tchampion\tscore\taccuracy\tmedian_tps\tprefill_tps\t"
-        "slowdown_vs_baseline_percent\tmedian_ttft_ms\twarning_count\tfailure\treceipt"
+        "profile\tok\tpartial\tchampion\tscore\taccuracy\tmedian_tps\tprefill_tps\t"
+        "slowdown_vs_baseline_percent\tmedian_ttft_ms\tcompleted_questions\t"
+        "attempted_questions\twarning_count\tfailure\treceipt"
     )
     lines = [header]
     for row in rows:
@@ -905,6 +918,7 @@ def _flag_ladder_tsv(rows: list[dict]) -> str:
                 [
                     row["profile"],
                     str(row["ok"]).lower(),
+                    str(row.get("partial", False)).lower(),
                     str(row["champion"]).lower(),
                     _tsv_float(row["score"]),
                     _tsv_float(row["accuracy"]),
@@ -912,6 +926,8 @@ def _flag_ladder_tsv(rows: list[dict]) -> str:
                     _tsv_float(row.get("prefill_tps")),
                     _tsv_float(row["slowdown_vs_baseline_percent"]),
                     _tsv_float(row["median_ttft_ms"]),
+                    str(row.get("completed_questions", 0)),
+                    str(row.get("attempted_questions", 0)),
                     "" if row["warning_count"] is None else str(row["warning_count"]),
                     str(row["failure"]),
                     str(row["receipt"] or ""),
@@ -939,23 +955,33 @@ def _flag_ladder_markdown(payload: dict) -> str:
         "",
         "Positive slowdown means slower than L0; negative means faster.",
         "",
-        "| Profile | OK | Champion | Accuracy | Gen TPS | Prefill TPS | "
-        "Slowdown vs L0 | TTFT ms | Warnings | Failure |",
-        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+        "| Profile | OK | Partial | Champion | Accuracy | Gen TPS | Prefill TPS | "
+        "Slowdown vs L0 | TTFT ms | Questions | Warnings | Failure |",
+        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
     for row in payload["rows"]:
         lines.append(
             "| "
             f"{row['profile']} | {str(row['ok']).lower()} | "
+            f"{str(row.get('partial', False)).lower()} | "
             f"{str(row['champion']).lower()} | {_md_float(row['accuracy'])} | "
             f"{_md_float(row['median_tps'])} | "
             f"{_md_float(row.get('prefill_tps'))} | "
             f"{_md_float(row['slowdown_vs_baseline_percent'])}% | "
             f"{_md_float(row['median_ttft_ms'])} | "
+            f"{row.get('completed_questions', 0)}/{row.get('attempted_questions', 0)} | "
             f"{row['warning_count'] if row['warning_count'] is not None else 'n/a'} | "
             f"{row['failure']} |"
         )
     return "\n".join(lines) + "\n"
+
+
+def _is_partial_result(result: AttemptResult) -> bool:
+    return (
+        not result.ok
+        and result.completed_questions > 0
+        and result.generation_tokens_per_second > 0
+    )
 
 
 def build_autoresearch_llama_bench_command(
@@ -1215,6 +1241,8 @@ def _decision_for_attempt(
     previous_best: AttemptResult | None,
 ) -> str:
     if not result.ok:
+        if _is_partial_result(result):
+            return "partial"
         return "crash"
     if previous_best is None:
         return "keep"

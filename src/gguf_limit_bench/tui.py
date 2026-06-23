@@ -6,6 +6,7 @@ from pathlib import Path
 import sqlite3
 from typing import Callable
 
+from textual import events
 from textual.app import App, ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import DataTable, Footer, Header, ProgressBar, Static
@@ -23,6 +24,15 @@ from gguf_limit_bench.telemetry import TelemetrySnapshot, sample_telemetry
 
 
 RunModelCallback = Callable[[ModelInfo], Path]
+
+DEFAULT_HISTORY_RATIO = 0.18
+HISTORY_RATIO_STEP = 0.04
+MIN_HISTORY_RATIO = 0.10
+MAX_HISTORY_RATIO = 0.36
+MIN_HISTORY_HEIGHT = 3
+RESERVED_HEIGHT_WITH_MIN_TABLE = 20
+NARROW_TABLE_WIDTH = 90
+MEDIUM_TABLE_WIDTH = 125
 
 
 @dataclass
@@ -63,8 +73,8 @@ class TelemetryStats:
 
 class BenchTui(App):
     # Layout is sized to fit a standard 80x24 terminal: the model table flexes
-    # (1fr) and takes whatever space the slim fixed-height panels leave, so the
-    # picker and the live dashboard are always on-screen.
+    # (1fr) and takes whatever space the fixed panels leave, while recent runs
+    # scales with terminal height and can be resized by the user.
     CSS = """
     Screen { background: #0f1117; color: #d6deeb; }
     Header, Footer { background: #151923; color: #d6deeb; }
@@ -73,7 +83,8 @@ class BenchTui(App):
     #banner { height: 1; color: #f2c94c; text-style: bold; }
     #telemetry { height: 1; color: #8fa3bf; }
     #status { height: 2; }
-    #history_box { height: 3; }
+    #details { height: 2; color: #9fb4d1; }
+    #history_box { min-height: 3; }
     #history { color: #8fa3bf; }
     #dashboard { height: 6; padding: 0 1; border: solid #293241; }
     #progress { height: 1; }
@@ -88,6 +99,9 @@ class BenchTui(App):
         ("a", "select_all", "Select all"),
         ("c", "clear", "Clear"),
         ("m", "cycle_mode", "Mode"),
+        ("[", "shrink_history", "Recent runs smaller"),
+        ("]", "grow_history", "Recent runs larger"),
+        ("0", "reset_history", "Reset panels"),
         ("q", "quit", "Quit"),
     ]
 
@@ -112,6 +126,8 @@ class BenchTui(App):
         self.run_config = RunConfig.from_preset("normal")
         self.run_mode = DEFAULT_RUN_MODE
         self.telemetry_stats = TelemetryStats()
+        self.history_ratio = DEFAULT_HISTORY_RATIO
+        self._table_layout: tuple[str, ...] = ()
 
     @property
     def evaluation_mode(self) -> EvaluationMode:
@@ -126,6 +142,7 @@ class BenchTui(App):
             yield Static("Sampling hardware telemetry...", id="telemetry")
             yield Static("Loading GGUF models...", id="status")
             yield DataTable(id="models")
+            yield Static("Cursor: no model highlighted yet.", id="details")
             with VerticalScroll(id="history_box"):
                 yield Static(self._history_text(), id="history")
             yield Static(self._dashboard_text("Waiting for model selection."), id="dashboard")
@@ -138,13 +155,16 @@ class BenchTui(App):
         self._restore_last_selection()
         table = self.query_one("#models", DataTable)
         table.cursor_type = "row"
-        table.add_columns("Sel", "Family", "Params", "Quant", "GB", "Vision", "Model")
         self._refresh_table()
         self._refresh_telemetry()
+        self._apply_history_layout()
         self.set_interval(5, self._refresh_telemetry)
         # Live run progress: while a benchmark is running, poll the active run dir
         # so the user actually sees questions being asked instead of a frozen screen.
         self.set_interval(1.5, self._refresh_run_progress)
+
+    def on_resize(self, event: events.Resize) -> None:
+        self._apply_history_layout(event.size.height)
 
     def action_toggle_model(self) -> None:
         if self.phase != "selecting":
@@ -158,6 +178,10 @@ class BenchTui(App):
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         event.stop()
         self.action_run_selected()
+
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        event.stop()
+        self._refresh_details(event.cursor_row)
 
     def action_select_all(self) -> None:
         if self.phase != "selecting":
@@ -184,6 +208,18 @@ class BenchTui(App):
             return
         self.run_mode = next_mode(self.run_mode)
         if self.is_running:
+            self._refresh_table()
+
+    def action_grow_history(self) -> None:
+        self._resize_history(HISTORY_RATIO_STEP)
+
+    def action_shrink_history(self) -> None:
+        self._resize_history(-HISTORY_RATIO_STEP)
+
+    def action_reset_history(self) -> None:
+        self.history_ratio = DEFAULT_HISTORY_RATIO
+        self._apply_history_layout()
+        if self.phase == "selecting":
             self._refresh_table()
 
     def action_cancel(self) -> None:
@@ -290,23 +326,22 @@ class BenchTui(App):
 
     def _refresh_table(self, keep_row: int = 0) -> None:
         table = self.query_one("#models", DataTable)
+        layout = self._ensure_table_columns(table, self.size.width or 80)
         table.clear()
         for index, model in enumerate(self.models):
-            table.add_row(
-                "x" if self.selection.is_selected(index) else "",
-                model.family,
-                model.parameters,
-                model.quant,
-                f"{model.size_gb:.2f}",
-                "yes" if model.has_vision else "",
-                model.name,
-            )
+            table.add_row(*self._row_cells(model, index, layout))
         selected = len(self.selection.selected_models())
+        resize_hint = (
+            "brackets resize recent runs"
+            if (self.size.width or 80) < MEDIUM_TABLE_WIDTH
+            else "brackets resize recent runs panel"
+        )
         self.query_one("#status", Static).update(
             f"{len(self.models)} models found. {selected} selected. "
             f"Sort: {self.sort_modes[self.sort_mode_index]}. Mode: {self.run_mode.label}. "
-            "Space selects, Enter/R runs, S sort, A all, C clear, M mode, Esc cancel."
+            f"Space select, Enter/R run, S sort, M mode, {resize_hint}."
         )
+        self._refresh_details(table.cursor_row)
         if self.models:
             table.move_cursor(row=min(keep_row, len(self.models) - 1))
 
@@ -370,6 +405,70 @@ class BenchTui(App):
         snapshot = sample_telemetry()
         self.telemetry_stats.add(snapshot)
         self.query_one("#telemetry", Static).update(_telemetry_text(snapshot, self.telemetry_stats))
+
+    def _refresh_details(self, row: int | None = None) -> None:
+        if row is None or row < 0 or row >= len(self.models):
+            text = "Cursor: no model highlighted yet."
+        else:
+            model = self.models[row]
+            selected = "selected" if self.selection.is_selected(row) else "not selected"
+            text = (
+                f"Cursor: {model.name}\n"
+                f"{model.parameters} | {model.quant} | {model.size_gb:.2f} GB | {selected}"
+            )
+        self.query_one("#details", Static).update(text)
+
+    def _table_layout_for_width(self, width: int) -> tuple[str, ...]:
+        if width < NARROW_TABLE_WIDTH:
+            return ("selected", "size", "model")
+        if width < MEDIUM_TABLE_WIDTH:
+            return ("selected", "parameters", "quant", "size", "model")
+        return ("selected", "family", "parameters", "quant", "size", "vision", "model")
+
+    def _ensure_table_columns(self, table: DataTable, width: int) -> tuple[str, ...]:
+        layout = self._table_layout_for_width(width)
+        if layout == self._table_layout:
+            return layout
+        table.clear(columns=True)
+        for key, label, column_width in _column_specs(layout, width):
+            table.add_column(label, key=key, width=column_width)
+        self._table_layout = layout
+        return layout
+
+    def _row_cells(self, model: ModelInfo, index: int, layout: tuple[str, ...]) -> tuple[str, ...]:
+        values = {
+            "selected": "x" if self.selection.is_selected(index) else "",
+            "family": model.family,
+            "parameters": model.parameters,
+            "quant": model.quant,
+            "size": f"{model.size_gb:.2f}",
+            "vision": "yes" if model.has_vision else "",
+            "model": model.name,
+        }
+        return tuple(values[key] for key in layout)
+
+    def _resize_history(self, delta: float) -> None:
+        self.history_ratio = max(
+            MIN_HISTORY_RATIO,
+            min(MAX_HISTORY_RATIO, self.history_ratio + delta),
+        )
+        self._apply_history_layout()
+        if self.phase == "selecting":
+            self._refresh_table()
+
+    def _apply_history_layout(self, screen_height: int | None = None) -> None:
+        history_box = self.query_one("#history_box", VerticalScroll)
+        total_height = screen_height or self.size.height or 24
+        max_history_height = max(
+            MIN_HISTORY_HEIGHT,
+            total_height - RESERVED_HEIGHT_WITH_MIN_TABLE,
+        )
+        target_height = max(
+            MIN_HISTORY_HEIGHT,
+            min(max_history_height, round(total_height * self.history_ratio)),
+        )
+        history_box.styles.height = target_height
+        history_box.refresh(layout=True)
 
 
 def active_run_status(runs_root: Path) -> str | None:
@@ -490,6 +589,29 @@ def _telemetry_text(snapshot: TelemetrySnapshot, stats: TelemetryStats) -> str:
         f"GPU {gpu_util}%  VRAM {gpu_memory}  "
         f"Swap {snapshot.swap_used_percent:.0f}%"
     )
+
+
+def _column_specs(layout: tuple[str, ...], table_width: int) -> list[tuple[str, str, int | None]]:
+    fixed_widths = {
+        "selected": ("Sel", 3),
+        "family": ("Family", 9),
+        "parameters": ("Params", 9),
+        "quant": ("Quant", 10),
+        "size": ("GB", 7),
+        "vision": ("Vision", 7),
+    }
+    fixed_total = sum(fixed_widths[key][1] for key in layout if key != "model")
+    # DataTable adds padding and separators; leave a little slack so compact
+    # layouts do not create a horizontal scroll just from chrome.
+    model_width = max(24, table_width - fixed_total - (3 * len(layout)))
+    specs: list[tuple[str, str, int | None]] = []
+    for key in layout:
+        if key == "model":
+            specs.append((key, "Model", model_width))
+        else:
+            label, width = fixed_widths[key]
+            specs.append((key, label, width))
+    return specs
 
 
 def _min_value(current: float | None, value: float) -> float:

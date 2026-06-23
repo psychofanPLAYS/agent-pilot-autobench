@@ -53,7 +53,7 @@ from gguf_limit_bench.config import (
     with_cli_overrides,
 )
 from gguf_limit_bench.deployment import export_champion_profile
-from gguf_limit_bench.gpu_profiles import detect_gpu_name
+from gguf_limit_bench.gpu_profiles import detect_gpu_name, recommended_always_on
 from gguf_limit_bench.discovery import discover_models
 from gguf_limit_bench.doctor import DoctorReport, build_doctor_report
 from gguf_limit_bench.evaluation_mode import (
@@ -83,6 +83,13 @@ from gguf_limit_bench.installer import (
 from gguf_limit_bench.learning import OptunaSettingsLearner
 from gguf_limit_bench.modes import KARPATHY_ROUND_SECONDS
 from gguf_limit_bench.packs import load_benchmark_packs
+from gguf_limit_bench.programs import (
+    MIN_SERIOUS_CONTEXT_SIZE,
+    ProgramId,
+    enforce_min_context,
+    fit_probe_prompt,
+    speed_probe_prompt,
+)
 from gguf_limit_bench.flag_ladder import (
     build_core_flag_ladder,
     build_flag_ladder_plan,
@@ -97,7 +104,7 @@ from gguf_limit_bench.runtime_capabilities import (
 from gguf_limit_bench.reports import write_leaderboard
 from gguf_limit_bench.runner import BenchmarkRunner
 from gguf_limit_bench.run_config import PRESETS, RunConfig
-from gguf_limit_bench.server_probe import DEFAULT_AGENT_TTFT_PROMPT, probe_llama_server_ttft
+from gguf_limit_bench.server_probe import ServingProbeResult, probe_llama_server_ttft
 from gguf_limit_bench.simple_bench import (
     DEFAULT_SIMPLE_BENCH_PATH,
     DEFAULT_SIMPLE_BENCH_SYSTEM_PROMPT,
@@ -119,6 +126,17 @@ app = typer.Typer(
     rich_markup_mode="rich",
 )
 console = Console()
+
+
+def _effective_forced_server_args(custom_args: tuple[str, ...] = ()) -> tuple[str, ...]:
+    """Return standard always-on llama-server flags plus user-locked extras.
+
+    User extras are additive so template choices such as ``--jinja`` or
+    ``--chat-template-file`` stay locked across every profile without dropping
+    the current GPU's standard baseline.
+    """
+    standard_args = recommended_always_on(detect_gpu_name())
+    return validate_extra_server_args(tuple(standard_args) + tuple(custom_args))
 
 
 @app.callback()
@@ -1054,7 +1072,9 @@ def vram_plan(
 def context_limit_command(
     model: Annotated[Path, typer.Option(help="GGUF model path.")],
     llama_server: Path | None = None,
-    min_context: int = typer.Option(DEFAULT_MIN_CONTEXT, "--min-context", min=256),
+    min_context: int = typer.Option(
+        DEFAULT_MIN_CONTEXT, "--min-context", min=MIN_SERIOUS_CONTEXT_SIZE
+    ),
     max_context: int = typer.Option(262_144, "--max-context", min=256),
     parallel: int = typer.Option(1, "--parallel", min=1),
     kv_cache_type: str = typer.Option(
@@ -1067,10 +1087,10 @@ def context_limit_command(
     no_refine: bool = typer.Option(False, "--no-refine"),
     json_out: bool = False,
 ) -> None:
-    """Find the largest context the model can actually serve, from 16k upward.
+    """Find the largest context the model can actually serve, from 32k upward.
 
-    Starts small and climbs; uses q8_0 KV cache; recognises an out-of-memory
-    crash, notes it, and backs off instead of aborting the run.
+    Starts at a useful 32k, climbs by 32k, uses q8_0 KV cache, recognises an
+    out-of-memory crash, then backs off/refines instead of aborting the run.
     """
     config = with_cli_overrides(load_config(), llama_server=llama_server)
     server = config.paths.llama_server
@@ -1117,7 +1137,8 @@ def context_limit_command(
             llama_server=server,
             model=model,
             settings=settings,
-            max_tokens=8,
+            prompt=fit_probe_prompt(),
+            max_tokens=256,
             samples=1,
             timeout_seconds=timeout_seconds,
         )
@@ -1178,6 +1199,7 @@ def context_limit_command(
 def serve_probe(
     model: Annotated[Path, typer.Option(help="GGUF model path.")],
     llama_server: Path | None = None,
+    runs_root: Path | None = None,
     context_size: int = 4096,
     parallel: int = 1,
     gpu_layers: int = 99,
@@ -1185,39 +1207,69 @@ def serve_probe(
     ubatch_size: int = 512,
     flash_attention: bool = True,
     timeout_seconds: int = 180,
-    max_tokens: int = 64,
+    max_tokens: int = 768,
     samples: int = 0,
     cache_prompt: bool = True,
     prompt: str | None = None,
+    llama_server_extra_arg: list[str] | None = typer.Option(
+        None,
+        "--llama-server-extra-arg",
+        help="Extra raw llama-server argument locked into this speed probe. Repeatable.",
+    ),
     json_out: bool = False,
 ) -> None:
-    """Start llama-server once and measure cold/warm streaming TTFT plus serving speed."""
+    """Run the repeatable 16k+ speed probe and write a receipt."""
     from gguf_limit_bench.autoresearch import AutoresearchSettings
 
-    config = with_cli_overrides(load_config(), llama_server=llama_server)
+    config = with_cli_overrides(load_config(), llama_server=llama_server, runs_root=runs_root)
+    requested_context_size = context_size
+    effective_context_size = enforce_min_context(context_size, ProgramId.SPEED)
+    forced_args = _effective_forced_server_args(tuple(llama_server_extra_arg or ()))
+    probe_prompt = prompt or speed_probe_prompt()
 
     settings = AutoresearchSettings(
-        context_size=context_size,
+        profile_name="speed-probe",
+        context_size=effective_context_size,
         parallel=parallel,
         gpu_layers=gpu_layers,
         batch_size=batch_size,
         ubatch_size=ubatch_size,
         flash_attention=flash_attention,
+        kv_unified=True,
+        cache_type_k="q8_0",
+        cache_type_v="q8_0",
+        extra_server_args=forced_args,
     )
     result = probe_llama_server_ttft(
         llama_server=config.paths.llama_server,
         model=model,
         settings=settings,
-        prompt=prompt or DEFAULT_AGENT_TTFT_PROMPT,
+        prompt=probe_prompt,
         max_tokens=max_tokens,
         samples=samples,
         cache_prompt=cache_prompt,
         timeout_seconds=timeout_seconds,
     )
+    receipt = _write_speed_probe_receipt(
+        runs_root=config.paths.runs_root,
+        model=model,
+        prompt=probe_prompt,
+        requested_context_size=requested_context_size,
+        settings=settings,
+        result=result,
+    )
     if json_out:
-        _print_json(result.to_dict())
+        _print_json(
+            {
+                "program": ProgramId.SPEED.value,
+                "receipt": str(receipt.path),
+                "result": result.to_dict(),
+            }
+        )
         return
     if result.ok:
+        if effective_context_size != requested_context_size:
+            console.print(f"Context bumped to {effective_context_size // 1024}k.")
         console.print(f"Server ready: {_format_optional_ms(result.server_ready_ms)}")
         console.print(
             f"Server start to first token: {_format_optional_ms(result.cold_start_to_first_token_ms)}"
@@ -1235,11 +1287,56 @@ def serve_probe(
         console.print(f"Tokens cached: {result.tokens_cached_samples}")
         console.print(f"Tokens evaluated: {result.tokens_evaluated_samples}")
         console.print(f"Output chars: {result.output_chars}")
+        console.print(f"Receipt: {receipt.path}")
     else:
         console.print(f"Serving probe failed: {result.failure}")
+        console.print(f"Receipt: {receipt.path}")
         if result.stderr_tail:
             console.print(result.stderr_tail)
         raise typer.Exit(1)
+
+
+def _write_speed_probe_receipt(
+    *,
+    runs_root: Path,
+    model: Path,
+    prompt: str,
+    requested_context_size: int,
+    settings: AutoresearchSettings,
+    result: ServingProbeResult,
+) -> RunReceipt:
+    receipt = RunReceipt.create(runs_root, slug=f"{_safe_receipt_slug(model.stem)}-speed")
+    payload = {
+        "program": ProgramId.SPEED.value,
+        "model": str(model),
+        "prompt": prompt,
+        "requested_context_size": requested_context_size,
+        "settings": settings.to_dict(),
+        "result": result.to_dict(),
+    }
+    receipt.write_json("speed-probe.json", payload)
+    receipt.write_summary(
+        [
+            f"# Speed Probe - {model.name}",
+            "",
+            f"- Program: `{ProgramId.SPEED.value}`",
+            f"- Requested context: `{requested_context_size}`",
+            f"- Effective context: `{settings.context_size}`",
+            f"- KV cache: `{settings.cache_type_k}/{settings.cache_type_v}`",
+            f"- Unified KV: `{settings.kv_unified}`",
+            f"- Extra server args: `{list(settings.extra_server_args)}`",
+            f"- OK: `{result.ok}`",
+            f"- Decode TPS: `{result.tokens_per_second:.2f}`",
+            f"- Generated tokens: `{result.generated_tokens}`",
+            f"- Failure: `{result.failure}`",
+        ]
+    )
+    receipt.mark_recovery(step="speed-probe", status="finished" if result.ok else "failed")
+    return receipt
+
+
+def _safe_receipt_slug(value: str) -> str:
+    return "".join(char if char.isalnum() or char in "-_" else "-" for char in value)[:80]
 
 
 @app.command()
@@ -1295,9 +1392,9 @@ def autoresearch(
         help="Write the flag-ladder launch plan without starting llama-server.",
     ),
     flag_context_size: int = typer.Option(
-        4096,
+        MIN_SERIOUS_CONTEXT_SIZE,
         "--flag-context-size",
-        min=1,
+        min=MIN_SERIOUS_CONTEXT_SIZE,
         help="Context size used by every rung in the flag ladder.",
     ),
     simple_bench: Path = typer.Option(
@@ -1388,7 +1485,7 @@ def autoresearch(
         simple_bench_max_tokens=simple_bench_max_tokens,
         llama_server_extra_args=extra_server_args,
         evaluation=evaluation,
-        forced_server_args=config.benchmark.forced_server_args,
+        forced_server_args=_effective_forced_server_args(config.benchmark.forced_server_args),
         champion_sample_size=resolved_sample_size,
         champion_selection=resolved_selection,
     )
@@ -1476,7 +1573,7 @@ def autoresearch_all(
             benchmark_suite_plan=benchmark_suite_plan,
             enable_mtp=model.has_mtp,
             evaluation=evaluation,
-            forced_server_args=config.benchmark.forced_server_args,
+            forced_server_args=_effective_forced_server_args(config.benchmark.forced_server_args),
         )
         console.print(f"{model.name}: {receipt.path}")
         _print_receipt_outputs(receipt.path)
@@ -1549,7 +1646,7 @@ def tui(
             benchmark_suite_plan=benchmark_suite_plan,
             enable_mtp=model.has_mtp,
             evaluation=picker.evaluation_mode,
-            forced_server_args=config.benchmark.forced_server_args,
+            forced_server_args=_effective_forced_server_args(config.benchmark.forced_server_args),
         ).path
     )
     picker.run()
@@ -1656,7 +1753,7 @@ def _run_one_autoresearch(
     enable_mtp: bool = False,
     flag_ladder: bool = False,
     dry_run: bool = False,
-    flag_context_size: int = 4096,
+    flag_context_size: int = MIN_SERIOUS_CONTEXT_SIZE,
     simple_bench: Path = DEFAULT_SIMPLE_BENCH_PATH,
     simple_bench_system_prompt: Path = DEFAULT_SIMPLE_BENCH_SYSTEM_PROMPT,
     simple_bench_max_tokens: int = 4096,

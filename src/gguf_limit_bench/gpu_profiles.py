@@ -24,17 +24,19 @@ _PROFILES: list[_GpuProfile] = [
         always_on_flags=(
             "--flash-attn",
             "on",
+            "--kv-unified",
             "--cache-type-k",
             "q8_0",
             "--cache-type-v",
             "q8_0",
+            "--jinja",
             "--gpu-layers",
             "99",
         ),
         parallel_slots=4,
         description_template=(
-            "RTX 4090 (Ada, 24 GB): fp8 KV cache (q8_0) + flash-attn,"
-            " 4 parallel slots"
+            "RTX 4090 (Ada, 24 GB): flash-attn + unified q8_0 KV cache +"
+            " Jinja chat templating, 4 parallel slots"
         ),
     ),
 ]
@@ -44,6 +46,7 @@ _FALLBACK = _GpuProfile(
     always_on_flags=(
         "--flash-attn",
         "on",
+        "--jinja",
         "--gpu-layers",
         "99",
     ),

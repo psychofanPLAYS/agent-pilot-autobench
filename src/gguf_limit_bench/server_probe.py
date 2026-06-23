@@ -103,6 +103,9 @@ def build_llama_server_command(
 ) -> list[str]:
     from gguf_limit_bench.flag_ladder import llama_server_args_for_settings
 
+    extra_options = {
+        arg.split("=", 1)[0] for arg in settings.extra_server_args if arg.startswith("-")
+    }
     command = [
         str(llama_server),
         "--model",
@@ -113,20 +116,20 @@ def build_llama_server_command(
         str(port),
         "--ctx-size",
         str(settings.context_size or 4096),
-        "--gpu-layers",
-        str(settings.gpu_layers),
         "--batch-size",
         str(settings.batch_size),
         "--ubatch-size",
         str(settings.ubatch_size),
         "--parallel",
         str(settings.parallel),
-        "--flash-attn",
-        "on" if settings.flash_attention else "off",
         "--metrics",
         "--slots",
         "--no-webui",
     ]
+    if "--gpu-layers" not in extra_options:
+        command.extend(["--gpu-layers", str(settings.gpu_layers)])
+    if "--flash-attn" not in extra_options:
+        command.extend(["--flash-attn", "on" if settings.flash_attention else "off"])
     command.extend(llama_server_args_for_settings(settings))
     return command
 

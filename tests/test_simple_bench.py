@@ -12,6 +12,7 @@ from gguf_limit_bench.flag_ladder import (
     llama_server_args_for_settings,
     validate_extra_server_args,
 )
+from gguf_limit_bench.programs import MIN_SERIOUS_CONTEXT_SIZE
 from gguf_limit_bench.simple_bench import (
     SimpleBenchBatchResult,
     SimpleBenchQuestionResult,
@@ -244,6 +245,13 @@ def test_core_flag_ladder_builds_ordered_profiles_and_extra_args():
     # q8 KV profiles carry the q8 cache types.
     q8 = [s for s in ladder if s.profile_name == "L6-q8-kv" or s.profile_name.startswith("T")]
     assert all(s.cache_type_k == "q8_0" and s.cache_type_v == "q8_0" for s in q8)
+
+
+def test_core_flag_ladder_defaults_to_serious_16k_context():
+    ladder = build_core_flag_ladder()
+
+    assert all(settings.context_size >= MIN_SERIOUS_CONTEXT_SIZE for settings in ladder)
+    assert {settings.context_size for settings in ladder} == {16_384}
 
 
 def test_extra_server_args_cannot_override_managed_bindings():
@@ -497,6 +505,55 @@ def test_partial_candidate_sequence_is_labeled_and_has_no_champion(tmp_path):
     best = json.loads((receipt.path / "best-settings.json").read_text(encoding="utf-8"))
     assert best["status"] == "partial"
     assert best["promotion_eligible"] is False
+
+
+def test_budget_exhausted_question_rows_are_partial_not_crash(tmp_path):
+    candidates = (AutoresearchSettings(profile_name="L0-baseline"),)
+
+    def partial_runner(settings):
+        return AttemptResult(
+            ok=False,
+            generation_tokens_per_second=85.0,
+            prompt_tokens_per_second=1200.0,
+            ttft_ms=110.0,
+            context_size=settings.context_size,
+            failure="budget_exhausted_partial",
+            stdout="",
+            stderr="SimpleBench attempt budget exhausted",
+            returncode=124,
+            flag_profile=settings.profile_name,
+            simple_bench_score=250.0,
+            simple_bench_accuracy=0.25,
+            serving_question_results=[{"question_id": 1}, {"question_id": 2}],
+            completed_questions=2,
+            attempted_questions=8,
+        )
+
+    receipt = AutoresearchLoop(
+        model=Path("model.gguf"),
+        runs_root=tmp_path,
+        attempt_runner=partial_runner,
+        budget_seconds=60,
+        candidate_sequence=candidates,
+    ).run()
+
+    best = json.loads((receipt.path / "best-settings.json").read_text(encoding="utf-8"))
+    payload = json.loads((receipt.path / "flag-ladder-results.json").read_text(encoding="utf-8"))
+    row = payload["rows"][0]
+
+    assert best["promotion_eligible"] is False
+    assert best["status"] == "partial"
+    assert payload["champion_profile"] is None
+    assert row["partial"] is True
+    assert row["accuracy"] == 0.25
+    assert row["median_tps"] == 85.0
+    assert row["completed_questions"] == 2
+    assert row["attempted_questions"] == 8
+    attempts_tsv = (tmp_path / "autoresearch-attempts.tsv").read_text(encoding="utf-8")
+    assert "\tpartial\t" in attempts_tsv
+    assert "\tcrash\t" not in attempts_tsv
+    markdown = (receipt.path / "flag-ladder-results.md").read_text(encoding="utf-8")
+    assert "2/8" in markdown
 
 
 def _question_result(tps, ttft, prompt_tps):

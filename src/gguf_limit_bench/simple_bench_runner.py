@@ -113,6 +113,7 @@ class LlamaServerSimpleBenchAttemptRunner:
 
         base_url = f"http://{self.host}:{port}"
         question_results: list[SimpleBenchQuestionResult] = []
+        partial_failure: str | None = None
         stdout = ""
         try:
             ready_at = _wait_until_ready(base_url, process, timeout_seconds=self.timeout_seconds)
@@ -139,6 +140,11 @@ class LlamaServerSimpleBenchAttemptRunner:
                     response=measurement.response,
                     prompt_tokens_per_second=measurement.prompt_tokens_per_second,
                     failure=measurement.failure,
+                    outcome=(
+                        "correct"
+                        if predicted == question.answer
+                        else ("incomplete" if predicted is None else "wrong")
+                    ),
                 )
                 question_results.append(question_result)
                 _append_jsonl(attempt_dir / "transcript.jsonl", question_result.to_dict())
@@ -167,6 +173,8 @@ class LlamaServerSimpleBenchAttemptRunner:
                 simple_bench_accuracy=batch.accuracy,
                 simple_bench_receipt=str(attempt_dir),
                 simple_bench_failure=None if batch.ok else batch.failure,
+                completed_questions=len(question_results),
+                attempted_questions=len(self.questions),
             )
         except TimeoutError as exc:
             stdout, stderr = _flush_and_read_logs(
@@ -174,6 +182,31 @@ class LlamaServerSimpleBenchAttemptRunner:
                 stderr_log=stderr_log,
                 attempt_dir=attempt_dir,
             )
+            if question_results:
+                partial_failure = "budget_exhausted_partial"
+                batch = combine_simple_bench_results(question_results)
+                return AttemptResult(
+                    ok=False,
+                    generation_tokens_per_second=batch.median_tps,
+                    prompt_tokens_per_second=batch.median_prompt_tps,
+                    ttft_ms=batch.median_ttft_ms,
+                    context_size=settings.context_size,
+                    failure=partial_failure,
+                    stdout=stdout[-8000:],
+                    stderr=f"{stderr}\n{exc}"[-8000:],
+                    returncode=process.returncode or 124,
+                    serving_ttft_ms=batch.median_ttft_ms,
+                    serving_tokens_per_second=batch.median_tps,
+                    serving_question_results=[result.to_dict() for result in question_results],
+                    flag_profile=settings.profile_name,
+                    launch_command=command,
+                    simple_bench_score=batch.score,
+                    simple_bench_accuracy=batch.accuracy,
+                    simple_bench_receipt=str(attempt_dir),
+                    simple_bench_failure=partial_failure,
+                    completed_questions=len(question_results),
+                    attempted_questions=len(self.questions),
+                )
             failure = str(exc)
             return self._failed_result(
                 settings=settings,
@@ -213,6 +246,10 @@ class LlamaServerSimpleBenchAttemptRunner:
                 summary = combine_simple_bench_results(question_results).to_dict()
                 summary["settings"] = settings.to_dict()
                 summary["command"] = command
+                summary["status"] = "partial" if partial_failure else "complete"
+                summary["failure"] = partial_failure or summary.get("failure", "none")
+                summary["completed_questions"] = len(question_results)
+                summary["attempted_questions"] = len(self.questions)
                 summary["warning_count"] = warning_count
                 summary["warnings_log"] = str(attempt_dir / "warnings.log")
                 summary["server_tail_log"] = str(attempt_dir / "server-tail.log")
@@ -271,6 +308,8 @@ class LlamaServerSimpleBenchAttemptRunner:
             simple_bench_accuracy=None,
             simple_bench_receipt=str(attempt_dir),
             simple_bench_failure=normalized_failure,
+            completed_questions=0,
+            attempted_questions=len(self.questions),
         )
 
 

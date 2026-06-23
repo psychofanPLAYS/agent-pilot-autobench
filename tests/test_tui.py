@@ -7,6 +7,14 @@ from gguf_limit_bench.modes import RUN_MODES
 from gguf_limit_bench.tui import BenchTui, format_champion_line
 
 
+def _make_model_dir(tmp_path, names: list[str]):
+    model_dir = tmp_path / "models"
+    model_dir.mkdir()
+    for index, name in enumerate(names, start=1):
+        (model_dir / name).write_bytes(b"1" * index)
+    return model_dir
+
+
 def test_tui_loads_models_and_supports_select_all(tmp_path):
     model_dir = tmp_path / "models"
     model_dir.mkdir()
@@ -33,6 +41,74 @@ def test_tui_loads_models_and_supports_select_all(tmp_path):
 
             assert len(app.selection.selected_models()) == 2
             assert "2 selected" in str(status.render())
+
+    asyncio.run(run_tui_check())
+
+
+def test_history_panel_scales_with_terminal_height(tmp_path):
+    model_dir = _make_model_dir(
+        tmp_path,
+        [
+            "Qwen3-Small-Q4_K_M.gguf",
+            "Qwen3-Large-Q4_K_M.gguf",
+        ],
+    )
+
+    async def run_tui_check():
+        small = BenchTui(root=model_dir)
+        async with small.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            small_history_height = small.query_one("#history_box").region.height
+
+        large = BenchTui(root=model_dir)
+        async with large.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            large_history_height = large.query_one("#history_box").region.height
+
+        assert small_history_height >= 3
+        assert large_history_height > small_history_height
+
+    asyncio.run(run_tui_check())
+
+
+def test_history_panel_resize_keys_adjust_and_reset_height(tmp_path):
+    model_dir = _make_model_dir(tmp_path, ["Qwen3-Test-Q4_K_M.gguf"])
+
+    async def run_tui_check():
+        app = BenchTui(root=model_dir)
+        async with app.run_test(size=(100, 40)) as pilot:
+            await pilot.pause()
+            original_height = app.query_one("#history_box").region.height
+
+            await pilot.press("]")
+            await pilot.pause()
+            grown_height = app.query_one("#history_box").region.height
+
+            await pilot.press("[")
+            await pilot.press("0")
+            await pilot.pause()
+            reset_height = app.query_one("#history_box").region.height
+
+            assert grown_height > original_height
+            assert reset_height == original_height
+
+    asyncio.run(run_tui_check())
+
+
+def test_narrow_tui_shows_full_highlighted_model_details(tmp_path):
+    long_name = "Qwen3.6-35B-A3B-Uncensored-Heretic-Native-MTP-Preserved-Q4_K_M.gguf"
+    model_dir = _make_model_dir(tmp_path, [long_name])
+
+    async def run_tui_check():
+        app = BenchTui(root=model_dir)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            table = app.query_one("#models", DataTable)
+            details = app.query_one("#details", Static)
+
+            labels = [str(column.label) for column in table.columns.values()]
+            assert labels == ["Sel", "GB", "Model"]
+            assert long_name in str(details.render())
 
     asyncio.run(run_tui_check())
 

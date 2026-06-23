@@ -15,6 +15,7 @@ from gguf_limit_bench.config import (
 )
 from gguf_limit_bench.discovery import ModelInfo
 from gguf_limit_bench.doctor import DoctorCheck, DoctorReport
+from gguf_limit_bench.programs import MIN_SERIOUS_CONTEXT_SIZE
 
 
 runner = CliRunner()
@@ -43,7 +44,7 @@ class FakeAttemptRunner:
     [
         ("--budget-minutes", "0"),
         ("--max-attempts", "-1"),
-        ("--flag-context-size", "0"),
+        ("--flag-context-size", "4096"),
         ("--simple-bench-max-tokens", "0"),
     ],
 )
@@ -308,7 +309,7 @@ def test_autoresearch_flag_ladder_dry_run_writes_plan_without_runner(tmp_path, m
             "--flag-ladder",
             "--dry-run",
             "--flag-context-size",
-            "8192",
+            str(MIN_SERIOUS_CONTEXT_SIZE),
             "--parallel-max",
             "4",
             "--llama-server-extra-arg=--dry",
@@ -319,9 +320,44 @@ def test_autoresearch_flag_ladder_dry_run_writes_plan_without_runner(tmp_path, m
     run_dirs = list((tmp_path / "runs").iterdir())
     plan = json.loads((run_dirs[0] / "flag-ladder-plan.json").read_text(encoding="utf-8"))
     assert plan["dry_run"] is True
-    assert plan["context_size"] == 8192
+    assert plan["context_size"] == MIN_SERIOUS_CONTEXT_SIZE
     assert plan["profiles"][0]["name"] == "Lmin-stripped"
     assert "--dry" in plan["profiles"][0]["command"]
+
+
+def test_autoresearch_flag_ladder_dry_run_defaults_to_16k_context(tmp_path, monkeypatch):
+    def fail_runner(*args, **kwargs):
+        raise AssertionError("dry run should not create a benchmark runner")
+
+    monkeypatch.setattr("gguf_limit_bench.cli.LlamaServerSimpleBenchAttemptRunner", fail_runner)
+    model = tmp_path / "Qwen3-Test-Q4_K_M.gguf"
+    model.write_bytes(b"fake")
+
+    result = runner.invoke(
+        app,
+        [
+            "autoresearch",
+            "--model",
+            str(model),
+            "--runs-root",
+            str(tmp_path / "runs"),
+            "--llama-server",
+            str(tmp_path / "llama-server.exe"),
+            "--flag-ladder",
+            "--dry-run",
+            "--parallel-max",
+            "4",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    run_dirs = list((tmp_path / "runs").iterdir())
+    plan = json.loads((run_dirs[0] / "flag-ladder-plan.json").read_text(encoding="utf-8"))
+    assert plan["context_size"] == MIN_SERIOUS_CONTEXT_SIZE
+    assert all(
+        profile["settings"]["context_size"] >= MIN_SERIOUS_CONTEXT_SIZE
+        for profile in plan["profiles"]
+    )
 
 
 def test_autoresearch_dry_run_rejects_speed_scout(tmp_path, monkeypatch):
@@ -1245,13 +1281,81 @@ def test_serve_probe_command_prints_real_serving_metrics(tmp_path, monkeypatch):
 
     assert result.exit_code == 0
     assert calls[0]["model"] == model
-    assert calls[0]["settings"].context_size == 8192
+    assert calls[0]["settings"].context_size == 16_384
+    assert calls[0]["settings"].kv_unified is True
+    assert calls[0]["settings"].cache_type_k == "q8_0"
+    assert calls[0]["settings"].cache_type_v == "q8_0"
+    assert "--jinja" in calls[0]["settings"].extra_server_args
+    assert "Context bumped to 16k" in result.output
     assert calls[0]["samples"] == 0
     assert calls[0]["cache_prompt"] is True
     assert "Cold TTFT: 321 ms" in result.output
     assert "Warm TTFT: 111 ms" in result.output
     assert "Warmup penalty: 210 ms" in result.output
     assert "Serving speed: 27.50 tok/s" in result.output
+
+
+def test_serve_probe_command_writes_speed_program_receipt(tmp_path, monkeypatch):
+    class FakeServingProbeResult:
+        ok = True
+        ttft_ms = 250.0
+        tokens_per_second = 88.5
+        warm_ttft_ms = None
+        warm_tokens_per_second = None
+        warmup_penalty_ms = None
+        server_ready_ms = 900.0
+        cold_start_to_first_token_ms = 1150.0
+        ttft_samples_ms = [250.0]
+        tokens_cached_samples = [0]
+        tokens_evaluated_samples = [128]
+        generated_tokens = 420
+        output_chars = 2100
+        failure = "none"
+        stderr_tail = ""
+
+        def to_dict(self):
+            return {
+                "ok": self.ok,
+                "ttft_ms": self.ttft_ms,
+                "tokens_per_second": self.tokens_per_second,
+                "generated_tokens": self.generated_tokens,
+                "output_chars": self.output_chars,
+                "failure": self.failure,
+            }
+
+    monkeypatch.setattr(
+        "gguf_limit_bench.cli.probe_llama_server_ttft",
+        lambda **_kwargs: FakeServingProbeResult(),
+    )
+    model = tmp_path / "Qwen3-Test-Q8_0.gguf"
+    model.write_bytes(b"fake")
+
+    result = runner.invoke(
+        app,
+        [
+            "serve-probe",
+            "--model",
+            str(model),
+            "--runs-root",
+            str(tmp_path / "runs"),
+            "--context-size",
+            "16384",
+            "--max-tokens",
+            "512",
+        ],
+    )
+
+    assert result.exit_code == 0
+    run_dirs = list((tmp_path / "runs").iterdir())
+    assert len(run_dirs) == 1
+    payload = json.loads((run_dirs[0] / "speed-probe.json").read_text(encoding="utf-8"))
+    assert payload["program"] == "speed"
+    assert payload["model"] == str(model)
+    assert payload["settings"]["context_size"] == 16_384
+    assert payload["settings"]["cache_type_k"] == "q8_0"
+    assert payload["result"]["tokens_per_second"] == 88.5
+    assert "500 word poem" in payload["prompt"]
+    assert "Receipt:" in result.output
 
 
 def test_packs_command_lists_builtin_benchmark_packs():
@@ -1472,3 +1576,56 @@ def test_forced_server_args_apply_to_every_flag_ladder_profile(tmp_path):
     assert commanded, "dry-run plan should contain commands"
     for profile in commanded:
         assert "--no-mmap" in profile["command"]
+
+
+def test_effective_forced_args_keep_standard_flags_and_template_choice(monkeypatch):
+    import gguf_limit_bench.cli as cli
+
+    monkeypatch.setattr(cli, "detect_gpu_name", lambda: "NVIDIA GeForce RTX 4090")
+
+    args = cli._effective_forced_server_args(
+        ("--jinja", "--chat-template-file", "G:/templates/qwen.jinja")
+    )
+
+    assert "--flash-attn" in args
+    assert "--kv-unified" in args
+    assert "--cache-type-k" in args
+    assert "--cache-type-v" in args
+    assert "--jinja" in args
+    assert "--chat-template-file" in args
+    assert "G:/templates/qwen.jinja" in args
+
+
+def test_standard_forced_args_do_not_duplicate_managed_flags_in_plan(tmp_path, monkeypatch):
+    import gguf_limit_bench.cli as cli
+    from gguf_limit_bench.evaluation_mode import EvaluationMode
+
+    monkeypatch.setattr(cli, "detect_gpu_name", lambda: "NVIDIA GeForce RTX 4090")
+    model = tmp_path / "m.gguf"
+    model.write_bytes(b"fake")
+
+    receipt = cli._run_one_autoresearch(
+        model=model,
+        llama_bench=tmp_path / "llama-bench.exe",
+        llama_cli=tmp_path / "llama-cli.exe",
+        llama_server=tmp_path / "llama-server.exe",
+        runs_root=tmp_path,
+        budget_seconds=60,
+        parallel_max=2,
+        max_attempts=None,
+        learning=False,
+        workflow_eval=False,
+        ttft_probe=False,
+        evaluation=EvaluationMode.BENCHMARK,
+        flag_ladder=True,
+        dry_run=True,
+        forced_server_args=cli._effective_forced_server_args(),
+    )
+
+    plan = json.loads((receipt.path / "flag-ladder-plan.json").read_text(encoding="utf-8"))
+    command = next(p["command"] for p in plan["profiles"] if p["name"] == "L6-q8-kv")
+    assert command.count("--flash-attn") == 1
+    assert command.count("--gpu-layers") == 1
+    assert command.count("--kv-unified") == 1
+    assert command.count("--cache-type-k") == 1
+    assert command.count("--cache-type-v") == 1

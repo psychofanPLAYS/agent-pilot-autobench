@@ -17,6 +17,14 @@ class TestRecommendedAlwaysOn:
         flags = recommended_always_on("RTX 4090 24GB")
         assert "q8_0" in flags
 
+    def test_4090_flags_include_kv_unified(self):
+        flags = recommended_always_on("RTX 4090")
+        assert "--kv-unified" in flags
+
+    def test_4090_flags_include_jinja_template_engine(self):
+        flags = recommended_always_on("RTX 4090")
+        assert "--jinja" in flags
+
     def test_4090_flags_include_gpu_layers_99(self):
         flags = recommended_always_on("RTX 4090")
         assert "--gpu-layers" in flags

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from gguf_limit_bench.autoresearch import AutoresearchSettings
+from gguf_limit_bench.programs import MIN_SERIOUS_CONTEXT_SIZE
 from gguf_limit_bench.runtime_capabilities import LlamaRuntimeCapabilities
 
 
@@ -27,7 +28,7 @@ class FlagLadderProfile:
 
 def build_core_flag_ladder(
     *,
-    context_size: int = 4096,
+    context_size: int = MIN_SERIOUS_CONTEXT_SIZE,
     parallel_max: int = 6,
     extra_server_args: tuple[str, ...] = (),
     enable_mtp: bool = False,
@@ -109,7 +110,7 @@ def build_core_flag_ladder(
 
 def profile_descriptions(
     *,
-    context_size: int = 4096,
+    context_size: int = MIN_SERIOUS_CONTEXT_SIZE,
     parallel_max: int = 6,
     extra_server_args: tuple[str, ...] = (),
     enable_mtp: bool = False,
@@ -155,9 +156,10 @@ def profile_descriptions(
 def llama_server_args_for_settings(settings: AutoresearchSettings) -> list[str]:
     validate_native_spec_settings(settings)
     args: list[str] = []
+    extra_options = _option_names(settings.extra_server_args)
     if settings.cont_batching:
         args.append("--cont-batching")
-    if settings.kv_unified:
+    if settings.kv_unified and "--kv-unified" not in extra_options:
         args.append("--kv-unified")
     if settings.cache_ram_mb is not None:
         args.extend(["--cache-ram", str(settings.cache_ram_mb)])
@@ -169,9 +171,9 @@ def llama_server_args_for_settings(settings: AutoresearchSettings) -> list[str]:
         args.extend(["--ctx-checkpoints", str(settings.ctx_checkpoints)])
     if settings.checkpoint_min_step is not None:
         args.extend(["--checkpoint-min-step", str(settings.checkpoint_min_step)])
-    if settings.cache_type_k is not None:
+    if settings.cache_type_k is not None and "--cache-type-k" not in extra_options:
         args.extend(["--cache-type-k", settings.cache_type_k])
-    if settings.cache_type_v is not None:
+    if settings.cache_type_v is not None and "--cache-type-v" not in extra_options:
         args.extend(["--cache-type-v", settings.cache_type_v])
     if settings.threads is not None:
         args.extend(["--threads", str(settings.threads)])
@@ -187,6 +189,10 @@ def llama_server_args_for_settings(settings: AutoresearchSettings) -> list[str]:
         args.extend(["--spec-draft-p-min", str(settings.spec_draft_p_min)])
     args.extend(settings.extra_server_args)
     return args
+
+
+def _option_names(args: tuple[str, ...]) -> set[str]:
+    return {arg.split("=", 1)[0] for arg in args if arg.startswith("-")}
 
 
 def validate_native_spec_settings(settings: AutoresearchSettings) -> None:
