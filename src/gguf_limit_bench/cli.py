@@ -1256,6 +1256,7 @@ def _build_learner(
     runs_root: Path,
     model: Path,
     parallel_max: int,
+    objective: str = "throughput",
 ) -> OptunaSettingsLearner | None:
     if not enabled:
         return None
@@ -1263,6 +1264,7 @@ def _build_learner(
         storage_path=runs_root / "learning" / "optuna.sqlite3",
         model=model,
         parallel_max=parallel_max,
+        objective=objective,
     )
     previous = _previous_successful_settings(model, runs_root)
     if previous is not None:
@@ -1378,10 +1380,11 @@ def _run_one_autoresearch(
             timeout_seconds=max(60, budget_seconds),
             max_tokens=simple_bench_max_tokens,
         )
-        learning = False
         workflow_eval = False
         ttft_probe = False
-        max_attempts = max_attempts if max_attempts is not None else len(candidate_sequence)
+        # Walk the ordered ladder first, then (when learning is on) keep searching
+        # with the persistent learner until the time budget runs out. This is what
+        # makes a long/overnight run converge instead of stopping at the ladder.
     else:
         attempt_runner = LlamaBenchAttemptRunner(
             llama_bench=llama_bench,
@@ -1436,7 +1439,13 @@ def _run_one_autoresearch(
         budget_seconds=budget_seconds,
         parallel_max=parallel_max,
         max_attempts=max_attempts,
-        learner=_build_learner(learning, runs_root, model, parallel_max),
+        learner=_build_learner(
+            learning,
+            runs_root,
+            model,
+            parallel_max,
+            objective="accuracy" if flag_ladder else "throughput",
+        ),
         benchmark_suite_plan=(
             BenchmarkSuitePlan.from_path(benchmark_suite_plan)
             if benchmark_suite_plan is not None

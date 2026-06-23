@@ -346,16 +346,24 @@ class AutoresearchLoop:
         while time.monotonic() - started < self.budget_seconds:
             if self.max_attempts is not None and attempt_index >= self.max_attempts:
                 break
-            if self.candidate_sequence is not None and attempt_index >= len(
+            in_ladder = self.candidate_sequence is not None and attempt_index < len(
                 self.candidate_sequence
-            ):
-                break
-            suggestion = self.learner.suggest() if self.learner is not None else None
-            settings = (
-                suggestion.settings
-                if suggestion is not None
-                else self._candidate(best_settings, attempt_index)
             )
+            # The ordered ladder runs first. Without a learner the run ends when the
+            # ladder is exhausted; with a learner it then keeps searching (Optuna)
+            # until the time budget, which is what makes an overnight run converge.
+            if not in_ladder and self.candidate_sequence is not None and self.learner is None:
+                break
+            if in_ladder and self.candidate_sequence is not None:
+                suggestion = None
+                settings = self.candidate_sequence[attempt_index]
+            else:
+                suggestion = self.learner.suggest() if self.learner is not None else None
+                settings = (
+                    suggestion.settings
+                    if suggestion is not None
+                    else self._candidate(best_settings, attempt_index)
+                )
             last_settings = settings
             attempt_index += 1
             receipt.event(

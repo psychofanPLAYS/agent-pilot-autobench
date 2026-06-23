@@ -15,7 +15,7 @@ CONTEXT_CHOICES = [4096, 8192, 16384, 32768, 65536, 131072]
 BATCH_CHOICES = [512, 1024, 2048, 4096]
 UBATCH_CHOICES = [128, 256, 512, 1024]
 GPU_LAYER_CHOICES = [99, 80, 60, 40]
-LEARNING_SCORE_VERSION = "score-v3-4k-serving-suite"
+LEARNING_SCORE_VERSION = "score-v4-simplebench"
 
 
 @dataclass(frozen=True)
@@ -31,11 +31,12 @@ class OptunaSettingsLearner:
         model: Path,
         parallel_max: int,
         seed: int = 4090,
+        objective: str = "throughput",
     ) -> None:
         self.storage_path = storage_path
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
         self.study = optuna.create_study(
-            study_name=study_name_for_model(model),
+            study_name=study_name_for_model(model, objective),
             storage=_sqlite_url(storage_path),
             direction="maximize",
             sampler=optuna.samplers.TPESampler(seed=seed),
@@ -96,10 +97,10 @@ class OptunaSettingsLearner:
         }
 
 
-def study_name_for_model(model: Path) -> str:
+def study_name_for_model(model: Path, objective: str = "throughput") -> str:
     stable = hashlib.sha1(str(model).lower().encode("utf-8")).hexdigest()[:12]
     slug = re.sub(r"[^a-zA-Z0-9_-]+", "-", model.stem).strip("-")[:60]
-    return f"gguf-{LEARNING_SCORE_VERSION}-{slug}-{stable}"
+    return f"gguf-{LEARNING_SCORE_VERSION}-{objective}-{slug}-{stable}"
 
 
 def _sqlite_url(path: Path) -> str:

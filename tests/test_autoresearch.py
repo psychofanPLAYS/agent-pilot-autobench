@@ -791,3 +791,96 @@ def test_autoresearch_loop_caps_each_attempt_to_round_seconds(tmp_path):
 
     assert timeouts, "the loop should set a per-attempt timeout"
     assert all(timeout <= 300 for timeout in timeouts)
+
+
+def test_loop_runs_ladder_first_then_learner_until_budget(tmp_path):
+    # Overnight convergence: the ordered ladder runs first, then the learner keeps
+    # proposing configs until the budget (here bounded by max_attempts).
+    from gguf_limit_bench.learning import LearningSuggestion
+
+    seen_profiles: list[str] = []
+
+    class FakeLearner:
+        def __init__(self) -> None:
+            self.told = 0
+
+        def suggest(self) -> LearningSuggestion:
+            return LearningSuggestion(
+                trial_id=self.told,
+                settings=AutoresearchSettings(profile_name="learner"),
+            )
+
+        def tell(self, suggestion, result) -> None:
+            self.told += 1
+
+        def best(self):
+            return None
+
+    def fake_runner(settings: AutoresearchSettings) -> AttemptResult:
+        seen_profiles.append(settings.profile_name)
+        return AttemptResult(
+            ok=True,
+            generation_tokens_per_second=10.0,
+            prompt_tokens_per_second=1.0,
+            ttft_ms=None,
+            context_size=settings.context_size,
+            failure="none",
+            stdout="{}",
+            stderr="",
+            returncode=0,
+        )
+
+    ladder = (
+        AutoresearchSettings(profile_name="L0"),
+        AutoresearchSettings(profile_name="L1"),
+    )
+    loop = AutoresearchLoop(
+        model=Path("G:/AI/models/Qwen3-Test-Q4_K_M.gguf"),
+        runs_root=tmp_path,
+        attempt_runner=fake_runner,
+        budget_seconds=60,
+        parallel_max=1,
+        max_attempts=4,
+        learner=FakeLearner(),
+        candidate_sequence=ladder,
+    )
+    loop.run()
+
+    assert seen_profiles[:2] == ["L0", "L1"]
+    assert seen_profiles[2:] == ["learner", "learner"]
+
+
+def test_loop_without_learner_stops_after_ladder(tmp_path):
+    seen: list[str] = []
+
+    def fake_runner(settings: AutoresearchSettings) -> AttemptResult:
+        seen.append(settings.profile_name)
+        return AttemptResult(
+            ok=True,
+            generation_tokens_per_second=10.0,
+            prompt_tokens_per_second=1.0,
+            ttft_ms=None,
+            context_size=settings.context_size,
+            failure="none",
+            stdout="{}",
+            stderr="",
+            returncode=0,
+        )
+
+    ladder = (
+        AutoresearchSettings(profile_name="L0"),
+        AutoresearchSettings(profile_name="L1"),
+    )
+    loop = AutoresearchLoop(
+        model=Path("G:/AI/models/Qwen3-Test-Q4_K_M.gguf"),
+        runs_root=tmp_path,
+        attempt_runner=fake_runner,
+        budget_seconds=60,
+        parallel_max=1,
+        max_attempts=10,
+        learner=None,
+        candidate_sequence=ladder,
+    )
+    loop.run()
+
+    assert seen == ["L0", "L1"]
