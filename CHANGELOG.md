@@ -12,6 +12,19 @@ semantic versioning for published versions.
 - MTP draft-profile experiments for models explicitly identified as MTP-capable.
 - Package-contained, MIT-licensed SimpleBench public data with upstream provenance.
 - Architecture/code map, contributor guide, security policy, and release-quality CI job.
+- Goal-shaped cockpit run modes (Quick check, Find best settings, How flags affect
+  speed, Context limits, Deep / overnight, Custom), cycled with the `M` key, plus a
+  champion verdict line shown when a run finishes.
+- Prefill/prompt-processing throughput, generation-speed variance (stddev), and TTFT
+  p90/p99 tail latency on the question path, with a server warmup before the scored batch.
+- `Lmin-stripped` bare-minimum ladder baseline (no flash-attn, no continuous batching)
+  to test whether removing standard flags helps or hurts; `--parallel` is now tested
+  last as a concurrency-capability axis (`Lpar-2`, `Lpar-3`).
+- `forced_server_args` config option (and `PILOTBENCH_FORCED_SERVER_ARGS`) to force raw
+  llama-server flags on for every benchmark profile.
+- Overnight convergence: after the ordered flag ladder, a persistent per-model Optuna
+  study keeps searching (accuracy-first) until the time budget and warm-starts the next
+  session.
 
 ### Changed
 
@@ -20,12 +33,31 @@ semantic versioning for published versions.
 - One SimpleBench attempt now shares a bounded deadline across its question batch.
 - Package metadata and CLI help now use a consistent public product description.
 - The codebase is checked by MyPy in addition to Ruff, pytest, compilation, and builds.
+- Asking the SimpleBench questions through `llama-server` is now the default; the fast
+  synthetic `llama-bench` scout is opt-in via `--speed-scout`.
+- Autoresearch follows Karpathy's fixed 5-minute round; each attempt is capped at the
+  round, and cockpit-mode budgets are expressed as round multiples.
+- Speed flags are measured at single stream; `--parallel` is evaluated last as
+  concurrency capability rather than mixed into the single-stream tok/s ranking.
+- Default SimpleBench generation budget raised to 4096 tokens, the answer extractor
+  accepts more real-world answer formats, and the system prompt demands the final-answer
+  line — so reasoning models actually reach and record an answer.
+- `--dry-run` now plans the flag ladder in the benchmark default and is only rejected
+  when combined with `--speed-scout`.
+- Learning studies are tagged by objective (accuracy vs throughput) and the score
+  version is bumped to `score-v4-simplebench`.
 
 ### Fixed
 
+- The cockpit and default `autoresearch` run now actually ask the model the benchmark
+  questions; previously the TUI and default path ran the synthetic `llama-bench` probe
+  and asked nothing.
+- Prefill/prompt throughput is captured from `llama-server` timings instead of being
+  hardcoded to `0.0`.
+- Tests are isolated from a developer's machine `PILOTBENCH_*` environment variables so a
+  local setup (real model/llama paths) can no longer break the suite.
 - Revised final answers are scored using the latest explicit answer marker.
 - Accuracy now always outranks throughput; speed is only a bounded tie-breaker.
-- `--dry-run` cannot fall through to a real benchmark without `--flag-ladder`.
 - Budget-limited ladders are marked partial, suppress a champion, and bound each
   server attempt to the remaining run budget. Partial evidence is excluded from
   project-wide champion promotion.
