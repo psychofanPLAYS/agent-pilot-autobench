@@ -208,3 +208,30 @@ def test_format_lifetime_line_contains_expected_parts():
     assert "50 seen" in result
     assert "31 correct" in result
     assert "62%" in result
+
+
+def test_active_run_status_reports_questions(tmp_path):
+    from gguf_limit_bench.tui import active_run_status
+
+    run = tmp_path / "20260623-0700-somemodel"
+    sub = run / "simplebench-Lmin-stripped"
+    sub.mkdir(parents=True)
+    (run / "events.jsonl").write_text(
+        '{"type":"autoresearch_attempt_started","data":{"settings":{"profile_name":"Lmin-stripped"}}}\n',
+        encoding="utf-8",
+    )
+    (sub / "transcript.jsonl").write_text(
+        '{"question_id":1,"correct":true,"predicted_answer":"B"}\n'
+        '{"question_id":2,"correct":false,"predicted_answer":"A"}\n',
+        encoding="utf-8",
+    )
+    status = active_run_status(tmp_path)
+    assert status is not None
+    assert "Lmin-stripped" in status
+    assert "asked 2Q" in status and "1 correct" in status
+
+
+def test_active_run_status_none_when_empty(tmp_path):
+    from gguf_limit_bench.tui import active_run_status
+
+    assert active_run_status(tmp_path) is None

@@ -25,17 +25,6 @@ from gguf_limit_bench.telemetry import TelemetrySnapshot, sample_telemetry
 RunModelCallback = Callable[[ModelInfo], Path]
 
 
-BANNER = r"""
-                              pilotBENCHY
-       _ __      __  ____  ______   ____  ______  _   __  ______  __  ____  __
-      (_) /___  / /_/ __ )/ ____/  / __ )/ ____/ / | / / / ____/ / / / / / / /
-     / / / __ \/ __/ __  / __/    / __  / __/   /  |/ / / /     / /_/ / /_/ /
-    / / / /_/ / /_/ /_/ / /___   / /_/ / /___  / /|  / / /___  / __  / __  /
-   /_/_/ .___/\__/_____/_____/  /_____/_____/ /_/ |_/  \____/ /_/ /_/_/ /_/
-      /_/
-"""
-
-
 @dataclass
 class TelemetryStats:
     count: int = 0
@@ -73,18 +62,21 @@ class TelemetryStats:
 
 
 class BenchTui(App):
+    # Layout is sized to fit a standard 80x24 terminal: the model table flexes
+    # (1fr) and takes whatever space the slim fixed-height panels leave, so the
+    # picker and the live dashboard are always on-screen.
     CSS = """
     Screen { background: #0f1117; color: #d6deeb; }
     Header, Footer { background: #151923; color: #d6deeb; }
     Static { color: #d6deeb; }
-    DataTable { height: 2fr; }
-    #banner { height: 8; padding: 0 1; color: #f2c94c; }
-    #telemetry { height: 5; padding: 1; border: solid #3a4a5c; }
-    #menu { height: 7; padding: 1; border: solid #293241; }
-    #status { height: 3; padding: 1; }
-    #history_box { height: 10; border: solid #293241; }
-    #history { padding: 1; }
-    #dashboard { height: 7; padding: 1; border: solid #293241; }
+    DataTable { height: 1fr; min-height: 4; }
+    #banner { height: 1; color: #f2c94c; text-style: bold; }
+    #telemetry { height: 1; color: #8fa3bf; }
+    #status { height: 2; }
+    #history_box { height: 3; }
+    #history { color: #8fa3bf; }
+    #dashboard { height: 6; padding: 0 1; border: solid #293241; }
+    #progress { height: 1; }
     """
     BINDINGS = [
         ("space", "toggle_model", "Toggle"),
@@ -128,9 +120,10 @@ class BenchTui(App):
     def compose(self) -> ComposeResult:
         yield Header()
         with Vertical():
-            yield Static(BANNER, id="banner")
+            yield Static(
+                "pilotBENCHY — local GGUF + llama.cpp autobench", id="banner"
+            )
             yield Static("Sampling hardware telemetry...", id="telemetry")
-            yield Static(self._menu_text(), id="menu")
             yield Static("Loading GGUF models...", id="status")
             yield DataTable(id="models")
             with VerticalScroll(id="history_box"):
@@ -149,6 +142,9 @@ class BenchTui(App):
         self._refresh_table()
         self._refresh_telemetry()
         self.set_interval(5, self._refresh_telemetry)
+        # Live run progress: while a benchmark is running, poll the active run dir
+        # so the user actually sees questions being asked instead of a frozen screen.
+        self.set_interval(1.5, self._refresh_run_progress)
 
     def action_toggle_model(self) -> None:
         if self.phase != "selecting":
@@ -354,6 +350,16 @@ class BenchTui(App):
         self.query_one("#dashboard", Static).update(self._dashboard_text(message))
         self.query_one("#progress", ProgressBar).update(progress=progress)
 
+    def _refresh_run_progress(self) -> None:
+        if self.phase != "testing":
+            return
+        status = active_run_status(self.runs_root)
+        if status:
+            try:
+                self.query_one("#dashboard", Static).update(self._dashboard_text(status))
+            except Exception:  # noqa: BLE001 - UI refresh must never crash the run
+                pass
+
     def _history_text(self) -> str:
         return truncated_previous_runs_text(self.runs_root)
 
@@ -364,6 +370,67 @@ class BenchTui(App):
         snapshot = sample_telemetry()
         self.telemetry_stats.add(snapshot)
         self.query_one("#telemetry", Static).update(_telemetry_text(snapshot, self.telemetry_stats))
+
+
+def active_run_status(runs_root: Path) -> str | None:
+    """Build a one-line live-progress string from the most recent run dir.
+
+    Reads the active run's ``events.jsonl`` for the current profile and the
+    newest ``transcript.jsonl`` for how many questions have been asked/scored,
+    so the cockpit can show real progress instead of a frozen screen. Returns
+    None when there is no run dir yet; never raises.
+    """
+    try:
+        dirs = [p for p in runs_root.glob("*") if p.is_dir()]
+    except OSError:
+        return None
+    if not dirs:
+        return None
+    newest = max(dirs, key=lambda p: p.stat().st_mtime)
+
+    profile: str | None = None
+    events = newest / "events.jsonl"
+    if events.exists():
+        try:
+            for line in events.read_text(encoding="utf-8").splitlines():
+                data = json.loads(line).get("data", {})
+                settings = data.get("settings")
+                if isinstance(settings, dict) and settings.get("profile_name"):
+                    profile = settings["profile_name"]
+                elif data.get("profile_name"):
+                    profile = data["profile_name"]
+        except (OSError, ValueError):
+            pass
+
+    asked = correct = 0
+    last_pred: str | None = None
+    transcripts = sorted(
+        newest.glob("**/transcript.jsonl"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if transcripts:
+        try:
+            for line in transcripts[0].read_text(encoding="utf-8").splitlines():
+                row = json.loads(line)
+                asked += 1
+                if row.get("correct") or row.get("outcome") == "correct":
+                    correct += 1
+                last_pred = row.get("predicted_answer", last_pred)
+        except (OSError, ValueError):
+            pass
+
+    parts = [f"Running: {newest.name[:44]}"]
+    if profile:
+        parts.append(f"profile {profile}")
+    if asked:
+        tail = f"asked {asked}Q · {correct} correct"
+        if last_pred:
+            tail += f" · last={last_pred}"
+        parts.append(tail)
+    else:
+        parts.append("launching server / warming up…")
+    return "  ·  ".join(parts)
 
 
 def _newest_results_json(runs_root: Path) -> Path | None:
@@ -414,17 +481,14 @@ def format_lifetime_line(pack_id: str, stats: dict) -> str:
 def _telemetry_text(snapshot: TelemetrySnapshot, stats: TelemetryStats) -> str:
     gpu_memory = "n/a"
     if snapshot.gpu_used_mb is not None and snapshot.gpu_total_mb is not None:
-        gpu_memory = f"{snapshot.gpu_used_mb}/{snapshot.gpu_total_mb} MB"
+        gpu_memory = f"{snapshot.gpu_used_mb}/{snapshot.gpu_total_mb}MB"
+    gpu_util = snapshot.gpu_util_percent if snapshot.gpu_util_percent is not None else "n/a"
+    # Single compact line so the panel fits in one terminal row.
     return (
-        "Hardware monitor\n"
-        f"CPU now {snapshot.cpu_used_percent:.0f}% | min/avg/max "
-        f"{stats.cpu_min:.0f}/{stats.avg_cpu():.0f}/{stats.cpu_max:.0f}%    "
-        f"RAM now {snapshot.ram_used_percent:.0f}% | min/avg/max "
-        f"{stats.ram_min:.0f}/{stats.avg_ram():.0f}/{stats.ram_max:.0f}%\n"
-        f"GPU now {snapshot.gpu_util_percent if snapshot.gpu_util_percent is not None else 'n/a'}% "
-        f"| min/avg/max {stats.gpu_min:.0f}/{stats.avg_gpu():.0f}/{stats.gpu_max:.0f}%    "
-        f"VRAM {gpu_memory}    Swap {snapshot.swap_used_percent:.0f}%    "
-        f"Disk R/W {snapshot.disk_read_mb:.0f}/{snapshot.disk_write_mb:.0f} MB"
+        f"CPU {snapshot.cpu_used_percent:.0f}%  "
+        f"RAM {snapshot.ram_used_percent:.0f}%  "
+        f"GPU {gpu_util}%  VRAM {gpu_memory}  "
+        f"Swap {snapshot.swap_used_percent:.0f}%"
     )
 
 
