@@ -47,6 +47,24 @@ After first run adds the repo-local `_bin` folder to your user PATH, new termina
 apb --start
 ```
 
+## Cockpit Modes
+
+`apb --start` (or double-clicking `FIRST_RUN.bat` after setup) opens the cockpit.
+Pick model(s) with the arrow keys and Space, press **M** to choose a mode, then
+press Enter to run:
+
+- **Quick check** — does it load, and how fast? No questions asked (fast scout).
+- **Find best settings** — walk the flag ladder, ask the questions, crown the best settings.
+- **How flags affect speed** — see how each llama.cpp flag changes tok/s and TTFT.
+- **Context limits** — how much context fits, and how long context affects tok/s.
+- **Deep / overnight** — everything, big budget; keeps searching and converging.
+- **Custom** — you choose the time.
+
+Each mode maps to a time budget (measured in Andrej Karpathy's fixed 5-minute
+rounds), whether the SimpleBench questions are asked, and which ladders run. The
+cockpit shows the active mode, live per-question progress, and the champion
+(best model and its best settings) when a run finishes.
+
 ## What Setup Creates
 
 The setup command prepares only local project state:
@@ -60,15 +78,28 @@ It also runs the doctor checks for model folders and llama.cpp executables. If a
 
 ## What The App Measures
 
-- load success or failure
-- prompt and generation throughput
-- context size and runtime settings
-- cold and warm serving TTFT when `llama-server` probing is enabled
-- workflow smoke scores when workflow evaluation is enabled
-- benchmark-suite scores when a suite plan is provided
-- failure class such as timeout, model load failure, crash, GPU OOM, or memory allocation failure
+By default a run **asks the model the bundled 10-question SimpleBench set through
+`llama-server`, one question at a time with a fresh session each, and scores the
+answers against the key** — so the result reflects reasoning, not just speed. For
+each runtime profile it records:
 
-The optimizer follows the simple Karpathy-style loop: fixed budget, one measured score, small setting changes, keep the change only when the recorded score improves.
+- answer accuracy (accuracy-first; speed is only a tiebreaker)
+- generation throughput (tok/s) and **prefill / prompt-processing throughput** (tok/s)
+- generation-speed stability (stddev) and TTFT, including p90/p99 tail latency
+- context size and the exact llama.cpp flags used
+- load success or failure, and failure class (timeout, model-load failure, crash,
+  GPU OOM, memory allocation failure)
+- workflow smoke scores and benchmark-suite scores when those are enabled
+
+The loop follows Karpathy's autoresearch pattern — a fixed time budget per round,
+one comparable score, keep a change only when the score improves, durable receipts
+— and walks an ordered llama.cpp flag ladder first. When learning is on and the
+budget allows (a long or overnight run), it then keeps searching with a
+**persistent per-model Optuna study** that warm-starts from the previous session,
+so each run starts smarter and converges toward the best settings.
+
+For a fast "does it load and roughly how fast" check that asks no questions, use
+`--speed-scout` (or the **Quick check** cockpit mode).
 
 ## Results
 
@@ -111,12 +142,20 @@ agent-autobench results --open-browser
 agent-autobench results --serve
 agent-autobench benchmark-suite-plans
 agent-autobench benchmark-suite --plan benchmarks\plans\local-openai-smoke.plan.json
-agent-autobench autoresearch --model "path\to\model.gguf" --budget-minutes 5
-agent-autobench autoresearch --model "path\to\model.gguf" --flag-ladder --dry-run
-agent-autobench autoresearch --model "path\to\model.gguf" --llama-server "path\to\llama-server.exe" --flag-ladder --budget-minutes 20 --parallel-max 6
+agent-autobench autoresearch --model "path\to\model.gguf" --llama-server "path\to\llama-server.exe" --budget-minutes 20
+agent-autobench autoresearch --model "path\to\model.gguf" --speed-scout --budget-minutes 5
+agent-autobench autoresearch --model "path\to\model.gguf" --llama-server "path\to\llama-server.exe" --dry-run
+agent-autobench autoresearch --model "path\to\model.gguf" --llama-server "path\to\llama-server.exe" --parallel-max 6
 agent-autobench autoresearch --model "path\to\model.gguf" --context-ladder 4096 --context-ladder 8192 --context-ladder 16384
 agent-autobench autoresearch --model "path\to\model.gguf" --perplexity-corpus "path\to\corpus.txt" --perplexity-context 4096 --perplexity-context 8192
 ```
+
+By default `autoresearch` runs in **benchmark mode**: it asks the SimpleBench
+questions through `llama-server` and walks the flag ladder, so it needs
+`--llama-server`. Add `--speed-scout` for the fast synthetic `llama-bench` probe
+that asks no questions. `--dry-run` writes the launch plan without starting a
+server. The older `--flag-ladder` flag is kept as a compatibility alias for the
+benchmark default.
 
 The short alias `apb` is created by setup for people who prefer a smaller command. The older `pilotbench` command remains available for compatibility.
 
@@ -132,15 +171,24 @@ Defaults are repo-relative so the project can be unpacked anywhere:
 
 Override paths and defaults in the single repo-root `_CONFIG.toml`, with environment variables, or with CLI options.
 
-Important defaults in `_CONFIG.toml`:
+Important settings in `_CONFIG.toml`:
 
-- `default_preset = "deep"` for long, evidence-heavy runs by default
-- `learning = true`
+- `learning = true` so long runs keep searching and remember across sessions
 - `workflow_eval = true`
 - `ttft_probe = true`
+- `parallel_max = 4` caps the parallel slots the capability test will try
+- `forced_server_args = []` — raw llama-server flags forced ON for every benchmark
+  profile (e.g. `["--no-mmap"]`); managed flags like `--host`/`--port`/`--model`
+  are rejected
 - `perplexity_corpus = ""` until you choose a local quality-test corpus
 
-Useful environment variables:
+The cockpit now drives runs by **mode** (see Cockpit Modes above). The older
+`default_preset` still applies to non-cockpit code paths but the mode you pick in
+the TUI takes precedence there.
+
+Keep your machine-specific paths out of the tracked `_CONFIG.toml` (it ships with
+repo-relative defaults). Set them with environment variables instead, which the
+`apb setup` flow can persist for you:
 
 ```text
 PILOTBENCH_MODEL_ROOTS
@@ -151,6 +199,7 @@ PILOTBENCH_LLAMA_PERPLEXITY
 PILOTBENCH_RUNS_ROOT
 PILOTBENCH_DEFAULT_PRESET
 PILOTBENCH_PARALLEL_MAX
+PILOTBENCH_FORCED_SERVER_ARGS
 ```
 
 To inspect resolved paths:
@@ -165,8 +214,9 @@ Speed-only tests are useful for scouting, but they are not enough to prove agent
 
 The metric contract is intentionally practical:
 
-- TTFT: cold and warm first-token latency from `llama-server`
-- TPS: generation speed from `llama-bench` and reliable serving samples
+- TTFT: first-token latency from `llama-server`, with p90/p99 tail latency
+- TPS: generation speed plus prompt/prefill throughput from `llama-server`, with
+  generation-speed stability (stddev) across the question batch
 - context growth: 4K upward through larger context tiers
 - falloff: token/sec retention as context grows
 - perplexity falloff: optional `llama-perplexity` profile over a fixed corpus
@@ -189,25 +239,36 @@ Autoresearch can optimize against the same suite score:
 agent-autobench autoresearch --model "path\to\model.gguf" --benchmark-suite-plan benchmarks\plans\local-openai-smoke.plan.json
 ```
 
-For an immediately useful local comparison, run the llama.cpp flag ladder
-against the 10-question SimpleBench public set:
+The flag ladder is what a benchmark-mode run does by default: it starts one
+benchmark-owned `llama-server` per flag profile and asks the same 10 SimpleBench
+questions in the same order, recording `transcript.jsonl` and `summary.json` and
+picking the best settings by accuracy first, speed second.
 
 ```powershell
-agent-autobench autoresearch --model "path\to\model.gguf" --flag-ladder --dry-run
-agent-autobench autoresearch --model "path\to\model.gguf" --llama-server "path\to\llama-server.exe" --flag-ladder --budget-minutes 20 --parallel-max 6
+agent-autobench autoresearch --model "path\to\model.gguf" --dry-run
+agent-autobench autoresearch --model "path\to\model.gguf" --llama-server "path\to\llama-server.exe" --budget-minutes 20 --parallel-max 6
 ```
 
-`--dry-run` writes the launch plan without starting a server. The live run
-starts one benchmark-owned `llama-server` process per flag profile, asks the
-same 10 questions, records `transcript.jsonl` and `summary.json`, and picks the
-best settings by accuracy first and speed second. Extra llama.cpp flags can be
-tested with repeatable `--llama-server-extra-arg=...`.
+`--dry-run` writes the launch plan without starting a server. The ladder walks
+rungs in order: a stripped bare-minimum baseline (`Lmin-stripped`), then the
+standard flags one at a time (`--kv-unified`, RAM cache, cache reuse, context
+checkpoints, q8 KV, a thread sweep) — all at single stream so the tok/s
+comparison is clean. Concurrency (`--parallel`) is a capability axis rather than
+a single-stream speed axis, so it is measured **last** (`Lpar-2`, `Lpar-3`). When
+the model filename signals preserved MTP heads and the local llama.cpp build
+supports them, the ladder adds one native speculative profile using
+`--spec-type draft-mtp --spec-draft-n-max` (not the removed `--draft-max`). Extra
+flags can be tested with repeatable `--llama-server-extra-arg=...`, and
+`forced_server_args` in `_CONFIG.toml` forces flags on for every profile.
 
-The generated `flag-ladder-results.md` shows each independent flag ablation's
-TPS slowdown versus baseline, TTFT, strict answer accuracy, warnings, and exact
-receipt. MTP-named models automatically add native `--draft-max 8/16/32`
-profiles. Full server logs are retained, with short `warnings.log` and
-`server-tail.log` files for quick review.
+The generated `flag-ladder-results.md` shows each profile's answer accuracy,
+generation tok/s, prefill tok/s, slowdown versus the `L0-baseline`, TTFT,
+warnings, and exact receipt. Full server logs are retained, with short
+`warnings.log` and `server-tail.log` files for quick review.
+
+On a long or overnight run, once the ladder is walked the loop keeps searching
+with a persistent per-model Optuna study, so it converges toward the best settings
+and starts smarter next session.
 
 For context scaling evidence, add a fixed ladder:
 
@@ -215,8 +276,9 @@ For context scaling evidence, add a fixed ladder:
 agent-autobench autoresearch --model "path\to\model.gguf" --context-ladder 4096 --context-ladder 8192 --context-ladder 16384 --context-ladder 32768
 ```
 
-Normal, deep, and overnight presets also carry context ladder targets. Quick
-Scout stays small so first runs do not unexpectedly become long tests.
+The Context limits and Deep / overnight cockpit modes carry context-ladder
+targets; Quick check stays small so a first run does not unexpectedly become a
+long test.
 
 For quality falloff evidence, add a fixed corpus and perplexity ladder:
 
@@ -272,9 +334,11 @@ then builds and installs the wheel in an isolated environment. See
 ## Project Status
 
 Agent Pilot Autobench is an **alpha release candidate**. Its offline release gates,
-packaging, dry-run orchestration, and mocked server lifecycle are automated. A live
-flag-ladder sweep on representative GGUF models and current llama.cpp binaries is the
-remaining hardware acceptance gate before a stable release is considered.
+packaging, dry-run orchestration, and mocked server lifecycle are automated, and a
+live benchmark run — asking and scoring the SimpleBench set through `llama-server`
+across the flag ladder — has been exercised on local GGUF models and current
+llama.cpp binaries. Broader live sweeps across more models and hardware remain the
+path to a stable release.
 
 ## Limitations
 
