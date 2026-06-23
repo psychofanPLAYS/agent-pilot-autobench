@@ -14,3 +14,6 @@ __pycache__/
 /_models/
 /_llama/
 *.pyc
+
+# scratch / dogfooding helpers (not part of the app)
+/_scratch_*
