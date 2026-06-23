@@ -1,6 +1,14 @@
 import json
 
+import pytest
+
 from gguf_limit_bench.packs import BUILTIN_PACK_IDS, BenchmarkPack, load_benchmark_packs
+from gguf_limit_bench.packs import (
+    AnswerType,
+    DEFAULT_PACKS,
+    available_packs,
+    load_pack,
+)
 
 
 def test_builtin_benchmark_packs_cover_autoresearch_plan():
@@ -34,3 +42,44 @@ def test_user_pack_manifest_is_loaded_and_versioned(tmp_path):
 
     assert isinstance(packs["private-pack"], BenchmarkPack)
     assert packs["private-pack"].version == "2026.05.26"
+
+
+# ---------------------------------------------------------------------------
+# QuestionPack tests (Task 1)
+# ---------------------------------------------------------------------------
+
+
+def test_load_simple_bench_question_pack():
+    pack = load_pack("simple-bench")
+
+    assert pack.answer_type is AnswerType.MULTIPLE_CHOICE
+    assert len(pack.questions) == 10
+    assert all(q.prompt for q in pack.questions)
+    assert all(q.answer for q in pack.questions)
+
+
+def test_load_easy_gotcha_question_pack():
+    pack = load_pack("easy-gotcha")
+
+    assert pack.answer_type is AnswerType.EXACT
+    assert len(pack.questions) >= 20
+    assert all(q.answer_source == "curated_fact" for q in pack.questions)
+
+
+def test_load_easy_mc_question_pack():
+    pack = load_pack("easy-mc")
+
+    assert pack.answer_type is AnswerType.MULTIPLE_CHOICE
+    assert len(pack.questions) >= 20
+    assert all(q.answer_source.startswith("dataset_label:") for q in pack.questions)
+
+
+def test_available_packs_covers_default_packs():
+    packs = available_packs()
+
+    assert set(DEFAULT_PACKS) <= set(packs)
+
+
+def test_load_pack_raises_key_error_for_unknown_id():
+    with pytest.raises(KeyError):
+        load_pack("nope")

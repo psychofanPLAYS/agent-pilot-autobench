@@ -3,7 +3,202 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
+import re
 from typing import Any
+
+try:
+    from enum import StrEnum
+except ImportError:  # Python < 3.11
+    from enum import Enum
+
+    class StrEnum(str, Enum):  # type: ignore[no-redef]
+        pass
+
+
+class AnswerType(StrEnum):
+    MULTIPLE_CHOICE = "multiple_choice"
+    EXACT = "exact"
+
+
+@dataclass(frozen=True)
+class PackQuestion:
+    question_id: str
+    prompt: str
+    answer: str
+    answer_source: str
+    choices: tuple[str, ...] | None = None
+    tags: tuple[str, ...] = ()
+    accept: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class QuestionPack:
+    pack_id: str
+    title: str
+    tier: str
+    answer_type: AnswerType
+    system_prompt: str
+    questions: tuple[PackQuestion, ...]
+
+
+_DATA_DIR = Path(__file__).resolve().parent / "data"
+_PACKS_DIR = _DATA_DIR / "packs"
+
+DEFAULT_PACKS: tuple[str, ...] = ("simple-bench", "easy-gotcha", "easy-mc")
+
+
+def available_packs() -> tuple[str, ...]:
+    """Return IDs of all available question packs."""
+    dynamic: list[str] = []
+    if _PACKS_DIR.exists():
+        for path in sorted(_PACKS_DIR.glob("*.json")):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                if "pack_id" in payload:
+                    dynamic.append(str(payload["pack_id"]))
+            except (OSError, json.JSONDecodeError):
+                pass
+    known = list(DEFAULT_PACKS)
+    for pid in dynamic:
+        if pid not in known:
+            known.append(pid)
+    return tuple(known)
+
+
+def load_pack(pack_id: str) -> QuestionPack:
+    """Load a QuestionPack by id.
+
+    Raises KeyError if the pack is not found.
+    """
+    if pack_id == "simple-bench":
+        return _load_simple_bench()
+
+    pack_path = _PACKS_DIR / f"{pack_id}.json"
+    if not pack_path.exists():
+        raise KeyError(f"Unknown question pack: {pack_id!r}")
+
+    payload = json.loads(pack_path.read_text(encoding="utf-8"))
+    if payload.get("pack_id") != pack_id:
+        raise KeyError(f"Unknown question pack: {pack_id!r}")
+
+    return _load_json_pack(payload, pack_path)
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+def _load_simple_bench() -> QuestionPack:
+    data_path = _DATA_DIR / "simple_bench_public.json"
+    system_prompt_path = _DATA_DIR / "system_prompt.txt"
+
+    payload = json.loads(data_path.read_text(encoding="utf-8"))
+    rows = payload["eval_data"]
+    system_prompt = system_prompt_path.read_text(encoding="utf-8").strip()
+
+    questions: list[PackQuestion] = []
+    for row in rows:
+        qid = str(row["question_id"])
+        questions.append(
+            PackQuestion(
+                question_id=qid,
+                prompt=str(row["prompt"]).strip(),
+                answer=str(row["answer"]).strip().upper(),
+                answer_source=f"dataset_label:simple-bench",
+                choices=None,
+                tags=(),
+                accept=(),
+            )
+        )
+
+    return QuestionPack(
+        pack_id="simple-bench",
+        title="SimpleBench Public",
+        tier="hard",
+        answer_type=AnswerType.MULTIPLE_CHOICE,
+        system_prompt=system_prompt,
+        questions=tuple(questions),
+    )
+
+
+def _derive_answer_source(question_id: str, answer_type: AnswerType) -> str:
+    if answer_type is AnswerType.EXACT:
+        return "curated_fact"
+    # dataset_label:<prefix up to first run of digits>
+    match = re.match(r"^(.*?)(\d)", question_id)
+    if match:
+        prefix = match.group(1).rstrip("-_")
+    else:
+        prefix = question_id
+    return f"dataset_label:{prefix}"
+
+
+def _load_json_pack(payload: dict[str, Any], pack_path: Path) -> QuestionPack:
+    pack_id = str(payload["pack_id"])
+    title = str(payload.get("title", pack_id))
+    tier = str(payload.get("tier", "unknown"))
+    answer_type = AnswerType(str(payload["answer_type"]))
+
+    # Resolve system_prompt: look in packs dir first, then data dir
+    system_prompt_ref = payload.get("system_prompt_ref")
+    if system_prompt_ref:
+        sp_path = pack_path.parent / system_prompt_ref
+        if not sp_path.exists():
+            sp_path = pack_path.parent.parent / system_prompt_ref
+        system_prompt = sp_path.read_text(encoding="utf-8").strip()
+    else:
+        system_prompt = str(payload.get("system_prompt", ""))
+
+    raw_questions: list[dict[str, Any]] = payload.get("questions", [])
+    questions: list[PackQuestion] = []
+    for raw in raw_questions:
+        qid = str(raw["question_id"])
+        choices_raw: list[str] | None = raw.get("choices")
+        choices: tuple[str, ...] | None = tuple(str(c) for c in choices_raw) if choices_raw else None
+        tags: tuple[str, ...] = tuple(str(t) for t in raw.get("tags", []))
+        accept: tuple[str, ...] = tuple(str(a) for a in raw.get("accept", []))
+        answer = str(raw["answer"]).strip()
+        if answer_type is AnswerType.MULTIPLE_CHOICE:
+            answer = answer.upper()
+
+        answer_source = str(raw.get("answer_source", "")) or _derive_answer_source(qid, answer_type)
+
+        # Validate MC questions
+        if answer_type is AnswerType.MULTIPLE_CHOICE:
+            if not choices:
+                raise ValueError(
+                    f"Pack {pack_id!r} question {qid!r}: MC question must have non-empty choices"
+                )
+            if len(answer) != 1 or answer not in "ABCDEF":
+                raise ValueError(
+                    f"Pack {pack_id!r} question {qid!r}: MC answer must be a single letter A-F"
+                )
+            letter_index = ord(answer) - ord("A")
+            if letter_index >= len(choices):
+                raise ValueError(
+                    f"Pack {pack_id!r} question {qid!r}: answer {answer!r} out of range for choices"
+                )
+
+        questions.append(
+            PackQuestion(
+                question_id=qid,
+                prompt=str(raw["prompt"]).strip(),
+                answer=answer,
+                answer_source=answer_source,
+                choices=choices,
+                tags=tags,
+                accept=accept,
+            )
+        )
+
+    return QuestionPack(
+        pack_id=pack_id,
+        title=title,
+        tier=tier,
+        answer_type=answer_type,
+        system_prompt=system_prompt,
+        questions=tuple(questions),
+    )
 
 
 @dataclass(frozen=True)
