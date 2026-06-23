@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
+import sqlite3
 from typing import Callable
 
 from textual.app import App, ComposeResult
@@ -16,6 +18,7 @@ from gguf_limit_bench.run_history import truncated_previous_runs_text
 from gguf_limit_bench.run_config import PRESETS, RunConfig
 from gguf_limit_bench.selection import SelectionState
 from gguf_limit_bench.selection_memory import load_last_selected_paths, save_last_selected_models
+import gguf_limit_bench.state_db as state_db
 from gguf_limit_bench.telemetry import TelemetrySnapshot, sample_telemetry
 
 
@@ -258,9 +261,35 @@ class BenchTui(App):
         board = write_leaderboard(self.runs_root)
         name = board.champion.model_name if board.entries else None
         score = board.champion.score if board.entries else None
+        message = format_champion_line(name, score)
+
+        # Append per-pack scoreboard from the newest results.json, if present.
+        extra_lines: list[str] = []
+        try:
+            results_json = _newest_results_json(self.runs_root)
+            if results_json is not None:
+                payload = json.loads(results_json.read_text(encoding="utf-8"))
+                packs = payload.get("packs", [])
+                extra_lines.append(format_scoreboard(packs))
+                model_key = payload.get("model", "")
+                db_path = self.runs_root / "state.db"
+                if model_key and db_path.exists():
+                    with sqlite3.connect(db_path) as conn:
+                        for pack in packs:
+                            pack_id = pack.get("pack_id", "")
+                            if pack_id:
+                                stats = state_db.lifetime_pack_stats(conn, model_key, pack_id)
+                                if stats["seen"]:
+                                    extra_lines.append(format_lifetime_line(pack_id, stats))
+        except Exception:  # noqa: BLE001 — don't crash the TUI
+            pass
+
+        if extra_lines:
+            message = message + "\n" + "\n".join(extra_lines)
+
         self.call_from_thread(
             self.query_one("#dashboard", Static).update,
-            self._dashboard_text(format_champion_line(name, score)),
+            self._dashboard_text(message),
         )
 
     def _refresh_table(self, keep_row: int = 0) -> None:
@@ -337,10 +366,49 @@ class BenchTui(App):
         self.query_one("#telemetry", Static).update(_telemetry_text(snapshot, self.telemetry_stats))
 
 
+def _newest_results_json(runs_root: Path) -> Path | None:
+    """Return the results.json from the most recently modified run dir, or None."""
+    candidates = sorted(
+        runs_root.glob("*/results.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return candidates[0] if candidates else None
+
+
 def format_champion_line(model_name: str | None, score: float | None) -> str:
     if model_name is None or score is None:
         return "Champion: not decided yet"
     return f"Champion: {model_name} ({score:.2f})"
+
+
+def format_scoreboard(per_pack: list[dict]) -> str:
+    """Format a one-line scoreboard from per-pack result dicts.
+
+    Each dict must contain: pack_id, correct, asked, incomplete.
+    Returns e.g. ``"simple-bench 2/5 · easy-gotcha 4/5 (1 incomplete)"``.
+    Returns ``"no packs scored"`` for an empty list.
+    """
+    if not per_pack:
+        return "no packs scored"
+    parts = [f"{p['pack_id']} {p['correct']}/{p['asked']}" for p in per_pack]
+    total_incomplete = sum(int(p.get("incomplete", 0)) for p in per_pack)
+    line = " · ".join(parts)
+    if total_incomplete > 0:
+        line += f" ({total_incomplete} incomplete)"
+    return line
+
+
+def format_lifetime_line(pack_id: str, stats: dict) -> str:
+    """Format a one-line lifetime stats string for a single pack.
+
+    *stats* must contain: seen, correct, accuracy (float 0–1).
+    Returns e.g. ``"lifetime: easy-gotcha 50 seen · 31 correct (62%)"``.
+    """
+    seen = int(stats.get("seen", 0))
+    correct = int(stats.get("correct", 0))
+    pct = int(round(float(stats.get("accuracy", 0.0)) * 100))
+    return f"lifetime: {pack_id} {seen} seen · {correct} correct ({pct}%)"
 
 
 def _telemetry_text(snapshot: TelemetrySnapshot, stats: TelemetryStats) -> str:

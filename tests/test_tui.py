@@ -168,3 +168,43 @@ def test_tui_m_key_cycles_run_mode(tmp_path):
 def test_champion_line_formats():
     assert format_champion_line("QwenX", 950.0) == "Champion: QwenX (950.00)"
     assert format_champion_line(None, None) == "Champion: not decided yet"
+
+
+# ---------------------------------------------------------------------------
+# Pure formatter unit tests (no Textual App required)
+# ---------------------------------------------------------------------------
+
+from gguf_limit_bench.tui import format_scoreboard, format_lifetime_line  # noqa: E402
+
+
+def test_format_scoreboard_two_packs_one_incomplete():
+    result = format_scoreboard(
+        [
+            {"pack_id": "simple-bench", "correct": 2, "asked": 5, "incomplete": 0},
+            {"pack_id": "easy-gotcha", "correct": 4, "asked": 5, "incomplete": 1},
+        ]
+    )
+    assert "simple-bench 2/5" in result
+    assert "easy-gotcha 4/5" in result
+    assert "(1 incomplete)" in result
+
+
+def test_format_scoreboard_no_incomplete_suffix_when_zero():
+    result = format_scoreboard(
+        [
+            {"pack_id": "simple-bench", "correct": 2, "asked": 5, "incomplete": 0},
+        ]
+    )
+    assert "incomplete" not in result
+
+
+def test_format_scoreboard_empty_list():
+    assert format_scoreboard([]) == "no packs scored"
+
+
+def test_format_lifetime_line_contains_expected_parts():
+    result = format_lifetime_line("easy-gotcha", {"seen": 50, "correct": 31, "accuracy": 0.62})
+    assert "easy-gotcha" in result
+    assert "50 seen" in result
+    assert "31 correct" in result
+    assert "62%" in result
