@@ -83,3 +83,29 @@ def test_available_packs_covers_default_packs():
 def test_load_pack_raises_key_error_for_unknown_id():
     with pytest.raises(KeyError):
         load_pack("nope")
+
+
+# ---------------------------------------------------------------------------
+# Task 8: easy-gotcha pack hardening tests
+# ---------------------------------------------------------------------------
+
+
+def test_easy_gotcha_does_not_contain_staircase_steps():
+    pack = load_pack("easy-gotcha")
+
+    ids = {q.question_id for q in pack.questions}
+    assert "staircase-steps" not in ids
+
+
+def test_easy_gotcha_sister_riddle_has_accept_variants():
+    pack = load_pack("easy-gotcha")
+
+    sister = next(q for q in pack.questions if q.question_id == "sister-riddle")
+    assert len(sister.accept) > 0
+
+
+def test_easy_gotcha_doctor_riddle_has_accept_variants():
+    pack = load_pack("easy-gotcha")
+
+    doctor = next(q for q in pack.questions if q.question_id == "doctor-riddle")
+    assert len(doctor.accept) > 0

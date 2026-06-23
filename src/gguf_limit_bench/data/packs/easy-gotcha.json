@@ -41,18 +41,21 @@
       "question_id": "sister-riddle",
       "prompt": "A man has no brothers or sisters. He looks at a photograph and says: \"That person's father is my father's son.\" Who is in the photograph?",
       "answer": "his son",
+      "accept": ["his son", "son", "the man's son", "a boy"],
       "tags": ["riddle", "family"]
     },
     {
       "question_id": "rooster-egg",
       "prompt": "If a rooster lays an egg on top of a pointed roof, which side does the egg roll down?",
       "answer": "roosters don't lay eggs",
+      "accept": ["roosters don't lay eggs", "roosters do not lay eggs", "none", "neither", "it doesn't", "trick question", "no egg"],
       "tags": ["trick", "logic"]
     },
     {
       "question_id": "doctor-riddle",
       "prompt": "A father and his son are in a car accident. The father dies at the scene. The son is rushed to the hospital and the doctor says: \"I cannot operate on this boy, he is my son.\" How is this possible?",
       "answer": "the doctor is his mother",
+      "accept": ["mother", "his mother", "the doctor is his mother", "mom", "his mom"],
       "tags": ["riddle", "logic"]
     },
     {
@@ -77,6 +80,7 @@
       "question_id": "two-coins",
       "prompt": "I have two coins that add up to 30 cents. One of them is not a nickel. What are the two coins?",
       "answer": "a quarter and a nickel",
+      "accept": ["a quarter and a nickel", "quarter and nickel", "nickel and quarter", "a nickel and a quarter"],
       "tags": ["riddle", "trick"]
     },
     {
@@ -89,13 +93,8 @@
       "question_id": "word-incorrectly",
       "prompt": "What is the only word that is spelled incorrectly in every dictionary?",
       "answer": "incorrectly",
+      "accept": ["incorrectly"],
       "tags": ["trick", "wordplay"]
-    },
-    {
-      "question_id": "staircase-steps",
-      "prompt": "If you go up a staircase that has 10 steps, you climb over how many steps?",
-      "answer": "10",
-      "tags": ["arithmetic", "trick"]
     },
     {
       "question_id": "age-riddle",
@@ -149,6 +148,7 @@
       "question_id": "yesterday-tomorrow",
       "prompt": "When does tomorrow come before yesterday?",
       "answer": "in a dictionary",
+      "accept": ["in a dictionary", "dictionary", "the dictionary", "alphabetically"],
       "tags": ["riddle", "wordplay"]
     },
     {
