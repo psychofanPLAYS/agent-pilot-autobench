@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from gguf_limit_bench.autoresearch import parse_llama_bench_jsonl
+from gguf_limit_bench.discovery import is_non_generative_gguf
 from gguf_limit_bench.evidence import display_status, evidence_status, normalize_success_failure
 
 
@@ -85,6 +86,10 @@ def build_leaderboard(runs_root: Path) -> Leaderboard:
         result = _normalized_result(payload)
         settings = payload.get("settings", {})
         model_path = str(payload.get("model", ""))
+        # Never let a non-LLM (embedding/reranker/query-expansion/etc.) become a
+        # champion via a stale historical receipt — they should never be benchmarked.
+        if model_path and is_non_generative_gguf(Path(model_path)):
+            continue
         ok = bool(result.get("ok", False))
         failure = normalize_success_failure(ok, str(result.get("failure", "unknown")))
         context = int(settings.get("context_size") or 0)

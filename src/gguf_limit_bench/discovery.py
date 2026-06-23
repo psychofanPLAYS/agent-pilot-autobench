@@ -29,9 +29,18 @@ _NON_GENERATIVE_MARKERS = (
 )
 
 
-def _is_non_generative(path: Path) -> bool:
+def is_non_generative_gguf(path: Path) -> bool:
+    """True if *path* looks like a non-chat GGUF (embedding/reranker/QE/imatrix/mmproj).
+
+    Used both to keep these out of model discovery and to keep them from ever
+    appearing as a champion in the leaderboard (which scans historical receipts).
+    """
     haystack = str(path).lower()
     return any(marker in haystack for marker in _NON_GENERATIVE_MARKERS)
+
+
+def _is_non_generative(path: Path) -> bool:  # backwards-compatible alias
+    return is_non_generative_gguf(path)
 
 
 @dataclass(frozen=True)

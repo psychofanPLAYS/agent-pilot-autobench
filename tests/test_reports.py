@@ -338,3 +338,13 @@ def test_write_leaderboard_writes_model_level_comparison_report(tmp_path):
     assert payload[0]["model_name"] == "winner.gguf"
     assert payload[0]["run_count"] == 1
     assert payload[0]["browser_report_path"].endswith("report.html")
+
+
+def test_leaderboard_excludes_non_generative_models(tmp_path):
+    # A real LLM and a stale query-expansion receipt both present.
+    _write_run(tmp_path, "Qwen3.5-4B-Q8_0", 120.0, 120.0)
+    _write_run(tmp_path, "qmd-query-expansion-qwen3.5-2B.Q8_0", 999.0, 999.0)
+    leaderboard = build_leaderboard(tmp_path)
+    names = [e.model_name for e in leaderboard.entries]
+    assert all("query-expansion" not in n for n in names)
+    assert any("Qwen3.5-4B" in n for n in names)
