@@ -7,6 +7,17 @@ semantic versioning for published versions.
 
 ### Added
 
+- **Let models think — no output cap during evaluation.** Both the pack runner and
+  the simple-bench runner now send `n_predict: -1` by default, so a reasoning model
+  generates until it stops on its own (bounded only by the request timeout) instead of
+  being truncated mid-thought at 4096 tokens. System prompts updated to "take as much
+  reasoning as you need" while still requiring a `Final Answer:` line. Verified live on
+  a real 4090: Gemma-4-E2B reasons through "Rs in STRAWBERRY" and answers correctly.
+- **Self-contained, user-extendable question packs.** Each pack JSON in
+  `data/packs/` now carries its own `system_prompt` inline (loaded with the questions
+  every time) alongside its questions and answers. Drop a new `*.json` in that folder
+  and it is picked up automatically — documented in `data/packs/README.md`.
+
 - **Ascending, OOM-resilient context-limit search.** New `apb context-limit --model X`
   climbs the context ladder from 16k upward (never launches a huge context first),
   using a q8_0 KV cache by default (nobody benchmarks f16). When a tier fails to

@@ -34,6 +34,11 @@ _FORCED_FINAL_INSTRUCTION = (
 )
 _FORCED_FINAL_MAX_TOKENS = 64
 
+# 0 (or any value <= 0) means "do not cap the answer" — let a reasoning model
+# think for as long as it needs and stop on its own. The per-request timeout is
+# the only bound, so a model that never stops still can't hang the run.
+UNLIMITED_THINKING = 0
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -44,7 +49,7 @@ def run_pack_questions(
     *,
     pack: QuestionPack,
     questions: list[PackQuestion],
-    answer_max_tokens: int = 4096,
+    answer_max_tokens: int = UNLIMITED_THINKING,
     base_url: str,
     timeout_seconds: int = 600,
 ) -> SimpleBenchBatchResult:
@@ -59,7 +64,9 @@ def run_pack_questions(
         The subset of questions to run (typically the full
         ``pack.questions`` or a sampled slice).
     answer_max_tokens:
-        Token budget for the primary response.  Defaults to 4096.
+        Token budget for the primary response.  Defaults to unlimited
+        (``UNLIMITED_THINKING``) so reasoning models are never truncated
+        mid-thought; the per-request timeout is the only bound.
     base_url:
         Base URL of the running llama-server, e.g.
         ``"http://127.0.0.1:8080"``.
@@ -169,17 +176,20 @@ def _chat(
 
     On network error returns empty text with zero metrics.
     """
-    payload = json.dumps(
-        {
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content},
-            ],
-            "stream": True,
-            "max_tokens": max_tokens,
-            "temperature": 0,
-        }
-    ).encode("utf-8")
+    body: dict[str, object] = {
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ],
+        "stream": True,
+        "temperature": 0,
+    }
+    if max_tokens > 0:
+        body["max_tokens"] = max_tokens
+    else:
+        # llama.cpp: n_predict = -1 means generate until EOS (let it think).
+        body["n_predict"] = -1
+    payload = json.dumps(body).encode("utf-8")
     request = Request(
         f"{base_url}/v1/chat/completions",
         data=payload,

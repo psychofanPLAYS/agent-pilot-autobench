@@ -3,7 +3,7 @@
   "title": "Well-known LLM gotchas (exact answers)",
   "tier": "easy",
   "answer_type": "exact",
-  "system_prompt_ref": "system_prompt_exact.txt",
+  "system_prompt": "You are an expert at reasoning and you always give the most accurate answer. Think step by step and take as much reasoning as you need; do not rush. You MUST finish with a line in exactly this format: Final Answer: X where X is your answer (a word, number, or short phrase). Do not stop before writing that final line.",
   "source": "curated, web-sourced well-known LLM gotchas",
   "license": "questions are common-knowledge facts; see LICENSES.md",
   "questions": [
@@ -11,151 +11,253 @@
       "question_id": "straw-r",
       "prompt": "How many times does the letter R appear in the word STRAWBERRY?",
       "answer": "3",
-      "tags": ["counting", "letters"]
+      "tags": [
+        "counting",
+        "letters"
+      ]
     },
     {
       "question_id": "straw-total",
       "prompt": "How many letters are in the word STRAWBERRY?",
       "answer": "10",
-      "tags": ["counting", "letters"]
+      "tags": [
+        "counting",
+        "letters"
+      ]
     },
     {
       "question_id": "dec-compare-9",
       "prompt": "Which is larger: 9.11 or 9.9?",
       "answer": "9.9",
-      "tags": ["decimal", "comparison"]
+      "tags": [
+        "decimal",
+        "comparison"
+      ]
     },
     {
       "question_id": "dec-compare-8",
       "prompt": "Which is larger: 8.11 or 8.9?",
       "answer": "8.9",
-      "tags": ["decimal", "comparison"]
+      "tags": [
+        "decimal",
+        "comparison"
+      ]
     },
     {
       "question_id": "float-sort",
       "prompt": "Sort these numbers from smallest to largest: 9.9, 9.11, 9.1",
       "answer": "9.1, 9.11, 9.9",
-      "tags": ["decimal", "sorting"]
+      "tags": [
+        "decimal",
+        "sorting"
+      ]
     },
     {
       "question_id": "sister-riddle",
       "prompt": "A man has no brothers or sisters. He looks at a photograph and says: \"That person's father is my father's son.\" Who is in the photograph?",
       "answer": "his son",
-      "accept": ["his son", "son", "the man's son", "a boy"],
-      "tags": ["riddle", "family"]
+      "accept": [
+        "his son",
+        "son",
+        "the man's son",
+        "a boy"
+      ],
+      "tags": [
+        "riddle",
+        "family"
+      ]
     },
     {
       "question_id": "rooster-egg",
       "prompt": "If a rooster lays an egg on top of a pointed roof, which side does the egg roll down?",
       "answer": "roosters don't lay eggs",
-      "accept": ["roosters don't lay eggs", "roosters do not lay eggs", "none", "neither", "it doesn't", "trick question", "no egg"],
-      "tags": ["trick", "logic"]
+      "accept": [
+        "roosters don't lay eggs",
+        "roosters do not lay eggs",
+        "none",
+        "neither",
+        "it doesn't",
+        "trick question",
+        "no egg"
+      ],
+      "tags": [
+        "trick",
+        "logic"
+      ]
     },
     {
       "question_id": "doctor-riddle",
       "prompt": "A father and his son are in a car accident. The father dies at the scene. The son is rushed to the hospital and the doctor says: \"I cannot operate on this boy, he is my son.\" How is this possible?",
       "answer": "the doctor is his mother",
-      "accept": ["mother", "his mother", "the doctor is his mother", "mom", "his mom"],
-      "tags": ["riddle", "logic"]
+      "accept": [
+        "mother",
+        "his mother",
+        "the doctor is his mother",
+        "mom",
+        "his mom"
+      ],
+      "tags": [
+        "riddle",
+        "logic"
+      ]
     },
     {
       "question_id": "months-28",
       "prompt": "How many months have 28 days?",
       "answer": "12",
-      "tags": ["trick", "calendar"]
+      "tags": [
+        "trick",
+        "calendar"
+      ]
     },
     {
       "question_id": "word-few",
       "prompt": "How many letters are in the phrase \"the alphabet\"?",
       "answer": "11",
-      "tags": ["counting", "trick"]
+      "tags": [
+        "counting",
+        "trick"
+      ]
     },
     {
       "question_id": "half-of-twelve",
       "prompt": "What is half of twelve?",
       "answer": "6",
-      "tags": ["arithmetic"]
+      "tags": [
+        "arithmetic"
+      ]
     },
     {
       "question_id": "two-coins",
       "prompt": "I have two coins that add up to 30 cents. One of them is not a nickel. What are the two coins?",
       "answer": "a quarter and a nickel",
-      "accept": ["a quarter and a nickel", "quarter and nickel", "nickel and quarter", "a nickel and a quarter"],
-      "tags": ["riddle", "trick"]
+      "accept": [
+        "a quarter and a nickel",
+        "quarter and nickel",
+        "nickel and quarter",
+        "a nickel and a quarter"
+      ],
+      "tags": [
+        "riddle",
+        "trick"
+      ]
     },
     {
       "question_id": "divide-30",
       "prompt": "You have 30 sick sheep and one sheep dies. How many sheep do you have left?",
       "answer": "29",
-      "tags": ["arithmetic", "trick", "homophones"]
+      "tags": [
+        "arithmetic",
+        "trick",
+        "homophones"
+      ]
     },
     {
       "question_id": "word-incorrectly",
       "prompt": "What is the only word that is spelled incorrectly in every dictionary?",
       "answer": "incorrectly",
-      "accept": ["incorrectly"],
-      "tags": ["trick", "wordplay"]
+      "accept": [
+        "incorrectly"
+      ],
+      "tags": [
+        "trick",
+        "wordplay"
+      ]
     },
     {
       "question_id": "age-riddle",
       "prompt": "Tom's father is three times as old as Tom. In 12 years Tom's father will be twice as old as Tom. How old is Tom now?",
       "answer": "12",
-      "tags": ["arithmetic", "algebra"]
+      "tags": [
+        "arithmetic",
+        "algebra"
+      ]
     },
     {
       "question_id": "banana-count",
       "prompt": "How many letters are in the word BANANA?",
       "answer": "6",
-      "tags": ["counting", "letters"]
+      "tags": [
+        "counting",
+        "letters"
+      ]
     },
     {
       "question_id": "mississippi-s",
       "prompt": "How many times does the letter S appear in MISSISSIPPI?",
       "answer": "4",
-      "tags": ["counting", "letters"]
+      "tags": [
+        "counting",
+        "letters"
+      ]
     },
     {
       "question_id": "mississippi-i",
       "prompt": "How many times does the letter I appear in MISSISSIPPI?",
       "answer": "4",
-      "tags": ["counting", "letters"]
+      "tags": [
+        "counting",
+        "letters"
+      ]
     },
     {
       "question_id": "bookshelf-worm",
       "prompt": "A bookworm starts eating from the front cover of volume 1 and eats straight through to the back cover of volume 2. If each book is 2 inches thick plus 0.25-inch covers on each side, and the books are on a shelf in order, how far does the worm travel?",
       "answer": "0.5",
-      "tags": ["riddle", "spatial"]
+      "tags": [
+        "riddle",
+        "spatial"
+      ]
     },
     {
       "question_id": "friday-born",
       "prompt": "A woman is born in 1980, is currently 43 years old, and her birthday is not today. What year does she turn 44?",
       "answer": "2024",
-      "tags": ["arithmetic", "dates"]
+      "tags": [
+        "arithmetic",
+        "dates"
+      ]
     },
     {
       "question_id": "pencil-letters",
       "prompt": "How many letters are in the word PENCIL?",
       "answer": "6",
-      "tags": ["counting", "letters"]
+      "tags": [
+        "counting",
+        "letters"
+      ]
     },
     {
       "question_id": "zero-point-nine",
       "prompt": "Which number is larger: 0.999 or 1?",
       "answer": "1",
-      "tags": ["decimal", "comparison"]
+      "tags": [
+        "decimal",
+        "comparison"
+      ]
     },
     {
       "question_id": "yesterday-tomorrow",
       "prompt": "When does tomorrow come before yesterday?",
       "answer": "in a dictionary",
-      "accept": ["in a dictionary", "dictionary", "the dictionary", "alphabetically"],
-      "tags": ["riddle", "wordplay"]
+      "accept": [
+        "in a dictionary",
+        "dictionary",
+        "the dictionary",
+        "alphabetically"
+      ],
+      "tags": [
+        "riddle",
+        "wordplay"
+      ]
     },
     {
       "question_id": "multiply-by-zero",
       "prompt": "What is 99 multiplied by 0?",
       "answer": "0",
-      "tags": ["arithmetic"]
+      "tags": [
+        "arithmetic"
+      ]
     }
   ]
 }

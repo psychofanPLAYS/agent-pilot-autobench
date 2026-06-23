@@ -3,7 +3,7 @@
   "title": "Easy multiple-choice (ARC-Easy / OpenBookQA / CommonsenseQA sample)",
   "tier": "easy",
   "answer_type": "multiple_choice",
-  "system_prompt_ref": "system_prompt.txt",
+  "system_prompt": "You are an expert at reasoning and you always pick the most realistic answer. Think step by step and take as much reasoning as you need; do not rush. You MUST finish with a line in exactly this format: Final Answer: X where X is one of the letters A, B, C, D, E, or F. Do not stop before writing that final line.",
   "source": "frozen sample: ARC-Easy (allenai/ai2_arc, ARC-Easy/train, rows 0-24), OpenBookQA (allenai/openbookqa, main/train, rows 0-24), CommonsenseQA (tau/commonsense_qa, default/train, rows 0-14)",
   "license": "see LICENSES.md",
   "questions": [
@@ -17,7 +17,11 @@
         "several viral particles on the skin",
         "carbohydrates being digested in the stomach"
       ],
-      "tags": ["arc-easy", "science", "biology"]
+      "tags": [
+        "arc-easy",
+        "science",
+        "biology"
+      ]
     },
     {
       "question_id": "arc-easy-0002",
@@ -29,7 +33,11 @@
         "protection",
         "water"
       ],
-      "tags": ["arc-easy", "science", "biology"]
+      "tags": [
+        "arc-easy",
+        "science",
+        "biology"
+      ]
     },
     {
       "question_id": "arc-easy-0003",
@@ -41,7 +49,11 @@
         "cause the current to change direction.",
         "stop and start the flow of current."
       ],
-      "tags": ["arc-easy", "science", "physics"]
+      "tags": [
+        "arc-easy",
+        "science",
+        "physics"
+      ]
     },
     {
       "question_id": "arc-easy-0004",
@@ -53,7 +65,11 @@
         "neutralizes digestive acid.",
         "occurs naturally in the body."
       ],
-      "tags": ["arc-easy", "science", "chemistry"]
+      "tags": [
+        "arc-easy",
+        "science",
+        "chemistry"
+      ]
     },
     {
       "question_id": "arc-easy-0005",
@@ -65,7 +81,11 @@
         "skeletal and respiratory",
         "respiratory and digestive"
       ],
-      "tags": ["arc-easy", "science", "biology"]
+      "tags": [
+        "arc-easy",
+        "science",
+        "biology"
+      ]
     },
     {
       "question_id": "arc-easy-0006",
@@ -77,7 +97,11 @@
         "freezing",
         "evaporating"
       ],
-      "tags": ["arc-easy", "science", "chemistry"]
+      "tags": [
+        "arc-easy",
+        "science",
+        "chemistry"
+      ]
     },
     {
       "question_id": "arc-easy-0007",
@@ -89,7 +113,11 @@
         "magma",
         "quartz"
       ],
-      "tags": ["arc-easy", "science", "earth-science"]
+      "tags": [
+        "arc-easy",
+        "science",
+        "earth-science"
+      ]
     },
     {
       "question_id": "arc-easy-0008",
@@ -101,7 +129,11 @@
         "the stomach, with churning and acid.",
         "the esophagus, with pushing towards the stomach."
       ],
-      "tags": ["arc-easy", "science", "biology"]
+      "tags": [
+        "arc-easy",
+        "science",
+        "biology"
+      ]
     },
     {
       "question_id": "arc-easy-0009",
@@ -113,7 +145,11 @@
         "It would be mostly carnivorous beetles.",
         "It would be mostly very large beetles."
       ],
-      "tags": ["arc-easy", "science", "evolution"]
+      "tags": [
+        "arc-easy",
+        "science",
+        "evolution"
+      ]
     },
     {
       "question_id": "obqa-0001",
@@ -125,7 +161,10 @@
         "flowers wilting in a vase",
         "plants sprouting, blooming and wilting"
       ],
-      "tags": ["openbookqa", "science"]
+      "tags": [
+        "openbookqa",
+        "science"
+      ]
     },
     {
       "question_id": "obqa-0002",
@@ -137,7 +176,11 @@
         "great balls of gas burning billions of miles away",
         "lights in the sky"
       ],
-      "tags": ["openbookqa", "science", "astronomy"]
+      "tags": [
+        "openbookqa",
+        "science",
+        "astronomy"
+      ]
     },
     {
       "question_id": "obqa-0003",
@@ -149,7 +192,11 @@
         "a house",
         "a car"
       ],
-      "tags": ["openbookqa", "science", "biology"]
+      "tags": [
+        "openbookqa",
+        "science",
+        "biology"
+      ]
     },
     {
       "question_id": "obqa-0004",
@@ -161,7 +208,11 @@
         "the headlights remain at a constant",
         "the headlights turn off"
       ],
-      "tags": ["openbookqa", "science", "physics"]
+      "tags": [
+        "openbookqa",
+        "science",
+        "physics"
+      ]
     },
     {
       "question_id": "obqa-0005",
@@ -173,7 +224,11 @@
         "radiation experiments",
         "celestial music"
       ],
-      "tags": ["openbookqa", "science", "astronomy"]
+      "tags": [
+        "openbookqa",
+        "science",
+        "astronomy"
+      ]
     },
     {
       "question_id": "obqa-0006",
@@ -185,7 +240,11 @@
         "nuts",
         "leaves"
       ],
-      "tags": ["openbookqa", "science", "biology"]
+      "tags": [
+        "openbookqa",
+        "science",
+        "biology"
+      ]
     },
     {
       "question_id": "obqa-0007",
@@ -197,7 +256,11 @@
         "it floats",
         "it hardens"
       ],
-      "tags": ["openbookqa", "science", "chemistry"]
+      "tags": [
+        "openbookqa",
+        "science",
+        "chemistry"
+      ]
     },
     {
       "question_id": "obqa-0008",
@@ -209,7 +272,11 @@
         "a plastic cup",
         "a paper plate"
       ],
-      "tags": ["openbookqa", "science", "physics"]
+      "tags": [
+        "openbookqa",
+        "science",
+        "physics"
+      ]
     },
     {
       "question_id": "obqa-0009",
@@ -221,7 +288,11 @@
         "bat",
         "scorpion"
       ],
-      "tags": ["openbookqa", "science", "biology"]
+      "tags": [
+        "openbookqa",
+        "science",
+        "biology"
+      ]
     },
     {
       "question_id": "csqa-0001",
@@ -234,7 +305,10 @@
         "apartment",
         "roadblock"
       ],
-      "tags": ["csqa", "commonsense"]
+      "tags": [
+        "csqa",
+        "commonsense"
+      ]
     },
     {
       "question_id": "csqa-0002",
@@ -247,7 +321,10 @@
         "atlas",
         "oceans"
       ],
-      "tags": ["csqa", "commonsense"]
+      "tags": [
+        "csqa",
+        "commonsense"
+      ]
     },
     {
       "question_id": "csqa-0003",
@@ -260,7 +337,10 @@
         "storybook",
         "dense forest"
       ],
-      "tags": ["csqa", "commonsense"]
+      "tags": [
+        "csqa",
+        "commonsense"
+      ]
     },
     {
       "question_id": "csqa-0004",
@@ -273,7 +353,10 @@
         "television",
         "desk"
       ],
-      "tags": ["csqa", "commonsense"]
+      "tags": [
+        "csqa",
+        "commonsense"
+      ]
     },
     {
       "question_id": "csqa-0005",
@@ -286,7 +369,10 @@
         "fridge",
         "coach"
       ],
-      "tags": ["csqa", "commonsense"]
+      "tags": [
+        "csqa",
+        "commonsense"
+      ]
     },
     {
       "question_id": "csqa-0006",
@@ -299,7 +385,10 @@
         "desk drawer",
         "blotter"
       ],
-      "tags": ["csqa", "commonsense"]
+      "tags": [
+        "csqa",
+        "commonsense"
+      ]
     },
     {
       "question_id": "csqa-0007",
@@ -312,7 +401,10 @@
         "fruit basket",
         "fruit market"
       ],
-      "tags": ["csqa", "commonsense"]
+      "tags": [
+        "csqa",
+        "commonsense"
+      ]
     },
     {
       "question_id": "csqa-0008",
@@ -325,7 +417,10 @@
         "living room",
         "garden"
       ],
-      "tags": ["csqa", "commonsense"]
+      "tags": [
+        "csqa",
+        "commonsense"
+      ]
     }
   ]
 }

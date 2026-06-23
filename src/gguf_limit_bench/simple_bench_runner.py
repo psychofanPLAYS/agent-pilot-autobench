@@ -309,17 +309,21 @@ def measure_simple_bench_completion(
     max_tokens: int,
     timeout_seconds: int,
 ) -> CompletionMeasurement:
-    payload = json.dumps(
-        {
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": question.prompt},
-            ],
-            "stream": True,
-            "max_tokens": max_tokens,
-            "temperature": 0,
-        }
-    ).encode("utf-8")
+    body: dict[str, object] = {
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": question.prompt},
+        ],
+        "stream": True,
+        "temperature": 0,
+    }
+    if max_tokens > 0:
+        body["max_tokens"] = max_tokens
+    else:
+        # n_predict = -1: let a reasoning model think to its own stop, bounded
+        # only by the request timeout (see UNLIMITED_THINKING in pack_runner).
+        body["n_predict"] = -1
+    payload = json.dumps(body).encode("utf-8")
     request = Request(
         f"{base_url}/v1/chat/completions",
         data=payload,
