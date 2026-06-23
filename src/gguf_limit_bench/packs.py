@@ -104,7 +104,7 @@ def _load_simple_bench() -> QuestionPack:
                 question_id=qid,
                 prompt=str(row["prompt"]).strip(),
                 answer=str(row["answer"]).strip().upper(),
-                answer_source=f"dataset_label:simple-bench",
+                answer_source="dataset_label:simple-bench",
                 choices=None,
                 tags=(),
                 accept=(),
