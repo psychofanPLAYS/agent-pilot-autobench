@@ -23,6 +23,11 @@ from gguf_limit_bench.autoresearch import (
     LlamaPerplexityRunner,
 )
 from gguf_limit_bench.bench_plan import BenchProfile
+from gguf_limit_bench.context_limit import (
+    DEFAULT_MIN_CONTEXT,
+    LaunchOutcome,
+    find_context_limit,
+)
 from gguf_limit_bench.context_search import context_ladder
 from gguf_limit_bench.gguf_metadata import read_model_arch
 from gguf_limit_bench.vram import (
@@ -1037,6 +1042,108 @@ def vram_plan(
         console.print(f"Largest context predicted to fit: {best // 1024}k")
     else:
         console.print("No context tier in range is predicted to fit. Try --kv-bits 8.")
+
+
+@app.command("context-limit")
+def context_limit_command(
+    model: Annotated[Path, typer.Option(help="GGUF model path.")],
+    llama_server: Path | None = None,
+    min_context: int = typer.Option(DEFAULT_MIN_CONTEXT, "--min-context", min=256),
+    max_context: int = typer.Option(262_144, "--max-context", min=256),
+    parallel: int = typer.Option(1, "--parallel", min=1),
+    kv_cache_type: str = typer.Option(
+        "q8_0", "--kv-cache-type", help="KV cache type (default q8_0; nobody benchmarks f16)."
+    ),
+    timeout_seconds: int = typer.Option(240, "--timeout-seconds", min=10),
+    no_vram_guard: bool = typer.Option(
+        False, "--no-vram-guard", help="Launch every tier even if the VRAM estimate says skip."
+    ),
+    no_refine: bool = typer.Option(False, "--no-refine"),
+    json_out: bool = False,
+) -> None:
+    """Find the largest context the model can actually serve, from 16k upward.
+
+    Starts small and climbs; uses q8_0 KV cache; recognises an out-of-memory
+    crash, notes it, and backs off instead of aborting the run.
+    """
+    config = with_cli_overrides(load_config(), llama_server=llama_server)
+    server = config.paths.llama_server
+    if not server.exists():
+        console.print(f"llama-server not found: {server}")
+        raise typer.Exit(1)
+
+    # Optional pre-flight VRAM guard so we never even launch a doomed tier.
+    fits_vram = None
+    if not no_vram_guard:
+        arch = read_model_arch(model)
+        vram = detect_vram_mb()
+        if arch is not None and vram is not None:
+            size_bytes = model.stat().st_size
+            kv_bits = 8 if kv_cache_type.lower().startswith("q8") else 16
+
+            def fits_vram(context: int) -> bool:
+                plan = plan_context_fit(
+                    arch, size_bytes, [context], vram.total_mb, k_bits=kv_bits, v_bits=kv_bits
+                )
+                return plan[0].fits
+
+    def attempt(context: int) -> LaunchOutcome:
+        settings = AutoresearchSettings(
+            context_size=context,
+            parallel=parallel,
+            gpu_layers=99,
+            flash_attention=True,
+            kv_unified=True,
+            cache_type_k=kv_cache_type,
+            cache_type_v=kv_cache_type,
+        )
+        result = probe_llama_server_ttft(
+            llama_server=server,
+            model=model,
+            settings=settings,
+            max_tokens=8,
+            samples=1,
+            timeout_seconds=timeout_seconds,
+        )
+        return LaunchOutcome(
+            ok=result.ok, stderr=result.stderr_tail, detail=result.failure
+        )
+
+    result = find_context_limit(
+        attempt,
+        min_context=min_context,
+        max_context=max_context,
+        fits_vram=fits_vram,
+        refine=not no_refine,
+        log=None if json_out else console.print,
+    )
+
+    if json_out:
+        _print_json(
+            {
+                "model": str(model),
+                "kv_cache_type": kv_cache_type,
+                "max_context": result.max_context,
+                "hit_oom": result.hit_oom,
+                "attempts": [
+                    {"context": a.context_size, "outcome": a.outcome, "note": a.note}
+                    for a in result.attempts
+                ],
+            }
+        )
+        return
+
+    table = Table(title=f"Context limit for {model.name} (KV {kv_cache_type})")
+    table.add_column("Context", justify="right")
+    table.add_column("Result")
+    table.add_column("Note")
+    for a in result.attempts:
+        table.add_row(f"{a.context_size // 1024}k", a.outcome, a.note)
+    console.print(table)
+    if result.max_context is not None:
+        console.print(f"Largest context that actually served: {result.max_context // 1024}k")
+    else:
+        console.print("No context tier served successfully.")
 
 
 @app.command("serve-probe")

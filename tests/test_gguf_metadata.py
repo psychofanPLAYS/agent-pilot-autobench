@@ -45,13 +45,16 @@ def _write(tmp_path, pairs):
     return path
 
 
-def test_read_gguf_metadata_parses_scalars_and_skips_arrays(tmp_path):
+def test_read_gguf_metadata_parses_scalars_and_small_arrays(tmp_path):
     path = _write(
         tmp_path,
         [
             _kv_string("general.architecture", "llama"),
             _kv_u32("llama.block_count", 32),
-            _kv_u32_array("llama.some.array", [1, 2, 3, 4]),  # must be skipped cleanly
+            # Small numeric arrays (e.g. a sliding-window pattern) are captured.
+            _kv_u32_array("llama.small.array", [1, 0, 1, 1]),
+            # A huge array (e.g. tokenizer vocab) is streamed past, not stored.
+            _kv_u32_array("llama.big.array", list(range(5000))),
             _kv_u32("llama.embedding_length", 4096),
         ],
     )
@@ -61,7 +64,8 @@ def test_read_gguf_metadata_parses_scalars_and_skips_arrays(tmp_path):
     assert meta["general.architecture"] == "llama"
     assert meta["llama.block_count"] == 32
     assert meta["llama.embedding_length"] == 4096
-    assert meta["llama.some.array"] is None  # arrays are not stored
+    assert meta["llama.small.array"] == [1, 0, 1, 1]
+    assert meta["llama.big.array"] is None  # too large -> skipped
 
 
 def test_model_arch_uses_explicit_key_value_lengths(tmp_path):
@@ -104,6 +108,46 @@ def test_model_arch_falls_back_to_head_dim_when_lengths_absent():
     assert arch.n_heads_kv == 32  # no GQA metadata -> equals head_count
     assert arch.key_length == 128  # 4096 / 32
     assert arch.value_length == 128
+
+
+def test_model_arch_resolves_sliding_window_split_from_pattern():
+    # Gemma-style pattern: [T,T,T,T,F] repeated -> 4 SWA : 1 global.
+    pattern = [True, True, True, True, False] * 7  # 35 layers
+    meta = {
+        "general.architecture": "gemma4",
+        "gemma4.block_count": 35,
+        "gemma4.attention.head_count": 8,
+        "gemma4.attention.head_count_kv": 1,
+        "gemma4.embedding_length": 1536,
+        "gemma4.attention.key_length": 512,
+        "gemma4.attention.value_length": 512,
+        "gemma4.attention.key_length_swa": 256,
+        "gemma4.attention.value_length_swa": 256,
+        "gemma4.attention.sliding_window": 512,
+        "gemma4.attention.sliding_window_pattern": pattern,
+    }
+
+    arch = model_arch_from_metadata(meta)
+
+    assert arch is not None
+    assert arch.is_sliding_window is True
+    assert arch.n_global_layers == 7
+    assert arch.n_swa_layers == 28
+    assert arch.sliding_window == 512
+    assert arch.key_length_swa == 256
+
+
+def test_model_arch_without_sliding_window_is_dense():
+    meta = {
+        "general.architecture": "llama",
+        "llama.block_count": 32,
+        "llama.attention.head_count": 32,
+        "llama.embedding_length": 4096,
+    }
+    arch = model_arch_from_metadata(meta)
+    assert arch is not None
+    assert arch.is_sliding_window is False
+    assert arch.n_swa_layers == 0
 
 
 def test_model_arch_returns_none_when_required_fields_missing():

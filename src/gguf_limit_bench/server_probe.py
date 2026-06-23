@@ -12,6 +12,7 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from gguf_limit_bench.autoresearch import AutoresearchSettings
+from gguf_limit_bench.oom import is_oom_failure
 
 
 @dataclass(frozen=True)
@@ -490,6 +491,10 @@ def _failed_probe(failure: str, detail: str, process: subprocess.Popen) -> Servi
             stderr = err or detail
         except subprocess.TimeoutExpired:
             pass
+    # An out-of-memory crash exits early and looks like a "timeout" to the ready
+    # wait; relabel it so callers can recognise it and back off the context size.
+    if is_oom_failure(stderr, process.returncode):
+        failure = "oom"
     return ServingProbeResult(
         ok=False,
         ttft_ms=None,

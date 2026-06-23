@@ -41,6 +41,50 @@ def test_q8_kv_is_half_of_f16():
     assert q8 * 2 == f16
 
 
+def test_sliding_window_layers_cost_far_less_than_dense():
+    # Gemma-like: 7 global + 28 windowed (window 512, smaller swa dims).
+    swa = _arch(
+        n_layers=35,
+        n_heads_kv=1,
+        key_length=512,
+        value_length=512,
+        sliding_window=512,
+        key_length_swa=256,
+        value_length_swa=256,
+        n_global_layers=7,
+        n_swa_layers=28,
+    )
+    dense = _arch(n_layers=35, n_heads_kv=1, key_length=512, value_length=512)
+
+    ctx = 262_144
+    swa_bytes = kv_cache_bytes(swa, ctx, k_bits=8, v_bits=8)
+    dense_bytes = kv_cache_bytes(dense, ctx, k_bits=8, v_bits=8)
+
+    # Only 7/35 layers scale with context, plus a tiny windowed contribution.
+    assert swa_bytes < dense_bytes / 3
+    # Sanity: global part = 7 * ctx * (512+512) * 1 byte.
+    global_only = 7 * ctx * (512 + 512)
+    assert swa_bytes > global_only  # includes the small windowed layers too
+    assert swa_bytes < global_only * 1.1  # but only a little more
+
+
+def test_swa_window_caps_below_context():
+    swa = _arch(
+        n_layers=10,
+        n_heads_kv=1,
+        sliding_window=512,
+        key_length_swa=256,
+        value_length_swa=256,
+        n_global_layers=2,
+        n_swa_layers=8,
+    )
+    # Past the window, swa layers stop growing; doubling context only grows the
+    # 2 global layers, not the 8 windowed ones.
+    small = kv_cache_bytes(swa, 16_384)
+    big = kv_cache_bytes(swa, 32_768)
+    assert big < small * 2  # not linear, because windowed layers are capped
+
+
 def test_plan_context_fit_skips_tiers_over_budget():
     arch = _arch(n_layers=40, n_heads_kv=8, key_length=128, value_length=128)
     size_bytes = 5 * 1024**3  # 5 GB weights

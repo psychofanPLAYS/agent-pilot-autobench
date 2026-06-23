@@ -829,6 +829,49 @@ def test_vram_plan_reports_fitting_contexts(tmp_path, monkeypatch):
     assert payload["vram_total_mb"] == 24564
 
 
+def test_context_limit_climbs_and_recovers_from_oom(tmp_path, monkeypatch):
+    from gguf_limit_bench.server_probe import ServingProbeResult
+
+    server = tmp_path / "llama-server.exe"
+    server.write_bytes(b"")
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"x")
+
+    monkeypatch.setattr(
+        "gguf_limit_bench.cli.load_config",
+        lambda: PilotbenchConfig(
+            paths=PathSettings(model_roots=(tmp_path,), llama_server=server),
+        ),
+    )
+    # No VRAM guard interference in this test.
+    monkeypatch.setattr("gguf_limit_bench.cli.read_model_arch", lambda _p: None)
+    monkeypatch.setattr("gguf_limit_bench.cli.detect_vram_mb", lambda: None)
+
+    def fake_probe(*, settings, **kwargs):
+        if settings.context_size > 65_536:
+            return ServingProbeResult(
+                ok=False, ttft_ms=None, tokens_per_second=0.0, output_chars=0,
+                generated_tokens=0, failure="oom", stderr_tail="cudaMalloc failed: out of memory",
+            )
+        return ServingProbeResult(
+            ok=True, ttft_ms=10.0, tokens_per_second=80.0, output_chars=10,
+            generated_tokens=8, failure="none",
+        )
+
+    monkeypatch.setattr("gguf_limit_bench.cli.probe_llama_server_ttft", fake_probe)
+
+    result = runner.invoke(
+        app,
+        ["context-limit", "--model", str(model), "--no-refine", "--json-out"],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["kv_cache_type"] == "q8_0"  # q8_0 is the default
+    assert payload["max_context"] == 65_536
+    assert payload["hit_oom"] is True
+
+
 def test_vram_plan_errors_when_metadata_unreadable(tmp_path, monkeypatch):
     model = tmp_path / "model.gguf"
     model.write_bytes(b"x")

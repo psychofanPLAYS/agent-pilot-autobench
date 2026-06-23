@@ -70,16 +70,35 @@ def kv_cache_bytes(
     k_bits: int = 16,
     v_bits: int = 16,
 ) -> int:
-    """Dense upper-bound KV-cache size in bytes for a given context and arch.
+    """KV-cache size in bytes for a given context and arch.
 
     ``context_size`` is the total llama-server ``--ctx-size``; with
     ``--parallel N`` that total is shared across slots, so the KV cache is sized
     by the total context, not multiplied by the slot count.
+
+    For sliding-window models (Gemma 3/4 etc.) only the global layers store the
+    full context — recent llama.cpp's interleaved-SWA cache caps the windowed
+    layers at the sliding window with their smaller K/V dims, which is a large
+    memory saving at long context. Dense models size every layer at full context.
     """
-    per_token_k = arch.n_heads_kv * arch.key_length * _bytes_per_element(k_bits)
-    per_token_v = arch.n_heads_kv * arch.value_length * _bytes_per_element(v_bits)
-    per_layer = (per_token_k + per_token_v) * context_size
-    return int(per_layer * arch.n_layers)
+    k_bytes = _bytes_per_element(k_bits)
+    v_bytes = _bytes_per_element(v_bits)
+    heads = arch.n_heads_kv
+
+    def layer_bytes(tokens: int, key_len: int, value_len: int) -> float:
+        return (heads * key_len * k_bytes + heads * value_len * v_bytes) * tokens
+
+    if arch.is_sliding_window:
+        window_tokens = min(context_size, arch.sliding_window)
+        global_bytes = arch.n_global_layers * layer_bytes(
+            context_size, arch.key_length, arch.value_length
+        )
+        swa_bytes = arch.n_swa_layers * layer_bytes(
+            window_tokens, arch.key_length_swa, arch.value_length_swa
+        )
+        return int(global_bytes + swa_bytes)
+
+    return int(arch.n_layers * layer_bytes(context_size, arch.key_length, arch.value_length))
 
 
 def model_weights_mb(size_bytes: int) -> int:

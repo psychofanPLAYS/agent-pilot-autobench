@@ -7,6 +7,20 @@ semantic versioning for published versions.
 
 ### Added
 
+- **Ascending, OOM-resilient context-limit search.** New `apb context-limit --model X`
+  climbs the context ladder from 16k upward (never launches a huge context first),
+  using a q8_0 KV cache by default (nobody benchmarks f16). When a tier fails to
+  allocate VRAM it recognises the CUDA out-of-memory crash (`oom.py`), notes the
+  context that broke, and backs off / refines instead of letting the run die. A
+  pre-flight VRAM estimate skips tiers that clearly cannot fit. Verified on a real
+  RTX 4090: Gemma-4-E2B climbs 16k→256k and serves every tier.
+- **OOM is now a recognised outcome, not a mystery timeout.** `server_probe` relabels
+  an early-exit-with-allocation-failure as `oom` (was misreported as `timeout`).
+- **Sliding-window-aware VRAM math (Gemma 3/4).** The GGUF reader now resolves the
+  per-layer sliding-window pattern, so only the global layers are sized at full
+  context while windowed layers cap at the window with their smaller K/V dims. This
+  fixes a ~5× over-estimate for Gemma (256k q8 KV: 1.8 GB, not 8.8 GB).
+
 - **Phase B (foundation): VRAM-headroom guard for the context ladder.** A new
   dependency-free GGUF header reader (`gguf_metadata.py`) extracts the real
   architecture fields (block count, GQA KV-head count, explicit key/value lengths —
