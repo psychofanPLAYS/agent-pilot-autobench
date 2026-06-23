@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 from gguf_limit_bench.question_selection import select_questions
 
 
