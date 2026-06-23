@@ -19,6 +19,8 @@ DEFAULT_PARALLEL_MAX = 4
 DEFAULT_PRESET = "deep"
 DEFAULT_CONFIG_PATH = Path("_CONFIG.toml")
 DEFAULT_PERPLEXITY_CONTEXTS = (4096, 8192, 16384)
+DEFAULT_QUESTION_SAMPLE_SIZE = 5
+DEFAULT_QUESTION_SELECTION = "sequential"
 
 
 @dataclass(frozen=True)
@@ -41,6 +43,8 @@ class BenchmarkSettings:
     perplexity_corpus: Path | None = None
     perplexity_contexts: tuple[int, ...] = DEFAULT_PERPLEXITY_CONTEXTS
     forced_server_args: tuple[str, ...] = ()
+    question_sample_size: int = DEFAULT_QUESTION_SAMPLE_SIZE
+    question_selection: str = DEFAULT_QUESTION_SELECTION
 
 
 @dataclass(frozen=True)
@@ -71,6 +75,8 @@ class PilotbenchConfig:
                 ),
                 "perplexity_contexts": list(self.benchmark.perplexity_contexts),
                 "forced_server_args": list(self.benchmark.forced_server_args),
+                "question_sample_size": self.benchmark.question_sample_size,
+                "question_selection": self.benchmark.question_selection,
             },
         }
 
@@ -102,6 +108,12 @@ def load_config(config_path: Path | None = None) -> PilotbenchConfig:
                 benchmark.get("perplexity_contexts"), DEFAULT_PERPLEXITY_CONTEXTS
             ),
             forced_server_args=_strings(benchmark.get("forced_server_args"), ()),
+            question_sample_size=int(
+                benchmark.get("question_sample_size", DEFAULT_QUESTION_SAMPLE_SIZE)
+            ),
+            question_selection=str(
+                benchmark.get("question_selection", DEFAULT_QUESTION_SELECTION)
+            ),
         ),
     )
     return apply_env_overrides(config)
@@ -143,6 +155,14 @@ def apply_env_overrides(config: PilotbenchConfig) -> PilotbenchConfig:
             forced_server_args=_strings(
                 os.environ.get("PILOTBENCH_FORCED_SERVER_ARGS"), benchmark.forced_server_args
             ),
+            question_sample_size=int(
+                os.environ.get(
+                    "PILOTBENCH_QUESTION_SAMPLE_SIZE", benchmark.question_sample_size
+                )
+            ),
+            question_selection=str(
+                os.environ.get("PILOTBENCH_QUESTION_SELECTION", benchmark.question_selection)
+            ),
         ),
     )
 
@@ -163,6 +183,8 @@ def with_cli_overrides(
     ttft_probe: bool | None = None,
     perplexity_corpus: Path | None = None,
     perplexity_contexts: tuple[int, ...] | list[int] | None = None,
+    question_sample_size: int | None = None,
+    question_selection: str | None = None,
 ) -> PilotbenchConfig:
     config = PilotbenchConfig(
         paths=PathSettings(
@@ -190,6 +212,16 @@ def with_cli_overrides(
                 else config.benchmark.perplexity_contexts
             ),
             forced_server_args=config.benchmark.forced_server_args,
+            question_sample_size=(
+                question_sample_size
+                if question_sample_size is not None
+                else config.benchmark.question_sample_size
+            ),
+            question_selection=(
+                question_selection
+                if question_selection is not None
+                else config.benchmark.question_selection
+            ),
         ),
     )
     return apply_env_overrides(config)

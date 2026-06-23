@@ -95,3 +95,59 @@ def test_config_forced_server_args_default_empty(tmp_path):
     cfg = tmp_path / "_CONFIG.toml"
     cfg.write_text("[benchmark]\nparallel_max = 4\n", encoding="utf-8")
     assert load_config(cfg).benchmark.forced_server_args == ()
+
+
+def test_config_question_sample_size_default(tmp_path):
+    from gguf_limit_bench.config import DEFAULT_QUESTION_SAMPLE_SIZE, load_config
+
+    cfg = tmp_path / "_CONFIG.toml"
+    cfg.write_text("[benchmark]\nparallel_max = 4\n", encoding="utf-8")
+    config = load_config(cfg)
+    assert config.benchmark.question_sample_size == DEFAULT_QUESTION_SAMPLE_SIZE
+
+
+def test_config_question_sample_size_from_toml(tmp_path):
+    from gguf_limit_bench.config import load_config
+
+    cfg = tmp_path / "_CONFIG.toml"
+    cfg.write_text("[benchmark]\nquestion_sample_size = 10\n", encoding="utf-8")
+    config = load_config(cfg)
+    assert config.benchmark.question_sample_size == 10
+
+
+def test_config_question_selection_default(tmp_path):
+    from gguf_limit_bench.config import DEFAULT_QUESTION_SELECTION, load_config
+
+    cfg = tmp_path / "_CONFIG.toml"
+    cfg.write_text("[benchmark]\nparallel_max = 4\n", encoding="utf-8")
+    config = load_config(cfg)
+    assert config.benchmark.question_selection == DEFAULT_QUESTION_SELECTION
+
+
+def test_config_question_selection_from_toml(tmp_path):
+    from gguf_limit_bench.config import load_config
+
+    cfg = tmp_path / "_CONFIG.toml"
+    cfg.write_text('[benchmark]\nquestion_selection = "random"\n', encoding="utf-8")
+    config = load_config(cfg)
+    assert config.benchmark.question_selection == "random"
+
+
+def test_config_question_sample_size_env_override(tmp_path, monkeypatch):
+    from gguf_limit_bench.config import load_config
+
+    monkeypatch.setenv("PILOTBENCH_QUESTION_SAMPLE_SIZE", "7")
+    cfg = tmp_path / "_CONFIG.toml"
+    cfg.write_text("[benchmark]\nquestion_sample_size = 3\n", encoding="utf-8")
+    config = load_config(cfg)
+    assert config.benchmark.question_sample_size == 7
+
+
+def test_config_question_selection_env_override(tmp_path, monkeypatch):
+    from gguf_limit_bench.config import load_config
+
+    monkeypatch.setenv("PILOTBENCH_QUESTION_SELECTION", "random")
+    cfg = tmp_path / "_CONFIG.toml"
+    cfg.write_text('[benchmark]\nquestion_selection = "sequential"\n', encoding="utf-8")
+    config = load_config(cfg)
+    assert config.benchmark.question_selection == "random"

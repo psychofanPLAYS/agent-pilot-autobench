@@ -507,6 +507,7 @@ def survey(
     mtp_only: bool = False,
     json_out: bool = False,
 ) -> None:
+    """List every GGUF model found under the model root(s)."""
     config = with_cli_overrides(load_config(), model_roots=[root] if root is not None else None)
     roots = [root] if root is not None else list(config.paths.model_roots)
     models = discover_models(roots)
@@ -862,6 +863,7 @@ def quick(
     llama_bench: Path | None = None,
     runs_root: Path | None = None,
 ) -> None:
+    """Run a quick llama-bench speed probe on a single model."""
     config = with_cli_overrides(load_config(), llama_bench=llama_bench, runs_root=runs_root)
     runner = BenchmarkRunner(llama_bench=config.paths.llama_bench, runs_root=config.paths.runs_root)
     receipt = runner.run_model(model=model, profile=BenchProfile.quick())
@@ -1015,7 +1017,19 @@ def autoresearch(
         "--llama-server-extra-arg",
         help="Extra raw llama-server argument appended to every flag-ladder rung. Repeatable.",
     ),
+    sample_size: int = typer.Option(
+        None,
+        "--sample-size",
+        min=1,
+        help="Questions sampled per pack in the post-run champion eval (default: from config).",
+    ),
+    selection: str = typer.Option(
+        None,
+        "--selection",
+        help="Question selection mode for champion eval: sequential or random (default: from config).",
+    ),
 ) -> None:
+    """Run the flag-ladder benchmark loop to find optimal server settings for a model."""
     evaluation = resolve_evaluation_mode(speed_scout=speed_scout, flag_ladder=flag_ladder)
     if dry_run and evaluation is EvaluationMode.SPEED_SCOUT:
         raise typer.BadParameter(
@@ -1037,6 +1051,12 @@ def autoresearch(
         llama_perplexity=llama_perplexity,
         runs_root=runs_root,
         parallel_max=parallel_max,
+    )
+    resolved_sample_size = (
+        sample_size if sample_size is not None else config.benchmark.question_sample_size
+    )
+    resolved_selection = (
+        selection if selection is not None else config.benchmark.question_selection
     )
     receipt = _run_one_autoresearch(
         model=model,
@@ -1065,6 +1085,8 @@ def autoresearch(
         llama_server_extra_args=extra_server_args,
         evaluation=evaluation,
         forced_server_args=config.benchmark.forced_server_args,
+        champion_sample_size=resolved_sample_size,
+        champion_selection=resolved_selection,
     )
     _print_receipt_outputs(receipt.path)
 
@@ -1107,6 +1129,7 @@ def autoresearch_all(
         help="Fast synthetic llama-bench scout (does NOT ask the benchmark questions).",
     ),
 ) -> None:
+    """Run the autoresearch loop on every model found under the model root(s)."""
     evaluation = resolve_evaluation_mode(speed_scout=speed_scout, flag_ladder=False)
     config = with_cli_overrides(
         load_config(),
@@ -1189,6 +1212,7 @@ def tui(
         help="Run a benchmark-suite plan for selected models and optimize by agent_bench_score.",
     ),
 ) -> None:
+    """Open the interactive TUI model picker and run the autoresearch loop."""
     config = with_cli_overrides(
         load_config(),
         model_roots=[root] if root is not None else None,
@@ -1337,6 +1361,11 @@ def _run_one_autoresearch(
     flag_ladder_attempt_runner: AttemptRunner | None = None,
     evaluation: EvaluationMode = EvaluationMode.BENCHMARK,
     forced_server_args: tuple[str, ...] = (),
+    champion_sample_size: int = 5,
+    champion_selection: str = "sequential",
+    champion_pack_ids: tuple[str, ...] | None = None,
+    champion_state_db_path: Path | None = None,
+    champion_gpu_name: str = "",
 ):
     # Benchmark mode asks the real questions via the flag-ladder SimpleBench engine.
     # The legacy --flag-ladder flag forces the same path.
@@ -1466,6 +1495,14 @@ def _run_one_autoresearch(
         candidate_sequence=candidate_sequence,
         skipped_profiles=skipped_profiles,
         round_seconds=KARPATHY_ROUND_SECONDS if flag_ladder else None,
+        # Champion pack eval
+        llama_server=llama_server,
+        champion_pack_ids=champion_pack_ids,
+        champion_sample_size=champion_sample_size,
+        champion_selection=champion_selection,
+        champion_state_db_path=champion_state_db_path,
+        champion_gpu_name=champion_gpu_name,
+        is_benchmark_mode=flag_ladder,
     )
     return loop.run()
 

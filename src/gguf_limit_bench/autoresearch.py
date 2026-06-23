@@ -292,6 +292,16 @@ class AutoresearchLoop:
         candidate_sequence: tuple[AutoresearchSettings, ...] | None = None,
         skipped_profiles: tuple[dict, ...] = (),
         round_seconds: int | None = None,
+        # Champion pack eval params (all optional; eval is skipped when
+        # llama_server is None or evaluation_mode is not benchmark).
+        llama_server: Path | None = None,
+        champion_pack_ids: tuple[str, ...] | None = None,
+        champion_sample_size: int = 5,
+        champion_selection: str = "sequential",
+        champion_seed: int | None = None,
+        champion_state_db_path: Path | None = None,
+        champion_gpu_name: str = "",
+        is_benchmark_mode: bool = False,
     ) -> None:
         self.model = model
         self.runs_root = runs_root
@@ -310,6 +320,15 @@ class AutoresearchLoop:
         self.perplexity_contexts = perplexity_contexts
         self.candidate_sequence = candidate_sequence
         self.skipped_profiles = skipped_profiles
+        # Champion eval
+        self.llama_server = llama_server
+        self.champion_pack_ids = champion_pack_ids
+        self.champion_sample_size = champion_sample_size
+        self.champion_selection = champion_selection
+        self.champion_seed = champion_seed
+        self.champion_state_db_path = champion_state_db_path
+        self.champion_gpu_name = champion_gpu_name
+        self.is_benchmark_mode = is_benchmark_mode
 
     def run(self) -> RunReceipt:
         receipt = RunReceipt.create(self.runs_root, slug=_safe_slug(self.model.stem))
@@ -506,7 +525,46 @@ class AutoresearchLoop:
                 planned_profiles=planned_profiles,
             )
         write_itemized_run_report(receipt.path)
+        self._run_champion_pack_eval(receipt, best_settings)
         return receipt
+
+    def _run_champion_pack_eval(
+        self, receipt: RunReceipt, best_settings: AutoresearchSettings
+    ) -> None:
+        """Best-effort champion pack evaluation — never raises."""
+        if not self.is_benchmark_mode:
+            return
+        if self.llama_server is None or not self.llama_server.exists():
+            return
+        try:
+            from gguf_limit_bench.champion_eval import evaluate_champion_packs
+            from gguf_limit_bench.packs import DEFAULT_PACKS
+
+            pack_ids = self.champion_pack_ids if self.champion_pack_ids is not None else DEFAULT_PACKS
+            receipt.event("champion_pack_eval_started", {"pack_ids": list(pack_ids)})
+            evaluate_champion_packs(
+                model=self.model,
+                llama_server=self.llama_server,
+                best_settings=best_settings,
+                run_dir=receipt.path,
+                pack_ids=pack_ids,
+                sample_size=self.champion_sample_size,
+                selection=self.champion_selection,
+                seed=self.champion_seed,
+                state_db_path=self.champion_state_db_path,
+                gpu_name=self.champion_gpu_name,
+            )
+            receipt.event("champion_pack_eval_finished", {"run_dir": str(receipt.path)})
+        except Exception as exc:  # noqa: BLE001
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "champion_pack_eval failed (best-effort, run not aborted): %s", exc
+            )
+            try:
+                receipt.event("champion_pack_eval_failed", {"error": str(exc)})
+            except Exception:  # noqa: BLE001
+                pass
 
     def _candidate(self, best: AutoresearchSettings, attempt_index: int) -> AutoresearchSettings:
         if self.candidate_sequence is not None:
