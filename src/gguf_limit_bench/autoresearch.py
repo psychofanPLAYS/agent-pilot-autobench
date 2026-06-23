@@ -795,6 +795,7 @@ def _write_flag_ladder_comparison(
                 "score": result.simple_bench_score,
                 "accuracy": result.simple_bench_accuracy,
                 "median_tps": tps,
+                "prefill_tps": result.prompt_tokens_per_second if result.ok else None,
                 "slowdown_vs_baseline_percent": slowdown_percent,
                 "median_ttft_ms": result.ttft_ms,
                 "warning_count": warning_count,
@@ -836,7 +837,7 @@ def _attempt_warning_count(receipt_path: str | None) -> int | None:
 
 def _flag_ladder_tsv(rows: list[dict]) -> str:
     header = (
-        "profile\tok\tchampion\tscore\taccuracy\tmedian_tps\t"
+        "profile\tok\tchampion\tscore\taccuracy\tmedian_tps\tprefill_tps\t"
         "slowdown_vs_baseline_percent\tmedian_ttft_ms\twarning_count\tfailure\treceipt"
     )
     lines = [header]
@@ -850,6 +851,7 @@ def _flag_ladder_tsv(rows: list[dict]) -> str:
                     _tsv_float(row["score"]),
                     _tsv_float(row["accuracy"]),
                     _tsv_float(row["median_tps"]),
+                    _tsv_float(row.get("prefill_tps")),
                     _tsv_float(row["slowdown_vs_baseline_percent"]),
                     _tsv_float(row["median_ttft_ms"]),
                     "" if row["warning_count"] is None else str(row["warning_count"]),
@@ -879,8 +881,9 @@ def _flag_ladder_markdown(payload: dict) -> str:
         "",
         "Positive slowdown means slower than L0; negative means faster.",
         "",
-        "| Profile | OK | Champion | Accuracy | TPS | Slowdown vs L0 | TTFT ms | Warnings | Failure |",
-        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |",
+        "| Profile | OK | Champion | Accuracy | Gen TPS | Prefill TPS | "
+        "Slowdown vs L0 | TTFT ms | Warnings | Failure |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
     for row in payload["rows"]:
         lines.append(
@@ -888,6 +891,7 @@ def _flag_ladder_markdown(payload: dict) -> str:
             f"{row['profile']} | {str(row['ok']).lower()} | "
             f"{str(row['champion']).lower()} | {_md_float(row['accuracy'])} | "
             f"{_md_float(row['median_tps'])} | "
+            f"{_md_float(row.get('prefill_tps'))} | "
             f"{_md_float(row['slowdown_vs_baseline_percent'])}% | "
             f"{_md_float(row['median_ttft_ms'])} | "
             f"{row['warning_count'] if row['warning_count'] is not None else 'n/a'} | "
