@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from gguf_limit_bench.results_report import (
     build_results_payload,
     render_results_markdown,
