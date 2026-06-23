@@ -4,9 +4,11 @@ import pytest
 
 from gguf_limit_bench.state_db import (
     CORE_TABLES,
+    get_context_limit,
     get_selection_cursor,
     init_state_db,
     lifetime_pack_stats,
+    record_context_limit,
     record_question_attempt,
     set_selection_cursor,
 )
@@ -24,6 +26,33 @@ def test_init_state_db_creates_research_memory_tables(tmp_path):
         }
 
     assert CORE_TABLES <= tables
+
+
+def test_context_limit_is_remembered_and_recalled(mem_conn):
+    assert get_context_limit(mem_conn, "Gemma-4-E2B.gguf", "q8_0") is None
+
+    record_context_limit(mem_conn, "Gemma-4-E2B.gguf", "q8_0", 262_144, False, "2026-06-23T10:00:00Z")
+    remembered = get_context_limit(mem_conn, "Gemma-4-E2B.gguf", "q8_0")
+
+    assert remembered is not None
+    assert remembered["max_context"] == 262_144
+    assert remembered["hit_oom"] is False
+
+
+def test_context_limit_keeps_the_best_seen(mem_conn):
+    record_context_limit(mem_conn, "m.gguf", "q8_0", 131_072, True, "2026-06-23T10:00:00Z")
+    # A later run that only got to 64k must not lower the remembered ceiling.
+    record_context_limit(mem_conn, "m.gguf", "q8_0", 65_536, True, "2026-06-23T11:00:00Z")
+
+    assert get_context_limit(mem_conn, "m.gguf", "q8_0")["max_context"] == 131_072
+
+
+def test_context_limit_is_scoped_per_kv_cache_type(mem_conn):
+    record_context_limit(mem_conn, "m.gguf", "q8_0", 262_144, False, "t")
+    record_context_limit(mem_conn, "m.gguf", "f16", 131_072, True, "t")
+
+    assert get_context_limit(mem_conn, "m.gguf", "q8_0")["max_context"] == 262_144
+    assert get_context_limit(mem_conn, "m.gguf", "f16")["max_context"] == 131_072
 
 
 # ---------------------------------------------------------------------------

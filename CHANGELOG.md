@@ -14,6 +14,10 @@ semantic versioning for published versions.
   context that broke, and backs off / refines instead of letting the run die. A
   pre-flight VRAM estimate skips tiers that clearly cannot fit. Verified on a real
   RTX 4090: Gemma-4-E2B climbs 16k→256k and serves every tier.
+- **The app remembers each model's context ceiling.** `context-limit` records the
+  largest context a model actually served (per KV cache type) to the experiment DB
+  (`model_context_limit`) and recalls it on the next run — so future sessions warm-start
+  instead of rediscovering the limit. Keeps the best context ever seen.
 - **OOM is now a recognised outcome, not a mystery timeout.** `server_probe` relabels
   an early-exit-with-allocation-failure as `oom` (was misreported as `timeout`).
 - **Sliding-window-aware VRAM math (Gemma 3/4).** The GGUF reader now resolves the

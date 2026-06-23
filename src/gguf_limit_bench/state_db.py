@@ -59,6 +59,18 @@ def _init_connection(connection: sqlite3.Connection) -> None:
         )
         """
     )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS model_context_limit (
+            model_key     TEXT NOT NULL,
+            kv_cache_type TEXT NOT NULL,
+            max_context   INTEGER NOT NULL,
+            hit_oom       INTEGER NOT NULL DEFAULT 0,
+            ts            TEXT NOT NULL,
+            PRIMARY KEY (model_key, kv_cache_type)
+        )
+        """
+    )
     connection.commit()
 
 
@@ -181,3 +193,53 @@ def set_selection_cursor(
         (model_key, pack_id, cursor),
     )
     conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# model_context_limit helpers — remember a model's usable context across runs
+# ---------------------------------------------------------------------------
+
+
+def record_context_limit(
+    conn: sqlite3.Connection,
+    model_key: str,
+    kv_cache_type: str,
+    max_context: int,
+    hit_oom: bool,
+    ts: str,
+) -> None:
+    """Remember the largest context a model served, keeping the best seen.
+
+    Stored per (model, kv cache type) so a future session can warm-start the
+    context ladder instead of rediscovering the ceiling from scratch.
+    """
+    conn.execute(
+        """
+        INSERT INTO model_context_limit (model_key, kv_cache_type, max_context, hit_oom, ts)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(model_key, kv_cache_type) DO UPDATE SET
+            max_context = MAX(model_context_limit.max_context, excluded.max_context),
+            hit_oom = excluded.hit_oom,
+            ts = excluded.ts
+        """,
+        (model_key, kv_cache_type, int(max_context), 1 if hit_oom else 0, ts),
+    )
+    conn.commit()
+
+
+def get_context_limit(
+    conn: sqlite3.Connection,
+    model_key: str,
+    kv_cache_type: str,
+) -> dict[str, object] | None:
+    """Return the remembered context limit for a model, or None if never run."""
+    row = conn.execute(
+        """
+        SELECT max_context, hit_oom, ts FROM model_context_limit
+        WHERE model_key=? AND kv_cache_type=?
+        """,
+        (model_key, kv_cache_type),
+    ).fetchone()
+    if not row:
+        return None
+    return {"max_context": int(row[0]), "hit_oom": bool(row[1]), "ts": row[2]}

@@ -3,11 +3,13 @@ from __future__ import annotations
 from dataclasses import replace
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from datetime import datetime, timezone
 from pathlib import Path
 import json
 import os
+import sqlite3
 import time
-from typing import Annotated, Callable
+from typing import Annotated, Callable, cast
 import webbrowser
 
 import typer
@@ -101,7 +103,11 @@ from gguf_limit_bench.simple_bench import (
     DEFAULT_SIMPLE_BENCH_SYSTEM_PROMPT,
 )
 from gguf_limit_bench.simple_bench_runner import LlamaServerSimpleBenchAttemptRunner
-from gguf_limit_bench.state_db import init_state_db
+from gguf_limit_bench.state_db import (
+    get_context_limit,
+    init_state_db,
+    record_context_limit,
+)
 from gguf_limit_bench.tui import BenchTui
 from gguf_limit_bench.workflows import WorkflowAugmentedAttemptRunner, WorkflowEvaluator
 
@@ -1072,6 +1078,16 @@ def context_limit_command(
         console.print(f"llama-server not found: {server}")
         raise typer.Exit(1)
 
+    # Recall what we already learned about this model in past runs.
+    init_state_db(DEFAULT_DB_PATH)
+    with sqlite3.connect(DEFAULT_DB_PATH) as conn:
+        remembered = get_context_limit(conn, model.name, kv_cache_type)
+    if remembered and not json_out:
+        console.print(
+            f"Previously found max context for this model (KV {kv_cache_type}): "
+            f"{cast(int, remembered['max_context']) // 1024}k"
+        )
+
     # Optional pre-flight VRAM guard so we never even launch a doomed tier.
     fits_vram = None
     if not no_vram_guard:
@@ -1117,6 +1133,18 @@ def context_limit_command(
         refine=not no_refine,
         log=None if json_out else console.print,
     )
+
+    # Remember the discovered ceiling so future runs/sessions can warm-start.
+    if result.max_context is not None:
+        with sqlite3.connect(DEFAULT_DB_PATH) as conn:
+            record_context_limit(
+                conn,
+                model.name,
+                kv_cache_type,
+                result.max_context,
+                result.hit_oom,
+                datetime.now(timezone.utc).isoformat(),
+            )
 
     if json_out:
         _print_json(
