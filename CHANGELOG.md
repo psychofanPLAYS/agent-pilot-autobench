@@ -7,6 +7,21 @@ semantic versioning for published versions.
 
 ### Added
 
+- **One-command install, then just `apb`.** `INSTALL.bat` / `install.ps1` is a single
+  command that auto-installs `uv` if missing, builds the local environment, pulls
+  dependencies, and puts `apb` on PATH — no flags, nothing else to run.
+- **Plain `apb` opens the app.** Bare `apb` (no subcommand, no flags) now launches the
+  model picker instead of printing a help wall. The first run on a machine detects it is
+  not set up yet and runs setup automatically before opening; every run after that goes
+  straight to the app. A `.apb-setup-complete` marker records the installed state, and a
+  wiped `.venv` re-triggers the one-time setup. Power-user subcommands are unchanged
+  (`apb --help`).
+
+### Changed
+
+- `FIRST_RUN.bat` now delegates to the one-command installer; `START.bat` just launches
+  `apb`. README "Start" is now two steps: install once, then type `apb`.
+
 - **Phase A — multi-pack LLM evaluation with visible results.** Question packs beyond
   SimpleBench via a `QuestionPack` interface and registry: `simple-bench` (10, hard),
   `easy-gotcha` (~24 verified gotchas, exact-answer with accept-variants), and `easy-mc`

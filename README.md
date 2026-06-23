@@ -16,7 +16,7 @@ Agent Pilot Autobench answers a practical question with evidence instead of gues
 
 It wraps existing tools such as `llama-bench`, `llama-cli`, `llama-server`, Optuna, Textual, Rich, and pytest. The project records receipts, scores, failures, and champion settings so results are based on repeatable evidence instead of vibes.
 
-**Fastest first run on Windows:** double-click `FIRST_RUN.bat`.
+**Fastest start on Windows:** double-click `INSTALL.bat` once, then type `apb`.
 
 **What proves it works:** every experiment records its command, settings, telemetry,
 score, failure class, and generated reports under `_runs/`; CI independently tests
@@ -27,29 +27,32 @@ to the [command board](docs/COMMAND-BOARD.md).
 
 ## Start
 
-On Windows, first run:
+Two steps, total. **Install once:**
 
 ```text
-FIRST_RUN.bat
+INSTALL.bat
 ```
 
-That installs the local command, adds `apb` to PATH, checks the machine, and opens the model picker when the required paths are ready.
+(or from a terminal: `powershell -ExecutionPolicy Bypass -File install.ps1`)
 
-Terminal users can run the same first-run flow with:
+That one command auto-installs `uv` if needed, builds the local environment,
+pulls dependencies, adds `apb` to your PATH, and checks the machine — no flags,
+nothing else to run.
+
+**Then, from any terminal, just type:**
 
 ```powershell
-uv run --extra dev --extra bench agent-autobench --first-run
+apb
 ```
 
-After first run adds the repo-local `_bin` folder to your user PATH, new terminals can use:
-
-```powershell
-apb --start
-```
+That's it. Plain `apb` opens the model picker. The very first time you run it on
+a new machine it sets itself up automatically before opening; every run after
+that goes straight to the app. Power-user subcommands still exist — run
+`apb --help` to see them.
 
 ## Cockpit Modes
 
-`apb --start` (or double-clicking `FIRST_RUN.bat` after setup) opens the cockpit.
+Plain `apb` (or double-clicking `START.bat`) opens the cockpit.
 Pick model(s) with the arrow keys and Space, press **M** to choose a mode, then
 press Enter to run:
 
@@ -134,8 +137,7 @@ performance that has not been measured.
 ## Common Commands
 
 ```powershell
-apb --first-run
-apb --start
+apb
 agent-autobench doctor
 agent-autobench results
 agent-autobench results --open-browser

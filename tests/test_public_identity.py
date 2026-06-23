@@ -18,13 +18,13 @@ def test_readme_uses_public_command_name():
     readme = Path("README.md").read_text(encoding="utf-8")
 
     assert "# Agent Pilot Autobench" in readme
-    assert "agent-autobench --first-run" in readme
-    assert "apb --start" in readme
+    # New onboarding: one-command install, then bare `apb` opens the app.
+    assert "INSTALL.bat" in readme
+    assert "install.ps1" in readme
     assert "PilotBENCHY" not in readme
     assert "Hero command" not in readme
     assert "apb" in readme
     assert "pilotbench" in readme
-    assert readme.count("agent-autobench --first-run") <= 2
     assert "Legacy command" not in readme
     assert "`gguf-limit-bench`" not in readme
     assert "LlamaLab" not in readme

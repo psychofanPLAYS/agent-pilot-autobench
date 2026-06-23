@@ -9,6 +9,12 @@ import subprocess
 
 DEFAULT_SHIM_DIR = Path("_bin")
 
+# A small marker file written once setup has installed the command and synced
+# the environment. Bare `apb` checks this to decide between "first run, set me
+# up" and "already installed, just launch". Lives at the repo root (gitignored)
+# so it survives even when the shim folder is customized.
+SETUP_MARKER_NAME = ".apb-setup-complete"
+
 
 @dataclass(frozen=True)
 class InstallStep:
@@ -34,6 +40,27 @@ def local_script(repo_root: Path, command: str) -> Path:
     scripts_dir = "Scripts" if os.name == "nt" else "bin"
     suffix = ".exe" if os.name == "nt" else ""
     return repo_root / ".venv" / scripts_dir / f"{command}{suffix}"
+
+
+def setup_marker_path(repo_root: Path) -> Path:
+    return repo_root / SETUP_MARKER_NAME
+
+
+def is_setup_complete(repo_root: Path) -> bool:
+    """True when setup has run once AND the local environment is still present.
+
+    Requiring the local command as well means a deleted/rebuilt .venv re-triggers
+    a (cheap, idempotent) first-run setup instead of launching against nothing.
+    """
+    return setup_marker_path(repo_root).exists() and local_script(repo_root, "apb").exists()
+
+
+def mark_setup_complete(repo_root: Path) -> None:
+    try:
+        setup_marker_path(repo_root).write_text("ok\n", encoding="utf-8")
+    except OSError:
+        # A missing marker only costs one extra (idempotent) setup next launch.
+        pass
 
 
 def sync_project_environment(repo_root: Path, skip: bool = False) -> InstallStep:

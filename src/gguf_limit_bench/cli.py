@@ -51,6 +51,8 @@ from gguf_limit_bench.installer import (
     add_shim_dir_to_user_path,
     check_user_path,
     install_command_shims,
+    is_setup_complete,
+    mark_setup_complete,
     project_root,
     resolved_shim_dir,
     sync_project_environment,
@@ -85,7 +87,7 @@ from gguf_limit_bench.workflows import WorkflowAugmentedAttemptRunner, WorkflowE
 
 app = typer.Typer(
     help="Local-first GGUF and llama.cpp benchmarking for agent workloads.",
-    no_args_is_help=True,
+    no_args_is_help=False,
     invoke_without_command=True,
     rich_markup_mode="rich",
 )
@@ -94,6 +96,7 @@ console = Console()
 
 @app.callback()
 def main(
+    ctx: typer.Context,
     start_now: bool = typer.Option(
         False,
         "--start",
@@ -110,11 +113,23 @@ def main(
         help="Only check the computer. Do not open the picker.",
     ),
 ) -> None:
-    """Local-first LLLM agent-pilot autobench."""
-    if not start_now and not first_run_now:
+    """Open the app. The first run sets itself up; after that it just launches.
+
+    Power-user subcommands (doctor, autoresearch, results, ...) still work; run
+    `apb --help` to see them.
+    """
+    # A subcommand was given (e.g. `apb doctor`): let it handle everything.
+    if ctx.invoked_subcommand is not None:
         return
+    # Bare `apb` is the front door. Set up on the very first run, then launch.
+    # Explicit --first-run always re-runs setup; --start always skips it.
     config = load_config()
-    if first_run_now:
+    needs_setup = first_run_now or (
+        not start_now and not is_setup_complete(project_root())
+    )
+    if needs_setup:
+        if not first_run_now:
+            console.print("First run detected. Setting up pilotBENCHY (one time)...")
         _setup_app(
             root=config.paths.model_roots[0],
             llama_bench=config.paths.llama_bench,
@@ -393,6 +408,10 @@ def _setup_app(
     init_state_db(db_path)
     write_leaderboard(config.paths.runs_root)
     install_ready = all(step.ok for step in install_steps if step.required)
+    if install_ready:
+        # Record that the app is installed so future bare `apb` calls launch
+        # straight away instead of re-running first-run setup.
+        mark_setup_complete(repo_root)
     payload = {
         **report.to_dict(),
         "install_ready": install_ready,

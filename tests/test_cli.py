@@ -751,6 +751,67 @@ def test_global_start_flag_opens_tui(monkeypatch):
     assert opened_roots == [Path("_models")]
 
 
+def test_bare_apb_launches_without_setup_when_already_installed(monkeypatch):
+    """Once installed, plain `apb` (no command, no flags) just opens the app."""
+    calls: list[str] = []
+    monkeypatch.setattr("gguf_limit_bench.cli.is_setup_complete", lambda _root: True)
+    monkeypatch.setattr(
+        "gguf_limit_bench.cli._setup_app",
+        lambda **kwargs: calls.append("setup"),
+    )
+    monkeypatch.setattr(
+        "gguf_limit_bench.cli._start_app",
+        lambda **kwargs: calls.append("start"),
+    )
+
+    result = runner.invoke(app, [])
+
+    assert result.exit_code == 0
+    # No flag soup, no setup: it went straight to launching.
+    assert calls == ["start"]
+    assert "Usage:" not in result.output
+
+
+def test_bare_apb_self_installs_on_first_run_then_launches(monkeypatch):
+    """First-ever `apb` detects it is not set up, runs setup, then launches."""
+    calls: list[str] = []
+    monkeypatch.setattr("gguf_limit_bench.cli.is_setup_complete", lambda _root: False)
+    monkeypatch.setattr(
+        "gguf_limit_bench.cli._setup_app",
+        lambda **kwargs: calls.append("setup"),
+    )
+    monkeypatch.setattr(
+        "gguf_limit_bench.cli._start_app",
+        lambda **kwargs: calls.append("start"),
+    )
+
+    result = runner.invoke(app, [])
+
+    assert result.exit_code == 0
+    assert calls == ["setup", "start"]
+    assert "First run detected" in result.output
+
+
+def test_bare_apb_with_subcommand_does_not_trigger_setup_or_launch(tmp_path, monkeypatch):
+    """A subcommand (e.g. `apb results`) must not be hijacked by the launcher."""
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "gguf_limit_bench.cli.is_setup_complete",
+        lambda _root: calls.append("checked") or True,
+    )
+    monkeypatch.setattr(
+        "gguf_limit_bench.cli._start_app",
+        lambda **kwargs: calls.append("start"),
+    )
+
+    # Point at a tmp runs-root so the real `results` command can't pollute the repo.
+    result = runner.invoke(app, ["results", "--runs-root", str(tmp_path / "runs")])
+
+    assert result.exit_code == 0
+    # The callback returned early: neither the install check nor launch ran.
+    assert calls == []
+
+
 def test_first_run_command_checks_paths_and_prepares_local_state(tmp_path, monkeypatch):
     db_path = tmp_path / "db" / "agentpilot.sqlite"
     runs_root = tmp_path / "runs"
