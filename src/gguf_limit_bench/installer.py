@@ -194,6 +194,83 @@ def _write_windows_shim(repo_root: Path, shim_dir: Path, command: str) -> Instal
     )
 
 
+def persist_user_env(
+    values: dict[str, str],
+    *,
+    runner=subprocess.run,
+) -> InstallStep:
+    """Persist env vars to the Windows user scope and the current process.
+
+    Writing to the current process too means the same `apb` run that detected
+    the paths can immediately use them (re-load config, re-check readiness)
+    without waiting for a new terminal.
+    """
+    if not values:
+        return InstallStep(
+            name="detected paths",
+            status="skipped",
+            path="",
+            detail="nothing needed auto-detection",
+            required=False,
+        )
+
+    # Always reflect the values in this process so the current run can use them.
+    for name, value in values.items():
+        os.environ[name] = value
+
+    if os.name != "nt":
+        return InstallStep(
+            name="detected paths",
+            status="skipped",
+            path=os.pathsep.join(sorted(values)),
+            detail="set for this run; persistent user env is Windows-only",
+            required=False,
+        )
+
+    assignments = "; ".join(
+        f"[Environment]::SetEnvironmentVariable("
+        f"$env:PB_SET_NAME_{i}, $env:PB_SET_VALUE_{i}, 'User')"
+        for i in range(len(values))
+    )
+    env = {**os.environ}
+    for i, (name, value) in enumerate(values.items()):
+        env[f"PB_SET_NAME_{i}"] = name
+        env[f"PB_SET_VALUE_{i}"] = value
+    try:
+        completed = runner(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", assignments],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+            env=env,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return InstallStep(
+            name="detected paths",
+            status="error",
+            path=", ".join(sorted(values)),
+            detail=f"set for this run, but could not persist to user env: {exc}",
+            required=False,
+        )
+    if completed.returncode != 0:
+        stderr = completed.stderr.strip() or completed.stdout.strip()
+        return InstallStep(
+            name="detected paths",
+            status="error",
+            path=", ".join(sorted(values)),
+            detail=f"set for this run, but could not persist to user env: {stderr[:200]}",
+            required=False,
+        )
+    return InstallStep(
+        name="detected paths",
+        status="ok",
+        path=", ".join(sorted(values)),
+        detail="saved to your user environment so apb finds them next time too",
+        required=False,
+    )
+
+
 def check_user_path(shim_dir: Path) -> InstallStep:
     current_path = os.environ.get("PATH", "")
     parts = [Path(part).resolve() for part in current_path.split(os.pathsep) if part.strip()]

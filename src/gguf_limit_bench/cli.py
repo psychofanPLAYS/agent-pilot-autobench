@@ -5,6 +5,7 @@ from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import json
+import os
 import time
 from typing import Annotated, Callable
 import webbrowser
@@ -46,6 +47,13 @@ from gguf_limit_bench.evaluation_mode import (
     asks_questions,
     resolve_evaluation_mode,
 )
+from gguf_limit_bench.autodetect import (
+    LLAMA_ENV_VARS,
+    default_llama_search_roots,
+    default_model_search_roots,
+    find_llama_binaries,
+    find_model_roots,
+)
 from gguf_limit_bench.installer import (
     DEFAULT_SHIM_DIR,
     add_shim_dir_to_user_path,
@@ -53,6 +61,7 @@ from gguf_limit_bench.installer import (
     install_command_shims,
     is_setup_complete,
     mark_setup_complete,
+    persist_user_env,
     project_root,
     resolved_shim_dir,
     sync_project_environment,
@@ -361,6 +370,54 @@ def doctor(
         raise typer.Exit(1)
 
 
+def _autoconfigure_paths(
+    config,
+    *,
+    detect_models: Callable[[], list[Path]] = lambda: find_model_roots(
+        default_model_search_roots()
+    ),
+    detect_binaries: Callable[[], dict[str, Path]] = lambda: find_llama_binaries(
+        default_llama_search_roots()
+    ),
+    persist: Callable[[dict[str, str]], object] = persist_user_env,
+):
+    """Detect missing model/llama paths, save them, and return updated config.
+
+    Only paths that are not already present are detected, so a machine that
+    already has working env vars (or a real ``_CONFIG.toml``) is left untouched.
+    """
+    detected: dict[str, str] = {}
+
+    if not any(root.exists() for root in config.paths.model_roots):
+        model_roots = detect_models()
+        if model_roots:
+            detected["PILOTBENCH_MODEL_ROOTS"] = os.pathsep.join(
+                str(path) for path in model_roots
+            )
+
+    configured_binaries = {
+        "llama-server": config.paths.llama_server,
+        "llama-bench": config.paths.llama_bench,
+        "llama-cli": config.paths.llama_cli,
+        "llama-perplexity": config.paths.llama_perplexity,
+    }
+    missing_binaries = {
+        stem for stem, path in configured_binaries.items() if not path.exists()
+    }
+    if missing_binaries:
+        found = detect_binaries()
+        for stem in missing_binaries:
+            if stem in found:
+                detected[LLAMA_ENV_VARS[stem]] = str(found[stem])
+
+    if not detected:
+        return config, []
+
+    step = persist(detected)
+    # Re-load so the freshly persisted env vars flow through resolution.
+    return load_config(), [step]
+
+
 def _setup_app(
     *,
     root: Path | None,
@@ -397,6 +454,14 @@ def _setup_app(
             else check_user_path(actual_shim_dir)
         )
 
+    # Auto-detect model folders and llama.cpp binaries for a fresh machine and
+    # save them, so `apb` opens against a real model instead of dead-ending.
+    # Gated on add_to_path: that is the "real install" flag (tests pass
+    # --no-add-to-path), and it persists user env vars just like the PATH step.
+    if add_to_path:
+        config, detect_steps = _autoconfigure_paths(config)
+        install_steps.extend(detect_steps)
+
     report = build_doctor_report(
         model_roots=[config.paths.model_roots[0]],
         llama_bench=config.paths.llama_bench,
@@ -419,11 +484,7 @@ def _setup_app(
         "db_path": str(db_path),
         "runs_root": str(config.paths.runs_root),
         "resolved_config": config.to_dict(),
-        "next_command": (
-            "agent-autobench --start"
-            if report.ready and install_ready
-            else "agent-autobench doctor"
-        ),
+        "next_command": ("apb" if report.ready and install_ready else "apb doctor"),
     }
     if json_out:
         _print_json(payload)
@@ -1780,11 +1841,10 @@ def _print_first_run_report(
     install_ready = all(step.ok for step in install_steps if step.required)
     if report.ready and install_ready:
         console.print("Setup is ready.")
-        console.print("Next command: agent-autobench --start")
-        console.print("Short command: apb --start")
+        console.print("Next command: apb")
     else:
         console.print("Setup needs one or more missing items fixed.")
-        console.print("Next command: agent-autobench doctor")
+        console.print("Next command: apb doctor")
 
 
 def _print_json(payload) -> None:

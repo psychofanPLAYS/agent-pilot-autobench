@@ -7,6 +7,14 @@ semantic versioning for published versions.
 
 ### Added
 
+- **First-run path auto-detection.** On a fresh machine `apb` setup now scans common
+  locations (PATH, LM Studio dirs, `?:\AI\models`, `?:\AI\llama.cpp`, ...) for GGUF model
+  folders and llama.cpp binaries it cannot already resolve, and saves what it finds to
+  your user environment — so a brand-new user gets a working app instead of "Something is
+  missing", without hand-setting `PILOTBENCH_*` env vars. Detection only fills in paths
+  that are not already configured, so an existing setup is left untouched. New
+  `autodetect.py` (`find_model_roots`, `find_llama_binaries`) and
+  `installer.persist_user_env`.
 - **One-command install, then just `apb`.** `INSTALL.bat` / `install.ps1` is a single
   command that auto-installs `uv` if missing, builds the local environment, pulls
   dependencies, and puts `apb` on PATH — no flags, nothing else to run.

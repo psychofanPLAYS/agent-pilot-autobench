@@ -792,6 +792,72 @@ def test_bare_apb_self_installs_on_first_run_then_launches(monkeypatch):
     assert "First run detected" in result.output
 
 
+def test_autoconfigure_detects_and_persists_missing_paths(tmp_path):
+    from gguf_limit_bench.cli import _autoconfigure_paths
+
+    models = tmp_path / "AI" / "models"
+    models.mkdir(parents=True)
+    server = tmp_path / "llama" / "llama-server.exe"
+    server.parent.mkdir(parents=True)
+    server.write_bytes(b"")
+
+    # Config points at non-existent default paths (fresh machine).
+    config = PilotbenchConfig(
+        paths=PathSettings(
+            model_roots=(tmp_path / "_models",),
+            llama_bench=tmp_path / "_llama" / "llama-bench.exe",
+            llama_cli=tmp_path / "_llama" / "llama-cli.exe",
+            llama_server=tmp_path / "_llama" / "llama-server.exe",
+            llama_perplexity=tmp_path / "_llama" / "llama-perplexity.exe",
+        )
+    )
+    persisted: dict[str, str] = {}
+
+    new_config, steps = _autoconfigure_paths(
+        config,
+        detect_models=lambda: [models],
+        detect_binaries=lambda: {"llama-server": server},
+        persist=lambda values: persisted.update(values) or "step",
+    )
+
+    assert persisted["PILOTBENCH_MODEL_ROOTS"] == str(models)
+    assert persisted["PILOTBENCH_LLAMA_SERVER"] == str(server)
+    assert len(steps) == 1
+    # new_config came from a real reload; it is a valid config object.
+    assert new_config is not None
+
+
+def test_autoconfigure_leaves_existing_paths_untouched(tmp_path):
+    from gguf_limit_bench.cli import _autoconfigure_paths
+
+    # Everything already resolves: detection must not run, nothing persisted.
+    (tmp_path / "models").mkdir()
+    for name in ("llama-bench.exe", "llama-cli.exe", "llama-server.exe", "llama-perplexity.exe"):
+        (tmp_path / name).write_bytes(b"")
+    config = PilotbenchConfig(
+        paths=PathSettings(
+            model_roots=(tmp_path / "models",),
+            llama_bench=tmp_path / "llama-bench.exe",
+            llama_cli=tmp_path / "llama-cli.exe",
+            llama_server=tmp_path / "llama-server.exe",
+            llama_perplexity=tmp_path / "llama-perplexity.exe",
+        )
+    )
+
+    def _boom():
+        raise AssertionError("detection should not run when paths already exist")
+
+    new_config, steps = _autoconfigure_paths(
+        config,
+        detect_models=_boom,
+        detect_binaries=_boom,
+        persist=lambda values: (_ for _ in ()).throw(AssertionError("must not persist")),
+    )
+
+    assert steps == []
+    assert new_config is config
+
+
 def test_bare_apb_with_subcommand_does_not_trigger_setup_or_launch(tmp_path, monkeypatch):
     """A subcommand (e.g. `apb results`) must not be hijacked by the launcher."""
     calls: list[str] = []
@@ -853,7 +919,7 @@ def test_first_run_command_checks_paths_and_prepares_local_state(tmp_path, monke
     assert (tmp_path / "bin" / "apb.bat").exists()
     assert "Setup wizard" in result.output
     assert "Setup is ready" in result.output
-    assert "agent-autobench --start" in result.output
+    assert "Next command: apb" in result.output
 
 
 def test_setup_command_uses_resolved_runs_root_when_not_overridden(tmp_path, monkeypatch):
@@ -943,7 +1009,7 @@ def test_setup_json_out_is_agent_friendly(tmp_path, monkeypatch):
     payload = json.loads(result.output)
     assert payload["ready"] is False
     assert payload["install_ready"] is True
-    assert payload["next_command"] == "agent-autobench doctor"
+    assert payload["next_command"] == "apb doctor"
     assert any(step["name"] == "agent-autobench command" for step in payload["install_steps"])
     assert payload["checks"][0]["name"] == "llama-bench"
 
