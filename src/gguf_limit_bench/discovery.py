@@ -10,6 +10,29 @@ from gguf_limit_bench.model_identity import ModelIdentity, resolve_path_identity
 QUANT_RE = re.compile(r"(IQ\d_[A-Z]+|Q\d_[A-Z](?:_[A-Z]+)?|Q8_0|MXFP4_MOE|TQ\d_\dS)", re.I)
 PARAM_RE = re.compile(r"(\d+(?:\.\d+)?B(?:-A\d+B?)?)", re.I)
 
+# Markers for GGUF files that are NOT chat/generative LLMs and must never enter the
+# benchmark candidate set. Serving an embedding/reranker/query-expansion model through
+# llama-server chat-completions would produce degenerate output (or fail outright); the
+# autobench must reject them at discovery rather than "score" them as if they were LLMs.
+# - mmproj / imatrix: vision projector + importance-matrix calibration sidecars.
+# - embedding / reranker: retrieval models, not text generators.
+# - query-expansion: a narrow search-rewrite fine-tune, not a general chat model.
+_NON_GENERATIVE_MARKERS = (
+    "mmproj",
+    "imatrix",
+    "embedding",
+    "embed-",
+    "reranker",
+    "rerank",
+    "query-expansion",
+    "query_expansion",
+)
+
+
+def _is_non_generative(path: Path) -> bool:
+    haystack = str(path).lower()
+    return any(marker in haystack for marker in _NON_GENERATIVE_MARKERS)
+
 
 @dataclass(frozen=True)
 class ModelInfo:
@@ -64,7 +87,7 @@ def discover_models(roots: list[Path]) -> list[ModelInfo]:
             if resolved in seen:
                 continue
             seen.add(resolved)
-            if "mmproj" in path.name.lower():
+            if _is_non_generative(path):
                 continue
             info = parse_model_name(path)
             mmproj = _find_mmproj(path.parent)

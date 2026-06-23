@@ -71,6 +71,21 @@ def test_discover_models_skips_mmproj_anywhere_in_name_and_deduplicates_nested_r
     assert models[0].vision_mmproj == mmproj
 
 
+def test_discover_models_skips_non_generative_ggufs(tmp_path):
+    root = tmp_path / "models"
+    chat = root / "LM_Studio-gguf" / "Qwen3.6-7B-Q4_K_M.gguf"
+    embedding = root / "_Embedding-server" / "Qwen3-Embedding-0.6B-Q8_0.gguf"
+    reranker = root / "_Reranking-server" / "rerankers" / "zerank-2.Q4_K_M.gguf"
+    imatrix = root / "LM_Studio-gguf" / "Qwen3-0.6B" / "imatrix.gguf"
+    for path in (chat, embedding, reranker, imatrix):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"fake")
+
+    models = discover_models([root])
+
+    assert [model.path for model in models] == [chat]
+
+
 def test_discover_models_attaches_path_identity(tmp_path):
     model_dir = tmp_path / "LM_Studio-gguf" / "Publisher" / "Repo"
     model_dir.mkdir(parents=True)
