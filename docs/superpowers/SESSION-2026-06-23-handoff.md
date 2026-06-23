@@ -1,3 +1,8 @@
+> **SUPERSEDED** by
+> [`SESSION-2026-06-23-handoff-2-onboarding-phaseB.md`](SESSION-2026-06-23-handoff-2-onboarding-phaseB.md)
+> (onboarding + Phase B + eval depth). This doc covers the earlier Phase-1
+> cockpit work; keep it only for the deep autoresearch-loop mental model.
+
 # Session Handoff — 2026-06-23 (pilotBENCHY real-benchmark + cockpit)
 
 Audience: the next engineer/agent picking this up cold. Read this first, then

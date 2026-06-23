@@ -78,6 +78,22 @@ Learning is on by default. To avoid updating the local Optuna memory:
 agent-autobench autoresearch --model "path\to\model.gguf" --no-learning
 ```
 
+## Context & VRAM
+
+Predict which context sizes fit in VRAM before running (sliding-window aware):
+
+```powershell
+apb vram-plan --model "path\to\model.gguf" --kv-bits 8
+```
+
+Find the largest context the model can actually serve — climbs from 16k upward,
+q8_0 KV by default, recognises an out-of-memory crash and backs off, and
+remembers the ceiling for next time:
+
+```powershell
+apb context-limit --model "path\to\model.gguf" --llama-server "path\to\llama-server.exe"
+```
+
 ## SimpleBench Flag Ladder
 
 Dry-run the useful autoresearch ladder first. This writes the exact
