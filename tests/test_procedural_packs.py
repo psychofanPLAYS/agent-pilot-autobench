@@ -6,8 +6,10 @@ long-context capability (and its falloff vs ctx) instead of a memorizable fixtur
 """
 from __future__ import annotations
 
+import pytest
+
 from gguf_limit_bench.answer_scoring import score_answer
-from gguf_limit_bench.packs import AnswerType, QuestionPack
+from gguf_limit_bench.packs import AnswerType, QuestionPack, available_packs, load_pack
 from gguf_limit_bench.procedural_packs import (
     approx_token_count,
     build_long_context_pack,
@@ -102,3 +104,28 @@ def test_build_long_context_pack_answers_all_self_score():
     for q in pack.questions:
         response = f"Final Answer: {q.answer}"
         assert score_answer(response, q.answer, pack.answer_type, q.accept) is True
+
+
+# --- registry integration (load_pack / available_packs) ---------------------
+
+def test_available_packs_includes_procedural_longctx_tiers():
+    assert "ruler-longctx-65536" in available_packs()
+
+
+def test_load_pack_generates_procedural_longctx_pack():
+    pack = load_pack("ruler-longctx-2048")
+    assert isinstance(pack, QuestionPack)
+    assert pack.pack_id == "ruler-longctx-2048"
+    assert pack.answer_type is AnswerType.EXACT
+    assert len(pack.questions) >= 1
+
+
+def test_load_pack_procedural_is_reproducible():
+    a = load_pack("ruler-longctx-2048")
+    b = load_pack("ruler-longctx-2048")
+    assert [q.answer for q in a.questions] == [q.answer for q in b.questions]
+
+
+def test_load_pack_unknown_still_raises_keyerror():
+    with pytest.raises(KeyError):
+        load_pack("definitely-not-a-pack")

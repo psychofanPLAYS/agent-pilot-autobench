@@ -46,6 +46,17 @@ _PACKS_DIR = _DATA_DIR / "packs"
 
 DEFAULT_PACKS: tuple[str, ...] = ("simple-bench", "easy-gotcha", "easy-mc")
 
+# Procedural long-context packs are generated on demand (RULER-style), not read
+# from disk. We surface one id per serious context tier so selection UIs can pick
+# them; load_pack() recognises any "ruler-longctx-<tokens>" id.
+PROCEDURAL_LONGCTX_TIERS: tuple[int, ...] = (16384, 65536, 131072, 262144)
+_PROCEDURAL_LONGCTX_RE = re.compile(r"ruler-longctx-(\d+)")
+_PROCEDURAL_LONGCTX_COUNT = 8
+
+
+def procedural_longctx_pack_ids() -> tuple[str, ...]:
+    return tuple(f"ruler-longctx-{tier}" for tier in PROCEDURAL_LONGCTX_TIERS)
+
 
 def available_packs() -> tuple[str, ...]:
     """Return IDs of all available question packs."""
@@ -62,6 +73,9 @@ def available_packs() -> tuple[str, ...]:
     for pid in dynamic:
         if pid not in known:
             known.append(pid)
+    for pid in procedural_longctx_pack_ids():
+        if pid not in known:
+            known.append(pid)
     return tuple(known)
 
 
@@ -72,6 +86,18 @@ def load_pack(pack_id: str) -> QuestionPack:
     """
     if pack_id == "simple-bench":
         return _load_simple_bench()
+
+    procedural = _PROCEDURAL_LONGCTX_RE.fullmatch(pack_id)
+    if procedural:
+        # Local import avoids a circular dependency: procedural_packs imports
+        # PackQuestion/QuestionPack from this module.
+        from gguf_limit_bench.procedural_packs import build_long_context_pack
+
+        return build_long_context_pack(
+            target_tokens=int(procedural.group(1)),
+            count=_PROCEDURAL_LONGCTX_COUNT,
+            seed=0,
+        )
 
     pack_path = _PACKS_DIR / f"{pack_id}.json"
     if not pack_path.exists():
