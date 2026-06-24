@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 
 from gguf_limit_bench.autodetect import (
     find_llama_binaries,
@@ -10,6 +11,10 @@ def _touch(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"")
     return path
+
+
+def _llama_bin_name(stem: str) -> str:
+    return f"{stem}.exe" if os.name == "nt" else stem
 
 
 def test_find_model_roots_returns_folders_that_contain_gguf(tmp_path):
@@ -58,8 +63,8 @@ def test_find_model_roots_respects_limit(tmp_path):
 
 def test_find_llama_binaries_scans_roots_when_not_on_path(tmp_path):
     build = tmp_path / "AI" / "llama.cpp" / "cuda12"
-    server = _touch(build / "llama-server.exe")
-    _touch(build / "llama-bench.exe")
+    server = _touch(build / _llama_bin_name("llama-server"))
+    _touch(build / _llama_bin_name("llama-bench"))
 
     found = find_llama_binaries([tmp_path / "AI"], which=lambda _name: None)
 
