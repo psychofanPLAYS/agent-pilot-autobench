@@ -27,6 +27,11 @@ apb --start
 Plain `apb` also opens the browser cockpit after setup. Use `apb tui` only when
 you specifically want the older terminal cockpit.
 
+In the browser cockpit, pick models, choose the test type, review the recommended
+forced flags, and start the run. The page shows live activity, telemetry, the
+current best model for this machine, and links to the receipts when the run
+finishes.
+
 The longer command also works:
 
 ```powershell
@@ -57,7 +62,10 @@ The app writes receipts and reports under:
 _runs\
 ```
 
-Open `_runs\results.html` for the cross-run browser report or `_runs\leaderboard.md` for the compact text version.
+The browser cockpit links to `_runs\results.html`, `_runs\leaderboard.md`, and
+recent per-run reports directly. You can still open `_runs\results.html` by hand
+for the cross-run browser report or `_runs\leaderboard.md` for the compact text
+version.
 
 You can also ask the app to open the report:
 

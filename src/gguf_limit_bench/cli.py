@@ -439,7 +439,7 @@ def _start_app(
     serve_webui(
         root=root,
         runs_root=runs_root,
-        run_model=lambda model, mode_id: (
+        run_model=lambda model, options: (
             _run_one_autoresearch(
                 model=model.path,
                 llama_bench=llama_bench,
@@ -447,21 +447,21 @@ def _start_app(
                 llama_server=llama_server,
                 llama_perplexity=llama_perplexity,
                 runs_root=runs_root,
-                budget_seconds=mode_by_id(mode_id).budget_minutes * 60,
+                budget_seconds=options.budget_minutes * 60,
                 parallel_max=parallel_max,
                 max_attempts=run_config.max_attempts,
                 learning=learning,
                 workflow_eval=workflow_eval,
                 ttft_probe=ttft_probe,
                 context_ladder=_context_ladder_or_none(context_ladder)
-                or _context_ladder_or_none(mode_by_id(mode_id).context_ladder)
+                or _context_ladder_or_none(mode_by_id(options.mode_id).context_ladder)
                 or _context_ladder_or_none(run_config.context_ladder),
                 benchmark_suite_plan=benchmark_suite_plan,
                 enable_mtp=model.has_mtp,
-                evaluation=mode_by_id(mode_id).evaluation,
-                forced_server_args=_effective_forced_server_args(),
+                evaluation=mode_by_id(options.mode_id).evaluation,
+                forced_server_args=options.forced_server_args,
                 champion_pack_ids=tuple(LIBRARIAN_PACK_IDS)
-                if mode_id == "librarian_bench"
+                if options.mode_id == "librarian_bench"
                 else None,
             ).path
         ),

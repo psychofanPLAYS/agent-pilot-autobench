@@ -16,6 +16,7 @@ from gguf_limit_bench.config import (
 from gguf_limit_bench.discovery import ModelInfo
 from gguf_limit_bench.doctor import DoctorCheck, DoctorReport
 from gguf_limit_bench.programs import MIN_SERIOUS_CONTEXT_SIZE
+from gguf_limit_bench.webui import WebRunOptions
 
 
 runner = CliRunner()
@@ -632,7 +633,14 @@ def test_start_command_webui_callback_runs_librarian_pack_models(tmp_path, monke
         return type("Receipt", (), {"path": receipt})()
 
     def fake_serve_webui(**kwargs) -> str:
-        receipt = kwargs["run_model"](selected, "librarian_bench")
+        receipt = kwargs["run_model"](
+            selected,
+            WebRunOptions(
+                mode_id="librarian_bench",
+                budget_minutes=7,
+                forced_server_args=("--jinja",),
+            ),
+        )
         assert receipt == tmp_path / "runs" / "fake"
         return "http://127.0.0.1:9999/"
 
@@ -660,6 +668,8 @@ def test_start_command_webui_callback_runs_librarian_pack_models(tmp_path, monke
     assert runs[0]["model"] == selected.path
     assert runs[0]["enable_mtp"] is True
     assert runs[0]["benchmark_suite_plan"] == plan_path
+    assert runs[0]["budget_seconds"] == 7 * 60
+    assert runs[0]["forced_server_args"] == ("--jinja",)
     assert "librarian-gate" in runs[0]["champion_pack_ids"]
 
 
@@ -687,7 +697,10 @@ def test_start_command_uses_preset_budget_when_budget_not_overridden(tmp_path, m
         return type("Receipt", (), {"path": receipt})()
 
     def fake_serve_webui(**kwargs) -> str:
-        kwargs["run_model"](selected, "deep")
+        kwargs["run_model"](
+            selected,
+            WebRunOptions(mode_id="deep", budget_minutes=60, forced_server_args=()),
+        )
         return "http://127.0.0.1:9999/"
 
     monkeypatch.setattr("gguf_limit_bench.cli.serve_webui", fake_serve_webui)

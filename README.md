@@ -53,8 +53,11 @@ that goes straight to the app. Power-user subcommands still exist — run
 ## Cockpit Modes
 
 Plain `apb` (or double-clicking `START.bat`) opens the local browser cockpit.
-Pick model(s) with checkboxes, choose a mode from the menu, then press
-**Start benchmark**. The older terminal cockpit is still available with `apb tui`.
+Pick model(s) with checkboxes, choose a mode from the menu, review the
+recommended/forced llama.cpp flags, then press **Start benchmark**. While a run is
+active, the cockpit shows the live activity feed, telemetry, current winner, and
+receipt/report links so you do not have to dig through `_runs` by hand. The older
+terminal cockpit is still available with `apb tui` as a fallback.
 
 - **Quick check** — does it load, and how fast? No questions asked (fast scout).
 - **Find best settings** — walk the flag ladder, ask the questions, crown the best settings.
