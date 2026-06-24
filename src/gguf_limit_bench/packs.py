@@ -76,6 +76,13 @@ def available_packs() -> tuple[str, ...]:
     for pid in procedural_longctx_pack_ids():
         if pid not in known:
             known.append(pid)
+    # Local import avoids a circular dependency: the librarian package imports
+    # PackQuestion/QuestionPack from this module.
+    from gguf_limit_bench.librarian.registry import LIBRARIAN_PACK_IDS
+
+    for pid in LIBRARIAN_PACK_IDS:
+        if pid not in known:
+            known.append(pid)
     return tuple(known)
 
 
@@ -98,6 +105,13 @@ def load_pack(pack_id: str) -> QuestionPack:
             count=_PROCEDURAL_LONGCTX_COUNT,
             seed=0,
         )
+
+    # Local import avoids a circular dependency: the librarian package imports
+    # PackQuestion/QuestionPack from this module.
+    from gguf_limit_bench.librarian.registry import LIBRARIAN_BUILDERS
+
+    if pack_id in LIBRARIAN_BUILDERS:
+        return LIBRARIAN_BUILDERS[pack_id](0)
 
     pack_path = _PACKS_DIR / f"{pack_id}.json"
     if not pack_path.exists():
