@@ -25,6 +25,9 @@ class LlamaRuntimeCapabilities:
     def supports(self, option: str) -> bool:
         return option in self.supported_options and option not in self.removed_options
 
+    def is_removed(self, option: str) -> bool:
+        return option in self.removed_options
+
     def to_dict(self) -> dict:
         return {
             "version": self.version,
@@ -82,6 +85,15 @@ def collect_llama_capabilities(
             help_text=help_text,
         )
     return parse_llama_help(version_text, help_text)
+
+
+LlamaCapabilities = LlamaRuntimeCapabilities
+
+
+def inspect_llama_executable(
+    executable: Path, timeout_seconds: float = 5.0
+) -> LlamaRuntimeCapabilities:
+    return collect_llama_capabilities(executable, timeout_seconds=timeout_seconds)
 
 
 def _run_introspection(executable: Path, option: str, timeout_seconds: float):

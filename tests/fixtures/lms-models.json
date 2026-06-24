@@ -1,0 +1,28 @@
+[
+  {
+    "type": "llm",
+    "modelKey": "qwen3.6-27b-mtp-pi-reasoning",
+    "format": "gguf",
+    "displayName": "Qwen3.6 27B MTP Pi Reasoning",
+    "publisher": "bytkim",
+    "path": "bytkim/Qwen3.6-27B-MTP-pi-reasoning-GGUF/Qwen3.6-27B-MTP-pi-reasoning-Q5_K_M.gguf",
+    "indexedModelIdentifier": "bytkim/Qwen3.6-27B-MTP-pi-reasoning-GGUF/Qwen3.6-27B-MTP-pi-reasoning-Q5_K_M.gguf",
+    "architecture": "qwen35",
+    "quantization": {"name": "Q5_K_M", "bits": 5},
+    "trainedForToolUse": true,
+    "maxContextLength": 262144
+  },
+  {
+    "type": "llm",
+    "modelKey": "qwen3.6-27b-mtp-pi-tune",
+    "format": "gguf",
+    "displayName": "Qwen3.6 27B MTP Pi Tune",
+    "publisher": "bytkim",
+    "path": "bytkim/Qwen3.6-27B-MTP-pi-tune-GGUF/Qwen3.6-27B-MTP-pi-tune-Q5_K_M.gguf",
+    "indexedModelIdentifier": "bytkim/Qwen3.6-27B-MTP-pi-tune-GGUF/Qwen3.6-27B-MTP-pi-tune-Q5_K_M.gguf",
+    "architecture": "qwen35",
+    "quantization": {"name": "Q5_K_M", "bits": 5},
+    "trainedForToolUse": true,
+    "maxContextLength": 262144
+  }
+]
