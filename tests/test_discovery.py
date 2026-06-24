@@ -25,6 +25,14 @@ def test_parse_model_name_does_not_mark_plain_qwen35_moe_as_mtp():
     assert info.has_mtp is False
 
 
+def test_parse_model_name_detects_gemma_family():
+    info = parse_model_name(Path("google-gemma-3-27b-it-Q4_K_M.gguf"))
+
+    assert info.family == "gemma"
+    assert info.parameters == "27B"
+    assert info.quant == "Q4_K_M"
+
+
 def test_discover_models_pairs_mmproj_with_weight(tmp_path):
     model_dir = tmp_path / "lmstudio-community" / "Qwen3.6-35B-A3B-GGUF"
     model_dir.mkdir(parents=True)

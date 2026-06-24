@@ -81,7 +81,9 @@ def render_results_markdown(payload: dict[str, Any]) -> str:
 
     # Summary line
     flags_str = " ".join(payload.get("recommended_flags", [])) or "(none)"
-    seed_str = str(payload.get("selection_seed")) if payload.get("selection_seed") is not None else "n/a"
+    seed_str = (
+        str(payload.get("selection_seed")) if payload.get("selection_seed") is not None else "n/a"
+    )
     lines.append(
         f"**GPU:** {payload['gpu']}  "
         f"**Mode:** {payload['selection_mode']} (seed {seed_str})  "

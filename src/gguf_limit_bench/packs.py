@@ -128,6 +128,7 @@ def load_pack(pack_id: str) -> QuestionPack:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _load_simple_bench() -> QuestionPack:
     data_path = _DATA_DIR / "simple_bench_public.json"
     system_prompt_path = _DATA_DIR / "system_prompt.txt"
@@ -194,7 +195,9 @@ def _load_json_pack(payload: dict[str, Any], pack_path: Path) -> QuestionPack:
     for raw in raw_questions:
         qid = str(raw["question_id"])
         choices_raw: list[str] | None = raw.get("choices")
-        choices: tuple[str, ...] | None = tuple(str(c) for c in choices_raw) if choices_raw else None
+        choices: tuple[str, ...] | None = (
+            tuple(str(c) for c in choices_raw) if choices_raw else None
+        )
         tags: tuple[str, ...] = tuple(str(t) for t in raw.get("tags", []))
         accept: tuple[str, ...] = tuple(str(a) for a in raw.get("accept", []))
         answer = str(raw["answer"]).strip()

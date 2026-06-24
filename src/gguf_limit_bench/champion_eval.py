@@ -18,6 +18,7 @@ Provides :func:`evaluate_champion_packs`, which:
 The server is always torn down (``finally``).  Callers should wrap the call in
 their own ``try/except`` so a failure here does not abort the outer run.
 """
+
 from __future__ import annotations
 
 import logging
@@ -180,9 +181,9 @@ def _eval_one_pack(
             model_key=model_key,
             pack_id=pack_id,
             question_id=str(result.question_id),
-            outcome=result.outcome if result.outcome is not None else (
-                "correct" if result.correct else "wrong"
-            ),
+            outcome=result.outcome
+            if result.outcome is not None
+            else ("correct" if result.correct else "wrong"),
             ts=ts,
         )
 
@@ -192,20 +193,21 @@ def _eval_one_pack(
     question_dicts = []
     for result in batch.results:
         original = chosen_by_id.get(result.question_id)
-        question_dicts.append({
-            "question_id": result.question_id,
-            "prompt": original.prompt if original is not None else "",
-            "expected": result.expected_answer,
-            "predicted": result.predicted_answer,
-            "outcome": result.outcome if result.outcome is not None else (
-                "correct" if result.correct else "wrong"
-            ),
-        })
+        question_dicts.append(
+            {
+                "question_id": result.question_id,
+                "prompt": original.prompt if original is not None else "",
+                "expected": result.expected_answer,
+                "predicted": result.predicted_answer,
+                "outcome": result.outcome
+                if result.outcome is not None
+                else ("correct" if result.correct else "wrong"),
+            }
+        )
 
     incomplete = sum(1 for r in batch.results if getattr(r, "outcome", None) == "incomplete")
     wrong = sum(
-        1 for r in batch.results
-        if not r.correct and getattr(r, "outcome", None) != "incomplete"
+        1 for r in batch.results if not r.correct and getattr(r, "outcome", None) != "incomplete"
     )
 
     return {

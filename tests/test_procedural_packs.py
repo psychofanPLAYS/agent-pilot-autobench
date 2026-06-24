@@ -4,6 +4,7 @@ These build synthetic, uncontaminated, length-controllable tasks: a model can
 only answer by actually reading the long context, so they measure real
 long-context capability (and its falloff vs ctx) instead of a memorizable fixture.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -24,6 +25,7 @@ def test_approx_token_count_uses_four_chars_per_token():
 
 
 # --- needle-in-context ------------------------------------------------------
+
 
 def test_needle_single_embeds_a_recoverable_code():
     q = generate_needle_single(target_tokens=300, depth_fraction=0.5, seed=1)
@@ -66,6 +68,7 @@ def test_needle_single_is_reproducible_by_seed():
 
 # --- variable tracking (multi-hop) ------------------------------------------
 
+
 def test_variable_tracking_answer_is_the_resolved_value():
     q = generate_variable_tracking(target_tokens=400, hops=5, seed=4)
     assert q.answer.isdigit()
@@ -88,6 +91,7 @@ def test_variable_tracking_is_reproducible_by_seed():
 
 # --- assembled pack ---------------------------------------------------------
 
+
 def test_build_long_context_pack_shape():
     pack = build_long_context_pack(target_tokens=500, count=4, seed=5)
     assert isinstance(pack, QuestionPack)
@@ -107,6 +111,7 @@ def test_build_long_context_pack_answers_all_self_score():
 
 
 # --- registry integration (load_pack / available_packs) ---------------------
+
 
 def test_available_packs_includes_procedural_longctx_tiers():
     assert "ruler-longctx-65536" in available_packs()

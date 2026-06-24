@@ -8,6 +8,7 @@ tradeoff" instead of a raw leaderboard.
 
 Pure functions; no dependencies.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

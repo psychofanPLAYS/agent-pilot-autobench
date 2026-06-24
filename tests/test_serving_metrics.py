@@ -5,6 +5,7 @@ server. They upgrade the speed program from single-stream tok/s to a real
 serving profile: TTFT, TPOT, inter-token latency, end-to-end latency,
 percentiles, and goodput-under-SLO.
 """
+
 from __future__ import annotations
 
 import math

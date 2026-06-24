@@ -2,6 +2,7 @@
 
 All tests use monkeypatching — no real llama-server is started.
 """
+
 from __future__ import annotations
 
 import json
@@ -100,9 +101,7 @@ def _make_fake_load_pack(pack_id: str) -> QuestionPack:
 
 def test_evaluate_champion_packs_writes_results_json(tmp_path, monkeypatch):
     """evaluate_champion_packs writes results.json into run_dir."""
-    monkeypatch.setattr(
-        "gguf_limit_bench.champion_eval.llama_server_session", _fake_server_session
-    )
+    monkeypatch.setattr("gguf_limit_bench.champion_eval.llama_server_session", _fake_server_session)
     monkeypatch.setattr(
         "gguf_limit_bench.champion_eval.run_pack_questions",
         lambda **kwargs: _make_fake_run_pack_questions(**kwargs),
@@ -140,9 +139,7 @@ def test_evaluate_champion_packs_writes_results_json(tmp_path, monkeypatch):
 
 def test_evaluate_champion_packs_results_references_packs(tmp_path, monkeypatch):
     """The written results.json references the requested pack IDs."""
-    monkeypatch.setattr(
-        "gguf_limit_bench.champion_eval.llama_server_session", _fake_server_session
-    )
+    monkeypatch.setattr("gguf_limit_bench.champion_eval.llama_server_session", _fake_server_session)
     monkeypatch.setattr(
         "gguf_limit_bench.champion_eval.run_pack_questions",
         lambda **kwargs: _make_fake_run_pack_questions(**kwargs),
@@ -181,9 +178,7 @@ def test_evaluate_champion_packs_results_references_packs(tmp_path, monkeypatch)
 
 def test_evaluate_champion_packs_advances_state_db_cursor(tmp_path, monkeypatch):
     """After the call the selection cursor in the state DB must have advanced."""
-    monkeypatch.setattr(
-        "gguf_limit_bench.champion_eval.llama_server_session", _fake_server_session
-    )
+    monkeypatch.setattr("gguf_limit_bench.champion_eval.llama_server_session", _fake_server_session)
     monkeypatch.setattr(
         "gguf_limit_bench.champion_eval.run_pack_questions",
         lambda **kwargs: _make_fake_run_pack_questions(**kwargs),
@@ -228,9 +223,7 @@ def test_evaluate_champion_packs_advances_state_db_cursor(tmp_path, monkeypatch)
 
 def test_evaluate_champion_packs_results_json_contains_model_name(tmp_path, monkeypatch):
     """results.json must record the model path."""
-    monkeypatch.setattr(
-        "gguf_limit_bench.champion_eval.llama_server_session", _fake_server_session
-    )
+    monkeypatch.setattr("gguf_limit_bench.champion_eval.llama_server_session", _fake_server_session)
     monkeypatch.setattr(
         "gguf_limit_bench.champion_eval.run_pack_questions",
         lambda **kwargs: _make_fake_run_pack_questions(**kwargs),
@@ -269,9 +262,7 @@ def test_evaluate_champion_packs_results_json_contains_model_name(tmp_path, monk
 
 def test_evaluate_champion_packs_unknown_pack_skipped(tmp_path, monkeypatch):
     """An unknown pack ID is skipped; results.json is still written."""
-    monkeypatch.setattr(
-        "gguf_limit_bench.champion_eval.llama_server_session", _fake_server_session
-    )
+    monkeypatch.setattr("gguf_limit_bench.champion_eval.llama_server_session", _fake_server_session)
     monkeypatch.setattr(
         "gguf_limit_bench.champion_eval.run_pack_questions",
         lambda **kwargs: _make_fake_run_pack_questions(**kwargs),

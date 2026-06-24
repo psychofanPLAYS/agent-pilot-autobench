@@ -43,6 +43,13 @@ RUN_MODES: tuple[RunMode, ...] = (
         evaluation=EvaluationMode.BENCHMARK,
     ),
     RunMode(
+        id="librarian_bench",
+        label="Librarian bot test",
+        description="Compare Gemma and Qwen as local memory/RAG workers for coding agents.",
+        budget_minutes=30,
+        evaluation=EvaluationMode.BENCHMARK,
+    ),
+    RunMode(
         id="flag_effect",
         label="How flags affect speed",
         description="See how each llama.cpp flag changes tok/s and TTFT for this model.",

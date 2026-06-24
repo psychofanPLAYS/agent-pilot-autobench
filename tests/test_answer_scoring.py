@@ -110,7 +110,10 @@ def test_score_answer_exact_wrong():
 
 
 def test_score_answer_exact_accept_variant():
-    assert score_answer("Final Answer: his son", "the son", AnswerType.EXACT, accept=("his son",)) is True
+    assert (
+        score_answer("Final Answer: his son", "the son", AnswerType.EXACT, accept=("his son",))
+        is True
+    )
 
 
 def test_score_answer_exact_phrase_containment_in_response():

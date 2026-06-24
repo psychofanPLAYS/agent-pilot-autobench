@@ -8,7 +8,7 @@ On Windows, first double-click:
 FIRST_RUN.bat
 ```
 
-That file sets up the app, installs the `apb` command, and opens the model picker when the machine checks pass.
+That file sets up the app, installs the `apb` command, and opens the browser cockpit when the machine checks pass.
 
 ## Terminal Path
 
@@ -23,6 +23,9 @@ After setup adds `_bin` to your user PATH, open a new terminal and run:
 ```powershell
 apb --start
 ```
+
+Plain `apb` also opens the browser cockpit after setup. Use `apb tui` only when
+you specifically want the older terminal cockpit.
 
 The longer command also works:
 

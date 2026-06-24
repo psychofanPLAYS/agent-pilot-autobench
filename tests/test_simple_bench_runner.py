@@ -4,6 +4,7 @@ Uses the same fake-client pattern as test_simple_bench.py — no real llama-serv
 is started.  Each test patches urlopen so we control exactly what the server
 "returns".
 """
+
 from __future__ import annotations
 
 from io import BytesIO
@@ -15,6 +16,7 @@ from gguf_limit_bench.pack_runner import run_pack_questions
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_pack(
     *,
@@ -58,6 +60,7 @@ class FakeResponse(BytesIO):
 def _sse(content: str) -> bytes:
     """Wrap content in a minimal SSE frame that the stream parser can consume."""
     import json
+
     event = json.dumps(
         {
             "choices": [{"delta": {"content": content}}],

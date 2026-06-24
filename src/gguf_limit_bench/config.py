@@ -111,9 +111,7 @@ def load_config(config_path: Path | None = None) -> PilotbenchConfig:
             question_sample_size=int(
                 benchmark.get("question_sample_size", DEFAULT_QUESTION_SAMPLE_SIZE)
             ),
-            question_selection=str(
-                benchmark.get("question_selection", DEFAULT_QUESTION_SELECTION)
-            ),
+            question_selection=str(benchmark.get("question_selection", DEFAULT_QUESTION_SELECTION)),
         ),
     )
     return apply_env_overrides(config)
@@ -156,9 +154,7 @@ def apply_env_overrides(config: PilotbenchConfig) -> PilotbenchConfig:
                 os.environ.get("PILOTBENCH_FORCED_SERVER_ARGS"), benchmark.forced_server_args
             ),
             question_sample_size=int(
-                os.environ.get(
-                    "PILOTBENCH_QUESTION_SAMPLE_SIZE", benchmark.question_sample_size
-                )
+                os.environ.get("PILOTBENCH_QUESTION_SAMPLE_SIZE", benchmark.question_sample_size)
             ),
             question_selection=str(
                 os.environ.get("PILOTBENCH_QUESTION_SELECTION", benchmark.question_selection)

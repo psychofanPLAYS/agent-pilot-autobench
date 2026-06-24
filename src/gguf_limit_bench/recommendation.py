@@ -5,6 +5,7 @@ This is the buyer's answer: instead of a leaderboard of profiles, produce
 AttemptResults (including honest *partial* results) into Pareto candidates,
 computes the non-dominated frontier, and picks a recommendation.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

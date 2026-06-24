@@ -24,7 +24,9 @@ def test_persist_user_env_sets_values_in_current_process(monkeypatch):
         return _Done()
 
     # Uses a PILOTBENCH_ name so the autouse conftest fixture cleans it up.
-    step = persist_user_env({"PILOTBENCH_LLAMA_SERVER": "X:/llama/llama-server.exe"}, runner=fake_runner)
+    step = persist_user_env(
+        {"PILOTBENCH_LLAMA_SERVER": "X:/llama/llama-server.exe"}, runner=fake_runner
+    )
 
     assert os.environ["PILOTBENCH_LLAMA_SERVER"] == "X:/llama/llama-server.exe"
     assert step.ok

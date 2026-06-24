@@ -1,4 +1,5 @@
 """Turn autoresearch attempts into a flag recommendation (the buyer's answer)."""
+
 from __future__ import annotations
 
 from gguf_limit_bench.autoresearch import AttemptResult
@@ -47,7 +48,12 @@ def test_crashes_are_excluded_from_candidates():
 def test_ok_and_partial_results_become_candidates():
     ok = _ar("L6", ok=True, tps=80.0, acc=0.6)
     partial = _ar(
-        "L2", ok=False, tps=50.0, acc=0.4, completed=3, attempted=10,
+        "L2",
+        ok=False,
+        tps=50.0,
+        acc=0.4,
+        completed=3,
+        attempted=10,
         failure="budget_exhausted_partial",
     )
     candidates = attempts_to_candidates([ok, partial])
@@ -56,7 +62,12 @@ def test_ok_and_partial_results_become_candidates():
 
 def test_partial_candidate_is_flagged_in_payload():
     partial = _ar(
-        "L2", ok=False, tps=50.0, acc=0.4, completed=3, attempted=10,
+        "L2",
+        ok=False,
+        tps=50.0,
+        acc=0.4,
+        completed=3,
+        attempted=10,
         failure="budget_exhausted_partial",
     )
     (candidate,) = attempts_to_candidates([partial])

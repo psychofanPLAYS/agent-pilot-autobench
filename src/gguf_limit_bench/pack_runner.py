@@ -14,6 +14,7 @@ The existing :mod:`gguf_limit_bench.simple_bench_runner` public API is
 the simple-bench path; callers such as ``autoresearch.py`` and ``cli.py``
 continue to import from there unchanged.
 """
+
 from __future__ import annotations
 
 import json
@@ -29,9 +30,7 @@ from gguf_limit_bench.simple_bench import (
     SimpleBenchQuestionResult,
 )
 
-_FORCED_FINAL_INSTRUCTION = (
-    "Reply with ONLY your final answer in the form 'Final Answer: X'."
-)
+_FORCED_FINAL_INSTRUCTION = "Reply with ONLY your final answer in the form 'Final Answer: X'."
 _FORCED_FINAL_MAX_TOKENS = 64
 
 # 0 (or any value <= 0) means "do not cap the answer" — let a reasoning model
@@ -118,9 +117,7 @@ def _run_one_question(
 
     # ---- Forced-final follow-up (if needed) --------------------------
     if extracted is None:
-        followup_user = (
-            f"{primary_text}\n\n{_FORCED_FINAL_INSTRUCTION}"
-        )
+        followup_user = f"{primary_text}\n\n{_FORCED_FINAL_INSTRUCTION}"
         followup_text, _, _, _, _ = _chat(
             base_url=base_url,
             system_prompt=system_prompt,
@@ -271,11 +268,11 @@ def _aggregate(results: list[SimpleBenchQuestionResult]) -> SimpleBenchBatchResu
     completion_rate = answered / total if total else 0.0
 
     tps_values = [
-        r.tokens_per_second
-        for r in results
-        if r.tokens_per_second > 0 and r.output_chars > 0
+        r.tokens_per_second for r in results if r.tokens_per_second > 0 and r.output_chars > 0
     ]
-    prompt_tps_values = [r.prompt_tokens_per_second for r in results if r.prompt_tokens_per_second > 0]
+    prompt_tps_values = [
+        r.prompt_tokens_per_second for r in results if r.prompt_tokens_per_second > 0
+    ]
     ttft_values = [r.ttft_ms for r in results if r.ttft_ms is not None]
 
     median_tps = _median(tps_values) or 0.0

@@ -9,7 +9,9 @@ from typing import Any, Protocol
 try:
     from huggingface_hub.errors import HfHubHTTPError
 except ModuleNotFoundError:
-    HfHubHTTPError = OSError
+
+    class HfHubHTTPError(OSError):  # type: ignore[no-redef]
+        pass
 
 
 class HubGateway(Protocol):

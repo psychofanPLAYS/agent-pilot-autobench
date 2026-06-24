@@ -560,7 +560,7 @@ def test_first_run_option_sets_up_then_starts_from_config(tmp_path, monkeypatch)
     assert calls[1][1]["parallel_max"] == 2
 
 
-def test_start_command_opens_tui_after_ready_check(tmp_path, monkeypatch):
+def test_start_command_opens_webui_after_ready_check(tmp_path, monkeypatch):
     opened_roots: list[Path] = []
     monkeypatch.setattr(
         "gguf_limit_bench.cli.build_doctor_report",
@@ -576,26 +576,20 @@ def test_start_command_opens_tui_after_ready_check(tmp_path, monkeypatch):
         ),
     )
 
-    class FakeBenchTui:
-        models_to_run: list[ModelInfo] = []
+    def fake_serve_webui(**kwargs) -> str:
+        opened_roots.append(kwargs["root"])
+        return "http://127.0.0.1:9999/"
 
-        def __init__(self, root: Path, **kwargs) -> None:
-            opened_roots.append(root)
-
-        def run(self) -> None:
-            pass
-
-    monkeypatch.setattr("gguf_limit_bench.cli.BenchTui", FakeBenchTui)
+    monkeypatch.setattr("gguf_limit_bench.cli.serve_webui", fake_serve_webui)
 
     result = runner.invoke(app, ["start", "--root", str(tmp_path)])
 
     assert result.exit_code == 0
     assert opened_roots == [tmp_path]
-    assert "Opening the model picker" in result.output
-    assert "No models selected" in result.output
+    assert "Opening the browser cockpit" in result.output
 
 
-def test_start_command_runs_selected_models_from_tui(tmp_path, monkeypatch):
+def test_start_command_webui_callback_runs_librarian_pack_models(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "gguf_limit_bench.cli.build_doctor_report",
         lambda **kwargs: DoctorReport(
@@ -631,20 +625,18 @@ def test_start_command_runs_selected_models_from_tui(tmp_path, monkeypatch):
     )
     runs: list[dict] = []
 
-    class FakeBenchTui:
-        def __init__(self, root: Path, **kwargs) -> None:
-            self.models_to_run = [selected]
-
-        def run(self) -> None:
-            pass
-
     def fake_run_one_autoresearch(**kwargs):
         runs.append(kwargs)
         receipt = tmp_path / "runs" / "fake"
         receipt.mkdir(parents=True)
         return type("Receipt", (), {"path": receipt})()
 
-    monkeypatch.setattr("gguf_limit_bench.cli.BenchTui", FakeBenchTui)
+    def fake_serve_webui(**kwargs) -> str:
+        receipt = kwargs["run_model"](selected, "librarian_bench")
+        assert receipt == tmp_path / "runs" / "fake"
+        return "http://127.0.0.1:9999/"
+
+    monkeypatch.setattr("gguf_limit_bench.cli.serve_webui", fake_serve_webui)
     monkeypatch.setattr("gguf_limit_bench.cli._run_one_autoresearch", fake_run_one_autoresearch)
 
     result = runner.invoke(
@@ -665,10 +657,10 @@ def test_start_command_runs_selected_models_from_tui(tmp_path, monkeypatch):
     )
 
     assert result.exit_code == 0
-    assert "Starting research loop for 1 selected model" in result.output
     assert runs[0]["model"] == selected.path
     assert runs[0]["enable_mtp"] is True
     assert runs[0]["benchmark_suite_plan"] == plan_path
+    assert "librarian-gate" in runs[0]["champion_pack_ids"]
 
 
 def test_start_command_uses_preset_budget_when_budget_not_overridden(tmp_path, monkeypatch):
@@ -688,26 +680,23 @@ def test_start_command_uses_preset_budget_when_budget_not_overridden(tmp_path, m
     selected = ModelInfo(path=tmp_path / "Qwen3.gguf", name="Qwen3.gguf", family="qwen")
     runs: list[dict] = []
 
-    class FakeBenchTui:
-        def __init__(self, root: Path, **kwargs) -> None:
-            self.models_to_run = [selected]
-
-        def run(self) -> None:
-            pass
-
     def fake_run_one_autoresearch(**kwargs):
         runs.append(kwargs)
         receipt = tmp_path / "runs" / "fake"
         receipt.mkdir(parents=True)
         return type("Receipt", (), {"path": receipt})()
 
-    monkeypatch.setattr("gguf_limit_bench.cli.BenchTui", FakeBenchTui)
+    def fake_serve_webui(**kwargs) -> str:
+        kwargs["run_model"](selected, "deep")
+        return "http://127.0.0.1:9999/"
+
+    monkeypatch.setattr("gguf_limit_bench.cli.serve_webui", fake_serve_webui)
     monkeypatch.setattr("gguf_limit_bench.cli._run_one_autoresearch", fake_run_one_autoresearch)
 
     result = runner.invoke(app, ["start", "--root", str(tmp_path), "--preset", "deep"])
 
     assert result.exit_code == 0
-    assert runs[0]["budget_seconds"] == 20 * 60
+    assert runs[0]["budget_seconds"] == 60 * 60
 
 
 def test_start_command_exits_when_required_check_is_missing(tmp_path, monkeypatch):
@@ -754,7 +743,7 @@ def test_global_start_flag_check_only_uses_beginner_path(tmp_path, monkeypatch):
     assert "Remove --check-only to open the picker" in result.output
 
 
-def test_global_start_flag_opens_tui(monkeypatch):
+def test_global_start_flag_opens_webui(monkeypatch):
     opened_roots: list[Path] = []
     monkeypatch.setattr(
         "gguf_limit_bench.cli.build_doctor_report",
@@ -770,16 +759,11 @@ def test_global_start_flag_opens_tui(monkeypatch):
         ),
     )
 
-    class FakeBenchTui:
-        models_to_run: list[ModelInfo] = []
+    def fake_serve_webui(**kwargs) -> str:
+        opened_roots.append(kwargs["root"])
+        return "http://127.0.0.1:9999/"
 
-        def __init__(self, root: Path, **kwargs) -> None:
-            opened_roots.append(root)
-
-        def run(self) -> None:
-            pass
-
-    monkeypatch.setattr("gguf_limit_bench.cli.BenchTui", FakeBenchTui)
+    monkeypatch.setattr("gguf_limit_bench.cli.serve_webui", fake_serve_webui)
 
     result = runner.invoke(app, ["--start"])
 
@@ -886,12 +870,21 @@ def test_context_limit_climbs_and_recovers_from_oom(tmp_path, monkeypatch):
     def fake_probe(*, settings, **kwargs):
         if settings.context_size > 65_536:
             return ServingProbeResult(
-                ok=False, ttft_ms=None, tokens_per_second=0.0, output_chars=0,
-                generated_tokens=0, failure="oom", stderr_tail="cudaMalloc failed: out of memory",
+                ok=False,
+                ttft_ms=None,
+                tokens_per_second=0.0,
+                output_chars=0,
+                generated_tokens=0,
+                failure="oom",
+                stderr_tail="cudaMalloc failed: out of memory",
             )
         return ServingProbeResult(
-            ok=True, ttft_ms=10.0, tokens_per_second=80.0, output_chars=10,
-            generated_tokens=8, failure="none",
+            ok=True,
+            ttft_ms=10.0,
+            tokens_per_second=80.0,
+            output_chars=10,
+            generated_tokens=8,
+            failure="none",
         )
 
     monkeypatch.setattr("gguf_limit_bench.cli.probe_llama_server_ttft", fake_probe)

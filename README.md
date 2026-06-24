@@ -45,19 +45,20 @@ nothing else to run.
 apb
 ```
 
-That's it. Plain `apb` opens the model picker. The very first time you run it on
+That's it. Plain `apb` opens the browser cockpit. The very first time you run it on
 a new machine it sets itself up automatically before opening; every run after
 that goes straight to the app. Power-user subcommands still exist — run
 `apb --help` to see them.
 
 ## Cockpit Modes
 
-Plain `apb` (or double-clicking `START.bat`) opens the cockpit.
-Pick model(s) with the arrow keys and Space, press **M** to choose a mode, then
-press Enter to run:
+Plain `apb` (or double-clicking `START.bat`) opens the local browser cockpit.
+Pick model(s) with checkboxes, choose a mode from the menu, then press
+**Start benchmark**. The older terminal cockpit is still available with `apb tui`.
 
 - **Quick check** — does it load, and how fast? No questions asked (fast scout).
 - **Find best settings** — walk the flag ladder, ask the questions, crown the best settings.
+- **Librarian bot test** — compare Gemma and Qwen as local memory/RAG workers.
 - **How flags affect speed** — see how each llama.cpp flag changes tok/s and TTFT.
 - **Context limits** — how much context fits, and how long context affects tok/s.
 - **Deep / overnight** — everything, big budget; keeps searching and converging.
@@ -65,7 +66,7 @@ press Enter to run:
 
 Each mode maps to a time budget (measured in Andrej Karpathy's fixed 5-minute
 rounds), whether the SimpleBench questions are asked, and which ladders run. The
-cockpit shows the active mode, live per-question progress, and the champion
+cockpit shows the active mode, live status/telemetry, and the champion
 (best model and its best settings) when a run finishes.
 
 ## What Setup Creates
@@ -186,7 +187,7 @@ Important settings in `_CONFIG.toml`:
 
 The cockpit now drives runs by **mode** (see Cockpit Modes above). The older
 `default_preset` still applies to non-cockpit code paths but the mode you pick in
-the TUI takes precedence there.
+the browser cockpit or TUI takes precedence there.
 
 Keep your machine-specific paths out of the tracked `_CONFIG.toml` (it ships with
 repo-relative defaults). Set them with environment variables instead, which the

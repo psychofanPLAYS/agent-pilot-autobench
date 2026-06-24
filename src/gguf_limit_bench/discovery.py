@@ -68,7 +68,14 @@ class ModelInfo:
 def parse_model_name(path: Path) -> ModelInfo:
     name = path.name
     lowered = name.lower()
-    family = "qwen" if "qwen" in lowered else "llama" if "llama" in lowered else "unknown"
+    if "qwen" in lowered:
+        family = "qwen"
+    elif "gemma" in lowered:
+        family = "gemma"
+    elif "llama" in lowered:
+        family = "llama"
+    else:
+        family = "unknown"
     quant_match = QUANT_RE.search(name)
     param_match = PARAM_RE.search(name)
     parameters = param_match.group(1).upper().replace("A3B", "A3B") if param_match else "unknown"

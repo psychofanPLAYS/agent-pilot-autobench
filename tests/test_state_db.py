@@ -31,7 +31,9 @@ def test_init_state_db_creates_research_memory_tables(tmp_path):
 def test_context_limit_is_remembered_and_recalled(mem_conn):
     assert get_context_limit(mem_conn, "Gemma-4-E2B.gguf", "q8_0") is None
 
-    record_context_limit(mem_conn, "Gemma-4-E2B.gguf", "q8_0", 262_144, False, "2026-06-23T10:00:00Z")
+    record_context_limit(
+        mem_conn, "Gemma-4-E2B.gguf", "q8_0", 262_144, False, "2026-06-23T10:00:00Z"
+    )
     remembered = get_context_limit(mem_conn, "Gemma-4-E2B.gguf", "q8_0")
 
     assert remembered is not None
@@ -83,8 +85,7 @@ def test_new_tables_created_by_init(tmp_path):
     init_state_db(db_path)
     with sqlite3.connect(db_path) as conn:
         tables = {
-            row[0]
-            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
     assert "question_attempts" in tables
     assert "selection_cursor" in tables

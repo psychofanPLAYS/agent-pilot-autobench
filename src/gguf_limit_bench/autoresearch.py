@@ -550,7 +550,9 @@ class AutoresearchLoop:
             from gguf_limit_bench.champion_eval import evaluate_champion_packs
             from gguf_limit_bench.packs import DEFAULT_PACKS
 
-            pack_ids = self.champion_pack_ids if self.champion_pack_ids is not None else DEFAULT_PACKS
+            pack_ids = (
+                self.champion_pack_ids if self.champion_pack_ids is not None else DEFAULT_PACKS
+            )
             receipt.event("champion_pack_eval_started", {"pack_ids": list(pack_ids)})
             evaluate_champion_packs(
                 model=self.model,
@@ -1013,9 +1015,7 @@ def _flag_ladder_markdown(payload: dict) -> str:
 
 def _is_partial_result(result: AttemptResult) -> bool:
     return (
-        not result.ok
-        and result.completed_questions > 0
-        and result.generation_tokens_per_second > 0
+        not result.ok and result.completed_questions > 0 and result.generation_tokens_per_second > 0
     )
 
 
