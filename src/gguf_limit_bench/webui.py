@@ -47,6 +47,14 @@ RUN_ARTIFACTS = (
     ("Summary", "summary.md"),
     ("Best settings", "best-settings.json"),
     ("Machine report", "report.json"),
+    ("Suite summary", "suite-summary.json"),
+    ("Suite plan", "suite-plan.json"),
+    ("Suite events", "events.jsonl"),
+    ("Librarian summary", "librarian-suite-summary.json"),
+    ("Librarian report", "librarian-suite.md"),
+    ("Preflight", "preflight.json"),
+    ("Results", "results.md"),
+    ("Results JSON", "results.json"),
 )
 OPTIONAL_FORCED_FLAGS = (
     ("--no-mmap", "Disable memory mapping when Windows paging makes loads unstable."),
@@ -63,6 +71,7 @@ class WebRunOptions:
     forced_server_args: tuple[str, ...]
     show_thinking: bool = False
     stream_prompts: bool = True
+    benchmark_suite_plan: Path | None = None
 
 
 @dataclass
@@ -116,6 +125,10 @@ class WebUiState:
             }
         with self._lock:
             run_payload = asdict(self.run)
+        if run_payload.get("phase") == "running" and (
+            run_payload.get("options") or {}
+        ).get("stream_prompts", True):
+            run_payload["events"] = run_payload["events"] + receipt_event_payloads(self.runs_root)
         return {
             "models": [_model_payload(model) for model in models],
             "modes": [_mode_payload(mode) for mode in RUN_MODES],
@@ -143,14 +156,24 @@ class WebUiState:
         if issue is not None:
             return False, issue
         try:
-            options = build_run_options(mode_id, options_payload or {})
+            options = build_run_options(
+                mode_id, options_payload or {}, project_root=self.project_root
+            )
         except ValueError as exc:
             return False, str(exc)
         with self._lock:
             if self.run.phase == "running":
                 return False, "A benchmark is already running."
+            plan_label = (
+                f"; suite plan: {options.benchmark_suite_plan.name}"
+                if options.benchmark_suite_plan is not None
+                else ""
+            )
             events = [
-                _event("configure", f"Mode: {mode_id}; budget: {options.budget_minutes} min/model"),
+                _event(
+                    "configure",
+                    f"Mode: {mode_id}; budget: {options.budget_minutes} min/model{plan_label}",
+                ),
                 _event(
                     "flags",
                     "Forced llama-server args: "
@@ -240,7 +263,9 @@ def validate_web_selection(selected: list[ModelInfo], mode_id: str) -> str | Non
     return "Librarian bot test needs at least one Gemma model and one Qwen model."
 
 
-def build_run_options(mode_id: str, payload: dict) -> WebRunOptions:
+def build_run_options(
+    mode_id: str, payload: dict, *, project_root: Path | None = None
+) -> WebRunOptions:
     mode = next((item for item in RUN_MODES if item.id == mode_id), None)
     if mode is None:
         raise ValueError(f"Unknown run mode: {mode_id}")
@@ -257,13 +282,38 @@ def build_run_options(mode_id: str, payload: dict) -> WebRunOptions:
     unknown = [arg for arg in forced_args if arg.startswith("--") and arg not in allowed]
     if unknown:
         raise ValueError(f"Unsupported forced flag from Web UI: {unknown[0]}")
+    benchmark_suite_plan = resolve_benchmark_suite_plan(
+        project_root or Path.cwd(), payload.get("benchmark_suite_plan")
+    )
     return WebRunOptions(
         mode_id=mode_id,
         budget_minutes=budget_minutes,
         forced_server_args=forced_args,
         show_thinking=bool(payload.get("show_thinking", False)),
         stream_prompts=bool(payload.get("stream_prompts", True)),
+        benchmark_suite_plan=benchmark_suite_plan,
     )
+
+
+def resolve_benchmark_suite_plan(project_root: Path, raw_path: object) -> Path | None:
+    if raw_path in (None, ""):
+        return None
+    if not isinstance(raw_path, str):
+        raise ValueError("benchmark_suite_plan must be a string path.")
+    plans_root = (project_root / "benchmarks" / "plans").resolve()
+    candidate = Path(raw_path)
+    if not candidate.is_absolute():
+        candidate = project_root / candidate
+    try:
+        resolved = candidate.resolve()
+        resolved.relative_to(plans_root)
+    except (OSError, ValueError):
+        raise ValueError("Benchmark suite plan must be under benchmarks/plans.") from None
+    if resolved.suffixes[-2:] != [".plan", ".json"]:
+        raise ValueError("Benchmark suite plan must be a .plan.json file.")
+    if not resolved.is_file():
+        raise ValueError(f"Benchmark suite plan not found: {raw_path}")
+    return resolved
 
 
 def run_configuration_payload() -> dict:
@@ -322,6 +372,11 @@ def create_web_app(state: WebUiState) -> FastAPI:
         except ValueError:
             return JSONResponse({"ok": False, "message": "Request body must be valid JSON."}, 400)
         ok, message = start_run_from_payload(state, payload)
+        return JSONResponse({"ok": ok, "message": message}, 200 if ok else 400)
+
+    @app.post("/api/stop-after-current")
+    async def api_stop_after_current() -> JSONResponse:
+        ok, message = state.request_stop_after_current()
         return JSONResponse({"ok": ok, "message": message}, 200 if ok else 400)
 
     @app.get("/runs/{encoded_relative_path:path}")
@@ -588,6 +643,57 @@ def recent_receipts(runs_root: Path, *, limit: int = RECENT_RECEIPT_LIMIT) -> li
     return [_receipt_payload(path, runs_root) for path in ordered]
 
 
+def receipt_event_payloads(runs_root: Path, *, limit: int = 40) -> list[dict]:
+    if not runs_root.exists():
+        return []
+    receipts = sorted(
+        (path for path in runs_root.iterdir() if path.is_dir()),
+        key=_safe_mtime,
+        reverse=True,
+    )
+    for receipt in receipts:
+        events_path = receipt / "events.jsonl"
+        if not events_path.is_file():
+            continue
+        try:
+            lines = events_path.read_text(encoding="utf-8").splitlines()[-limit:]
+        except OSError:
+            return []
+        return [_receipt_event_payload(line) for line in lines if line.strip()]
+    return []
+
+
+def _receipt_event_payload(line: str) -> dict:
+    try:
+        payload = json.loads(line)
+    except json.JSONDecodeError:
+        return {"at": "--", "kind": "receipt", "message": line[-240:]}
+    return {
+        "at": _event_time_label(payload.get("time")),
+        "kind": str(payload.get("type") or "receipt"),
+        "message": _receipt_event_message(payload.get("data")),
+    }
+
+
+def _event_time_label(value: object) -> str:
+    text = str(value or "--")
+    if "T" in text:
+        return text.split("T", 1)[1].split(".", 1)[0]
+    return text
+
+
+def _receipt_event_message(data: object) -> str:
+    if isinstance(data, dict):
+        if "model" in data:
+            return str(data["model"])
+        if "error" in data:
+            return str(data["error"])
+        return json.dumps(data, ensure_ascii=True, sort_keys=True)[:320]
+    if data is None:
+        return ""
+    return str(data)[:320]
+
+
 def resolve_run_artifact(runs_root: Path, encoded_relative_path: str) -> Path | None:
     try:
         runs_root_resolved = runs_root.resolve()
@@ -824,7 +930,11 @@ INDEX_HTML = r"""<!doctype html>
       display: grid; gap: 6px; margin-top: 10px; max-height: 240px; overflow: auto;
       border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); padding: 10px;
     }
-    .event { display: grid; grid-template-columns: 86px 82px 1fr; gap: 8px; color: var(--muted); }
+    .event {
+      display: grid; grid-template-columns: minmax(82px, 0.65fr) minmax(126px, 0.9fr) minmax(0, 2fr);
+      gap: 10px; color: var(--muted); align-items: start;
+    }
+    .event > * { min-width: 0; overflow-wrap: anywhere; }
     .event strong { color: var(--text); font-size: 12px; }
     .winner {
       margin-top: 10px; border: 1px solid var(--line); border-radius: 6px;
@@ -875,12 +985,16 @@ INDEX_HTML = r"""<!doctype html>
         <div class="side">
           <div class="panel">
             <h2>Run menu</h2>
-            <div class="body">
-              <select id="mode"></select>
-              <div class="field">
-                <label for="budget">Budget minutes per model</label>
-                <input id="budget" type="number" min="1" max="1440" value="30" />
-              </div>
+              <div class="body">
+                <select id="mode"></select>
+                <div class="field">
+                  <label for="benchmark-suite-plan">Benchmark suite plan</label>
+                  <select id="benchmark-suite-plan"></select>
+                </div>
+                <div class="field">
+                  <label for="budget">Budget minutes per model</label>
+                  <input id="budget" type="number" min="1" max="1440" value="30" />
+                </div>
               <div class="field">
                 <label>Standard forced flags</label>
                 <div id="standard-flags"></div>
@@ -933,6 +1047,7 @@ INDEX_HTML = r"""<!doctype html>
     let sortIndex = 0;
     let appState = null;
     let socket = null;
+    let fallbackNotice = "";
 
     function escapeHtml(value) {
       return String(value ?? "")
@@ -996,6 +1111,7 @@ INDEX_HTML = r"""<!doctype html>
         document.querySelector("#budget").value = selectedMode.budget_minutes;
         mode.dataset.defaultedFor = mode.value;
       }
+      renderBenchmarkSuitePlans(state.benchmark_suite_plans || []);
       renderConfiguration(state.run_configuration);
       document.querySelector("#packs").innerHTML = state.librarian_packs
         .map((pack, index) => `<div class="pack"><span>${escapeHtml(pack)}<small>${packDescription(pack)}</small></span><span>${index + 1}</span></div>`)
@@ -1022,6 +1138,18 @@ INDEX_HTML = r"""<!doctype html>
       const optional = document.querySelector("#optional-flags");
       optional.innerHTML = config.optional_forced_args.map(item => flagChoice(item, false)).join("");
       standard.querySelectorAll("input").forEach(input => input.checked = true);
+    }
+
+    function renderBenchmarkSuitePlans(plans) {
+      const select = document.querySelector("#benchmark-suite-plan");
+      const current = select.value;
+      select.innerHTML = `<option value="">Autoresearch only</option>` + plans
+        .map(plan => {
+          const label = plan.name && plan.name !== plan.filename ? `${plan.name} (${plan.filename})` : plan.filename;
+          return `<option value="${escapeHtml(plan.path)}" title="${escapeHtml(plan.warning || plan.description || "")}">${escapeHtml(label)}</option>`;
+        })
+        .join("");
+      if ([...select.options].some(option => option.value === current)) select.value = current;
     }
 
     function flagChoice(item, checked) {
@@ -1091,6 +1219,7 @@ INDEX_HTML = r"""<!doctype html>
     function updateGuard() {
       if (!appState) return;
       const mode = document.querySelector("#mode").value;
+      const plan = document.querySelector("#benchmark-suite-plan").value;
       const models = appState.models.filter(model => selected.has(model.path));
       const hasGemma = models.some(model => model.family === "gemma" || model.name.toLowerCase().includes("gemma"));
       const hasQwen = models.some(model => model.family === "qwen" || model.name.toLowerCase().includes("qwen"));
@@ -1100,7 +1229,8 @@ INDEX_HTML = r"""<!doctype html>
       } else if (models.length === 0) {
         guard.textContent = "Select one or more models.";
       } else {
-        guard.textContent = `${models.length} model(s) ready.`;
+        const planText = plan ? ` Benchmark suite plan: ${plan.split(/[\\\\/]/).pop()}.` : "";
+        guard.textContent = `${models.length} model(s) ready.${planText}`;
       }
     }
 
@@ -1121,17 +1251,46 @@ INDEX_HTML = r"""<!doctype html>
         if (message.type === "error") document.querySelector("#guard").textContent = message.message;
       });
       socket.addEventListener("open", () => {
+        fallbackNotice = "";
         document.querySelector("#guard").textContent = "Live connection ready.";
+        sendSocket({type: "refresh"});
       });
       socket.addEventListener("close", () => {
-        document.querySelector("#guard").textContent = "Live connection lost. Reconnecting...";
+        fallbackNotice = "Live connection lost. Reconnecting with HTTP refresh...";
+        document.querySelector("#guard").textContent = fallbackNotice;
+        loadStateViaHttp(fallbackNotice);
         setTimeout(connectSocket, 2000);
       });
     }
 
+    async function loadStateViaHttp(statusText = "") {
+      try {
+        const response = await fetch("/api/state", {cache: "no-store"});
+        if (!response.ok) throw new Error(`state ${response.status}`);
+        render(await response.json());
+        if (statusText) document.querySelector("#guard").textContent = statusText;
+      } catch (error) {
+        document.querySelector("#guard").textContent = `Could not load local state: ${error.message}`;
+      }
+    }
+
+    async function sendHttpCommand(message) {
+      const url = message.type === "stop_after_current" ? "/api/stop-after-current" : "/api/start";
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {"content-type": "application/json"},
+        body: JSON.stringify(message)
+      });
+      const payload = await response.json();
+      document.querySelector("#guard").textContent = payload.message;
+      await loadStateViaHttp();
+    }
+
     function sendSocket(message) {
       if (!socket || socket.readyState !== WebSocket.OPEN) {
-        document.querySelector("#guard").textContent = "Live connection is not ready yet.";
+        sendHttpCommand(message).catch(error => {
+          document.querySelector("#guard").textContent = `Local command failed: ${error.message}`;
+        });
         return;
       }
       socket.send(JSON.stringify(message));
@@ -1170,19 +1329,26 @@ INDEX_HTML = r"""<!doctype html>
         mode_id: document.querySelector("#mode").value,
         options: {
           budget_minutes: Number(document.querySelector("#budget").value),
+          benchmark_suite_plan: document.querySelector("#benchmark-suite-plan").value,
           forced_server_args: selectedForcedArgs(),
           stream_prompts: document.querySelector("#stream-prompts").checked,
           show_thinking: document.querySelector("#show-thinking").checked
         }
       });
     });
+    document.querySelector("#benchmark-suite-plan").addEventListener("change", updateGuard);
     document.querySelector("#stop-after-current").addEventListener("click", () => {
       sendSocket({type: "stop_after_current"});
     });
 
+    loadStateViaHttp("Loading local state...");
     connectSocket();
     setInterval(() => {
-      if (socket && socket.readyState === WebSocket.OPEN) sendSocket({type: "refresh"});
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        sendSocket({type: "refresh"});
+      } else {
+        loadStateViaHttp(fallbackNotice);
+      }
     }, 2500);
   </script>
 </body>

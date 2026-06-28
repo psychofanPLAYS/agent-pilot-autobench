@@ -141,7 +141,7 @@ cap reads as "we tested everything" when we didn't.
 - [ ] add per-letter accuracy reporting at score time
 - [ ] add the adversarial subtypes in section D to each generator (+ gold-sanity tests)
 - [ ] add negative-control cases (section E), incl. `None of these` in rerank
-- [ ] implement the 5 preflight gates (section A) in the run path
+- [x] implement the 5 preflight gates (section A) in the run path (DONE 2026-06-28 via `librarian/preflight.py`, `champion_eval`, and `librarian_suite`; failed cells write `preflight_fail` receipts instead of scored zeroes)
 - [ ] implement the two-regime stability protocol (section B)
 - [ ] wire format-adherence + grounding as scored gates (section G)
 - [ ] seed-rotation + seed recorded in every SSOT row (section F)

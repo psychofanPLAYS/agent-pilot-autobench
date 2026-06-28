@@ -1,6 +1,6 @@
 # Feature request: wiki-librarian benchmark suite
 
-Status: **v0 task generators implemented + integrated** (2026-06-24)
+Status: **v0 generators integrated + preflight gates implemented** (2026-06-28)
 Owner: psychofanPLAYS · Contributors welcome (Codex, CC)
 
 ## Implemented so far (v0)
@@ -14,12 +14,14 @@ The deterministic job-task layer is built, integrated, and green. See
   `dedupe`, `gate`, `rerank`, `compress`, `contradiction`.
 - A registry (`librarian/registry.py`) and wiring into `packs.py` so the packs are
   discoverable via `available_packs()` and loadable via `load_pack()`.
-- 99 gold-labeled questions at seed 0 (more at other seeds); 90 unit tests passing;
-  full repo suite green (594 passed / 1 skipped); ruff + mypy clean for the package.
+- 99 gold-labeled questions at seed 0.
+- Librarian preflight gates now run before scoring in the direct suite and champion
+  eval paths. Failed identity, template, Gemma BOS, Qwen thinking, or answer-channel
+  checks write explicit `preflight_fail` receipts instead of misleading zero scores.
 
-Not yet built (next): query-understanding/HyDE job (open question 2), the
-knob-sweep harness (thinking on/off, chat template), the `librarian_bench_score`
-aggregation, the web dashboard, and the SSOT sync.
+Not yet built (next): query-understanding/HyDE job (open question 2), full
+knob-sweep coverage (thinking on/off, chat template, seed repeats), adversarial and
+negative-control expansions, the web dashboard, and SSOT sync.
 
 ## What this is
 
@@ -72,6 +74,7 @@ Everything reduces to three independent dimensions. See
 | [07-model-plan-gemma3-27b.md](07-model-plan-gemma3-27b.md) | Per-model plan: Gemma 3 27B (dense, no-thinking, double-BOS, QAT) | grounded |
 | [08-model-plan-qwen3-moe.md](08-model-plan-qwen3-moe.md) | Per-model plan: Qwen3.5/3.6 35B-A3B (MoE, thinking x template, MTP) | grounded |
 | [09-hardening-spec.md](09-hardening-spec.md) | Hardening the whole suite: preflight gates, determinism, MC validity, adversarial cases | actionable |
+| [10-runnable-presets.md](10-runnable-presets.md) | Runnable Gemma/Qwen plan artifacts and first live command path | runnable |
 | [IMPLEMENTATION-STATUS.md](IMPLEMENTATION-STATUS.md) | What's built vs not, verification snapshot | live |
 
 ## How to contribute (Codex / CC)

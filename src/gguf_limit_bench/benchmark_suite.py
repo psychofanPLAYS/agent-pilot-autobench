@@ -126,6 +126,15 @@ def run_benchmark_suite(
     deadline = None if timeout_seconds is None else time.monotonic() + max(0.0, timeout_seconds)
     receipt_path = _new_receipt_dir(runs_root)
     receipt_path.mkdir(parents=True, exist_ok=False)
+    _suite_event(
+        receipt_path,
+        "benchmark_suite_started",
+        {
+            "model": plan.model,
+            "context": plan.context,
+            "tasks": [task.id for task in plan.tasks],
+        },
+    )
     (receipt_path / "suite-plan.json").write_text(
         json.dumps(
             {
@@ -142,6 +151,11 @@ def run_benchmark_suite(
 
     results: list[BenchmarkSuiteResult] = []
     for task in plan.tasks:
+        _suite_event(
+            receipt_path,
+            "benchmark_suite_task_started",
+            {"task": task.id, "phase": task.phase, "harness": task.harness},
+        )
         result = _run_task(
             task,
             plan=plan,
@@ -150,6 +164,19 @@ def run_benchmark_suite(
             deadline=deadline,
         )
         results.append(result)
+        _suite_event(
+            receipt_path,
+            "benchmark_suite_task_finished",
+            {
+                "task": task.id,
+                "phase": task.phase,
+                "harness": task.harness,
+                "ok": result.ok,
+                "score": result.score,
+                "failure_class": result.failure_class,
+                "runtime_seconds": round(result.runtime_seconds, 3),
+            },
+        )
         _append_phase_ledger(runs_root, plan, result)
 
     suite_run = BenchmarkSuiteRun(
@@ -167,6 +194,16 @@ def run_benchmark_suite(
     (receipt_path / "suite-summary.json").write_text(
         json.dumps(benchmark_suite_run_to_dict(suite_run), ensure_ascii=True, indent=2),
         encoding="utf-8",
+    )
+    _suite_event(
+        receipt_path,
+        "benchmark_suite_finished",
+        {
+            "ok": suite_run.ok,
+            "agent_bench_score": suite_run.agent_bench_score,
+            "general_score": suite_run.general_score,
+            "agentic_score": suite_run.agentic_score,
+        },
     )
     return suite_run
 
@@ -243,6 +280,16 @@ def _run_task(
     try:
         for command_index, command in enumerate(commands, start=1):
             command_timeout = _remaining_timeout(deadline, task.timeout_seconds)
+            _suite_event(
+                receipt_path,
+                "benchmark_suite_command_started",
+                {
+                    "task": task.id,
+                    "command_index": command_index,
+                    "command": _display_command(command),
+                    "timeout_seconds": round(command_timeout, 3),
+                },
+            )
             completed = subprocess.run(
                 list(command),
                 capture_output=True,
@@ -254,6 +301,15 @@ def _run_task(
             stdout_parts.append(completed.stdout or "")
             stderr_parts.append(completed.stderr or "")
             returncode = completed.returncode
+            _suite_event(
+                receipt_path,
+                "benchmark_suite_command_finished",
+                {
+                    "task": task.id,
+                    "command_index": command_index,
+                    "returncode": returncode,
+                },
+            )
             (task_dir / f"command-{command_index}.json").write_text(
                 json.dumps(
                     {
@@ -339,6 +395,20 @@ def _run_task(
         encoding="utf-8",
     )
     return result
+
+
+def _suite_event(receipt_path: Path, event_type: str, data: dict[str, Any]) -> None:
+    payload = {
+        "time": datetime.now().isoformat(timespec="seconds"),
+        "type": event_type,
+        "data": data,
+    }
+    with (receipt_path / "events.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
+
+
+def _display_command(command: tuple[str, ...]) -> list[str]:
+    return [Path(part).name if index == 0 else part for index, part in enumerate(command)]
 
 
 def _remaining_timeout(deadline: float | None, task_timeout_seconds: int) -> float:

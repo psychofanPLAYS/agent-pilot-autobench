@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from html import escape
 import json
 from pathlib import Path
@@ -18,6 +18,9 @@ class AttemptReport:
     cold_ttft_ms: float | None
     warm_ttft_ms: float | None
     serving_tps: float | None
+    questions: str
+    simple_bench_score_fraction: str
+    simple_bench_accuracy: float | None
     failure: str
     settings: dict
 
@@ -64,23 +67,97 @@ def _attempts_from_events(events_path: Path) -> list[AttemptReport]:
         data = event.get("data", {})
         result = data.get("result", {})
         settings = data.get("settings", {})
-        attempts.append(
-            AttemptReport(
-                attempt=int(data.get("attempt") or 0),
-                decision=str(data.get("decision") or ""),
-                score=float(data.get("score") or 0.0),
-                status=str(result.get("failure") or "unknown"),
-                context_size=int(settings.get("context_size") or result.get("context_size") or 0),
-                generation_tps=float(result.get("generation_tokens_per_second") or 0.0),
-                prompt_tps=float(result.get("prompt_tokens_per_second") or 0.0),
-                cold_ttft_ms=_float_or_none(result.get("serving_ttft_ms")),
-                warm_ttft_ms=_float_or_none(result.get("serving_warm_ttft_ms")),
-                serving_tps=_float_or_none(result.get("serving_tokens_per_second")),
-                failure=str(result.get("failure") or "unknown"),
-                settings=settings,
-            )
+        attempt = AttemptReport(
+            attempt=int(data.get("attempt") or 0),
+            decision=str(data.get("decision") or ""),
+            score=float(data.get("score") or 0.0),
+            status=str(result.get("failure") or "unknown"),
+            context_size=int(settings.get("context_size") or result.get("context_size") or 0),
+            generation_tps=float(result.get("generation_tokens_per_second") or 0.0),
+            prompt_tps=float(result.get("prompt_tokens_per_second") or 0.0),
+            cold_ttft_ms=_float_or_none(result.get("serving_ttft_ms")),
+            warm_ttft_ms=_float_or_none(result.get("serving_warm_ttft_ms")),
+            serving_tps=_float_or_none(result.get("serving_tokens_per_second")),
+            questions=_question_count_label(
+                result.get("completed_questions"), result.get("attempted_questions")
+            ),
+            simple_bench_score_fraction=_score_fraction(
+                result.get("simple_bench_accuracy"), result.get("completed_questions")
+            ),
+            simple_bench_accuracy=_float_or_none(result.get("simple_bench_accuracy")),
+            failure=str(result.get("failure") or "unknown"),
+            settings=settings,
         )
+        attempts.append(_hydrate_attempt_from_simple_bench_summary(attempt, result))
     return attempts
+
+
+def _hydrate_attempt_from_simple_bench_summary(
+    attempt: AttemptReport, result: dict
+) -> AttemptReport:
+    summary = _simple_bench_summary(result.get("simple_bench_receipt"))
+    if summary is None:
+        return attempt
+
+    completed = int(summary.get("total") or 0)
+    attempted = int(summary.get("attempted_questions") or completed)
+    if completed <= 0:
+        return attempt
+
+    decision = "partial" if attempt.decision == "crash" else attempt.decision
+    return replace(
+        attempt,
+        decision=decision,
+        generation_tps=_fallback_float(attempt.generation_tps, summary.get("median_tps")),
+        prompt_tps=_fallback_float(attempt.prompt_tps, summary.get("median_prompt_tps")),
+        cold_ttft_ms=_fallback_optional_float(attempt.cold_ttft_ms, summary.get("median_ttft_ms")),
+        questions=_question_count_label(completed, attempted),
+        simple_bench_score_fraction=_score_fraction(summary.get("accuracy"), completed),
+        simple_bench_accuracy=_fallback_optional_float(
+            attempt.simple_bench_accuracy, summary.get("accuracy")
+        ),
+    )
+
+
+def _simple_bench_summary(receipt_path: str | None) -> dict | None:
+    if not receipt_path:
+        return None
+    summary_path = Path(receipt_path) / "summary.json"
+    try:
+        payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _question_count_label(completed, attempted) -> str:
+    completed_count = int(completed or 0)
+    attempted_count = int(attempted or completed_count)
+    return f"{completed_count}/{attempted_count}" if attempted_count else "n/a"
+
+
+def _score_fraction(accuracy, total) -> str:
+    if accuracy is None or not total:
+        return "n/a"
+    total_count = int(total)
+    correct = round(float(accuracy) * total_count)
+    return f"{correct}/{total_count}"
+
+
+def _fallback_float(current: float, fallback) -> float:
+    if current > 0:
+        return current
+    if fallback is None:
+        return current
+    return float(fallback)
+
+
+def _fallback_optional_float(current: float | None, fallback) -> float | None:
+    if current is not None:
+        return current
+    if fallback is None:
+        return None
+    return float(fallback)
 
 
 def _context_profile_rows(profile_path: Path) -> list[dict]:
@@ -255,8 +332,8 @@ def _markdown(payload: dict) -> str:
         "",
         "## Attempts",
         "",
-        "| Attempt | Decision | Context | Gen TPS | Cold TTFT | Warm TTFT | Serving TPS | Failure |",
-        "| ---: | --- | ---: | ---: | ---: | ---: | ---: | --- |",
+        "| Attempt | Decision | Context | Gen TPS | Cold TTFT | Warm TTFT | Serving TPS | Questions | Score | Accuracy | Failure |",
+        "| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
     for attempt in attempts:
         lines.append(
@@ -264,6 +341,8 @@ def _markdown(payload: dict) -> str:
             f"{attempt['attempt']} | {attempt['decision']} | {attempt['context_size']} | "
             f"{attempt['generation_tps']:.2f} | {_fmt(attempt['cold_ttft_ms'])} | "
             f"{_fmt(attempt['warm_ttft_ms'])} | {_fmt(attempt['serving_tps'])} | "
+            f"{attempt['questions']} | {attempt['simple_bench_score_fraction']} | "
+            f"{_fmt(attempt['simple_bench_accuracy'])} | "
             f"{attempt['failure']} |"
         )
     lines.extend(
@@ -313,6 +392,9 @@ def _html(payload: dict) -> str:
         f"<td>{escape(_fmt(row['cold_ttft_ms']))}</td>"
         f"<td>{escape(_fmt(row['warm_ttft_ms']))}</td>"
         f"<td>{escape(_fmt(row['serving_tps']))}</td>"
+        f"<td>{escape(row['questions'])}</td>"
+        f"<td>{escape(row['simple_bench_score_fraction'])}</td>"
+        f"<td>{escape(_fmt(row['simple_bench_accuracy']))}</td>"
         f"<td>{escape(row['failure'])}</td>"
         "</tr>"
         for row in payload["attempts"]
@@ -352,7 +434,7 @@ def _html(payload: dict) -> str:
     <section class="panel">
       <h2>Attempts</h2>
       <table>
-        <thead><tr><th>#</th><th>Decision</th><th>Context</th><th>Gen TPS</th><th>Cold TTFT</th><th>Warm TTFT</th><th>Serving TPS</th><th>Failure</th></tr></thead>
+        <thead><tr><th>#</th><th>Decision</th><th>Context</th><th>Gen TPS</th><th>Cold TTFT</th><th>Warm TTFT</th><th>Serving TPS</th><th>Questions</th><th>Score</th><th>Accuracy</th><th>Failure</th></tr></thead>
         <tbody>{rows}</tbody>
       </table>
     </section>

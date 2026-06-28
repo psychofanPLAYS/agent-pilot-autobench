@@ -612,6 +612,7 @@ def test_start_command_webui_callback_runs_librarian_pack_models(tmp_path, monke
         has_mtp=True,
     )
     plan_path = tmp_path / "suite.plan.json"
+    web_plan_path = tmp_path / "web-selected.plan.json"
     plan_path.write_text(
         json.dumps(
             {
@@ -624,12 +625,13 @@ def test_start_command_webui_callback_runs_librarian_pack_models(tmp_path, monke
         ),
         encoding="utf-8",
     )
+    web_plan_path.write_text(plan_path.read_text(encoding="utf-8"), encoding="utf-8")
     runs: list[dict] = []
 
     def fake_run_one_autoresearch(**kwargs):
         runs.append(kwargs)
         receipt = tmp_path / "runs" / "fake"
-        receipt.mkdir(parents=True)
+        receipt.mkdir(parents=True, exist_ok=True)
         return type("Receipt", (), {"path": receipt})()
 
     def fake_serve_webui(**kwargs) -> str:
@@ -639,9 +641,18 @@ def test_start_command_webui_callback_runs_librarian_pack_models(tmp_path, monke
                 mode_id="librarian_bench",
                 budget_minutes=7,
                 forced_server_args=("--jinja",),
+                benchmark_suite_plan=web_plan_path,
             ),
         )
         assert receipt == tmp_path / "runs" / "fake"
+        kwargs["run_model"](
+            selected,
+            WebRunOptions(
+                mode_id="librarian_bench",
+                budget_minutes=7,
+                forced_server_args=("--jinja",),
+            ),
+        )
         return "http://127.0.0.1:9999/"
 
     monkeypatch.setattr("gguf_limit_bench.cli.serve_webui", fake_serve_webui)
@@ -667,7 +678,8 @@ def test_start_command_webui_callback_runs_librarian_pack_models(tmp_path, monke
     assert result.exit_code == 0
     assert runs[0]["model"] == selected.path
     assert runs[0]["enable_mtp"] is True
-    assert runs[0]["benchmark_suite_plan"] == plan_path
+    assert runs[0]["benchmark_suite_plan"] == web_plan_path
+    assert runs[1]["benchmark_suite_plan"] == plan_path
     assert runs[0]["budget_seconds"] == 7 * 60
     assert runs[0]["forced_server_args"] == ("--jinja",)
     assert "librarian-gate" in runs[0]["champion_pack_ids"]

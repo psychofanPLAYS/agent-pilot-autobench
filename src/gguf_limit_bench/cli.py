@@ -456,7 +456,8 @@ def _start_app(
                 context_ladder=_context_ladder_or_none(context_ladder)
                 or _context_ladder_or_none(mode_by_id(options.mode_id).context_ladder)
                 or _context_ladder_or_none(run_config.context_ladder),
-                benchmark_suite_plan=benchmark_suite_plan,
+                benchmark_suite_plan=options.benchmark_suite_plan
+                or benchmark_suite_plan,
                 enable_mtp=model.has_mtp,
                 evaluation=mode_by_id(options.mode_id).evaluation,
                 forced_server_args=options.forced_server_args,

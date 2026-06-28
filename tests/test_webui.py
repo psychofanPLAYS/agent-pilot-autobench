@@ -17,6 +17,7 @@ from gguf_limit_bench.webui import (
     build_run_options,
     create_web_app,
     recent_receipts,
+    receipt_event_payloads,
     resolve_run_artifact,
     serve_webui,
     validate_web_selection,
@@ -51,6 +52,10 @@ def test_librarian_web_selection_requires_gemma_and_qwen():
 
 
 def test_webui_start_run_calls_backend_for_selected_models(tmp_path):
+    plans_root = tmp_path / "benchmarks" / "plans"
+    plans_root.mkdir(parents=True)
+    plan_path = plans_root / "wiki-librarian-gemma3-27b-direct.plan.json"
+    plan_path.write_text('{"model": "gemma-3-27b-it", "tasks": []}', encoding="utf-8")
     model_root = tmp_path / "models"
     model_root.mkdir()
     gemma_path = model_root / "Gemma-3-27B-Q4_K_M.gguf"
@@ -65,13 +70,19 @@ def test_webui_start_run_calls_backend_for_selected_models(tmp_path):
         receipt.mkdir(parents=True)
         return receipt
 
-    state = WebUiState(root=model_root, runs_root=tmp_path / "_runs", run_model=fake_run_model)
+    state = WebUiState(
+        root=model_root,
+        runs_root=tmp_path / "_runs",
+        run_model=fake_run_model,
+        project_root=tmp_path,
+    )
 
     ok, message = state.start_run(
         [str(gemma_path), str(qwen_path)],
         "librarian_bench",
         {
             "budget_minutes": 7,
+            "benchmark_suite_plan": str(plan_path),
             "forced_server_args": ["--flash-attn", "on", "--jinja"],
             "stream_prompts": True,
         },
@@ -86,6 +97,7 @@ def test_webui_start_run_calls_backend_for_selected_models(tmp_path):
         ("Qwen3.6-35B-A3B-Q4_K_M.gguf", "librarian_bench", 7),
     ]
     assert calls[0][1].forced_server_args == ("--flash-attn", "on", "--jinja")
+    assert {options.benchmark_suite_plan for _name, options in calls} == {plan_path.resolve()}
     assert state.run.phase == "complete"
     assert any(event.kind == "receipt" for event in state.run.events)
 
@@ -112,6 +124,22 @@ def test_build_run_options_rejects_unsafe_web_flags():
         raise AssertionError("expected unsafe flag to be rejected")
 
 
+def test_build_run_options_rejects_outside_benchmark_suite_plan(tmp_path):
+    outside = tmp_path / "outside.plan.json"
+    outside.write_text("{}", encoding="utf-8")
+
+    try:
+        build_run_options(
+            "quick",
+            {"benchmark_suite_plan": str(outside)},
+            project_root=tmp_path,
+        )
+    except ValueError as exc:
+        assert "under benchmarks/plans" in str(exc)
+    else:  # pragma: no cover - assertion clarity
+        raise AssertionError("expected outside benchmark-suite plan to be rejected")
+
+
 def test_recent_receipts_and_run_artifact_links_stay_under_runs_root(tmp_path):
     runs_root = tmp_path / "_runs"
     receipt = runs_root / "2026-06-24-qwen"
@@ -121,11 +149,15 @@ def test_recent_receipts_and_run_artifact_links_stay_under_runs_root(tmp_path):
         '{"model": "G:/models/Qwen.gguf", "status": "complete", "result": {"score": 12.5}}',
         encoding="utf-8",
     )
+    (receipt / "suite-summary.json").write_text('{"ok": true}', encoding="utf-8")
+    (receipt / "librarian-suite.md").write_text("# ok", encoding="utf-8")
 
     receipts = recent_receipts(runs_root)
 
     assert receipts[0]["model"] == "Qwen.gguf"
     assert receipts[0]["artifacts"][0]["url"] == "/runs/2026-06-24-qwen/report.html"
+    artifact_labels = {artifact["label"] for artifact in receipts[0]["artifacts"]}
+    assert {"Suite summary", "Librarian report"} <= artifact_labels
     assert resolve_run_artifact(runs_root, "2026-06-24-qwen/report.html") == receipt / "report.html"
     assert resolve_run_artifact(runs_root, "../outside.txt") is None
 
@@ -172,6 +204,10 @@ def test_webui_websocket_sends_hello_and_state(tmp_path):
 
 
 def test_webui_websocket_start_run_dispatches_backend(tmp_path):
+    plans_root = tmp_path / "benchmarks" / "plans"
+    plans_root.mkdir(parents=True)
+    plan_path = plans_root / "wiki-librarian-qwen3-moe-thinking.plan.json"
+    plan_path.write_text('{"model": "qwen3.6-35b-a3b", "tasks": []}', encoding="utf-8")
     model_root = tmp_path / "models"
     model_root.mkdir()
     gemma_path = model_root / "Gemma-3-27B-Q4_K_M.gguf"
@@ -186,7 +222,12 @@ def test_webui_websocket_start_run_dispatches_backend(tmp_path):
         receipt.mkdir(parents=True)
         return receipt
 
-    state = WebUiState(root=model_root, runs_root=tmp_path / "_runs", run_model=fake_run_model)
+    state = WebUiState(
+        root=model_root,
+        runs_root=tmp_path / "_runs",
+        run_model=fake_run_model,
+        project_root=tmp_path,
+    )
     client = TestClient(create_web_app(state))
 
     with client.websocket_connect("/ws") as websocket:
@@ -197,7 +238,11 @@ def test_webui_websocket_start_run_dispatches_backend(tmp_path):
                 "type": "start_run",
                 "model_paths": [str(gemma_path), str(qwen_path)],
                 "mode_id": "librarian_bench",
-                "options": {"budget_minutes": 3, "forced_server_args": ["--jinja"]},
+                "options": {
+                    "budget_minutes": 3,
+                    "benchmark_suite_plan": str(plan_path),
+                    "forced_server_args": ["--jinja"],
+                },
             }
         )
         reply = websocket.receive_json()
@@ -208,6 +253,10 @@ def test_webui_websocket_start_run_dispatches_backend(tmp_path):
     while time.time() < deadline and len(calls) < 2:
         time.sleep(0.02)
     assert [call[1].budget_minutes for call in calls] == [3, 3]
+    assert [call[1].benchmark_suite_plan for call in calls] == [
+        plan_path.resolve(),
+        plan_path.resolve(),
+    ]
 
 
 def test_webui_websocket_stop_after_current_marks_run_state(tmp_path):
@@ -223,6 +272,19 @@ def test_webui_websocket_stop_after_current_marks_run_state(tmp_path):
 
     assert reply["type"] == "stop_after_current"
     assert reply["ok"] is True
+    assert state.run.stop_requested is True
+    assert any(event.kind == "stop" for event in state.run.events)
+
+
+def test_webui_http_stop_after_current_marks_run_state(tmp_path):
+    state = WebUiState(root=tmp_path / "models", runs_root=tmp_path / "_runs")
+    state.run.phase = "running"
+    client = TestClient(create_web_app(state))
+
+    response = client.post("/api/stop-after-current")
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
     assert state.run.stop_requested is True
     assert any(event.kind == "stop" for event in state.run.events)
 
@@ -312,6 +374,51 @@ def test_webui_state_lists_benchmark_suite_plans(tmp_path):
             "name": "Local OpenAI smoke",
             "description": "Requires a local endpoint.",
             "warning": "Requires a local endpoint.",
+        }
+    ]
+
+
+def test_webui_state_tails_receipt_events_while_running(tmp_path):
+    runs_root = tmp_path / "_runs"
+    latest = runs_root / "20260102-new"
+    latest.mkdir(parents=True)
+    (latest / "events.jsonl").write_text(
+        '{"time":"2026-01-02T00:00:00","type":"attempt","data":{"context":8192,"score":1.23}}\n',
+        encoding="utf-8",
+    )
+    state = WebUiState(root=tmp_path / "models", runs_root=runs_root)
+    state.run.phase = "running"
+    state.run.options = {"stream_prompts": True}
+
+    payload = state.state_payload()
+
+    assert payload["run"]["events"][-1] == {
+        "at": "00:00:00",
+        "kind": "attempt",
+        "message": '{"context": 8192, "score": 1.23}',
+    }
+
+
+def test_receipt_event_payloads_tails_latest_receipt(tmp_path):
+    runs_root = tmp_path / "_runs"
+    older = runs_root / "20260101-old"
+    latest = runs_root / "20260102-new"
+    older.mkdir(parents=True)
+    latest.mkdir()
+    (older / "events.jsonl").write_text(
+        '{"time":"2026-01-01T00:00:00","type":"old","data":{"model":"old.gguf"}}\n',
+        encoding="utf-8",
+    )
+    (latest / "events.jsonl").write_text(
+        '{"time":"2026-01-02T00:00:00","type":"attempt","data":{"context":8192,"score":1.23}}\n',
+        encoding="utf-8",
+    )
+
+    assert receipt_event_payloads(runs_root) == [
+        {
+            "at": "00:00:00",
+            "kind": "attempt",
+            "message": '{"context": 8192, "score": 1.23}',
         }
     ]
 

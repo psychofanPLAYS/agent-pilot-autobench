@@ -556,6 +556,67 @@ def test_budget_exhausted_question_rows_are_partial_not_crash(tmp_path):
     assert "2/8" in markdown
 
 
+def test_stale_budget_exhausted_attempt_recovers_summary_metrics(tmp_path):
+    candidates = (AutoresearchSettings(profile_name="L0-baseline"),)
+
+    def stale_runner(settings):
+        attempt_dir = tmp_path / "simplebench-L0-baseline"
+        attempt_dir.mkdir()
+        (attempt_dir / "summary.json").write_text(
+            json.dumps(
+                {
+                    "ok": True,
+                    "score": 360.2,
+                    "accuracy": 0.25,
+                    "correct": 2,
+                    "total": 8,
+                    "median_tps": 85.77,
+                    "median_prompt_tps": 3410.4,
+                    "median_ttft_ms": 119.68,
+                    "failure": "none",
+                }
+            ),
+            encoding="utf-8",
+        )
+        return AttemptResult(
+            ok=False,
+            generation_tokens_per_second=0.0,
+            prompt_tokens_per_second=0.0,
+            ttft_ms=None,
+            context_size=settings.context_size,
+            failure="SimpleBench attempt budget exhausted",
+            stdout="",
+            stderr="SimpleBench attempt budget exhausted",
+            returncode=124,
+            flag_profile=settings.profile_name,
+            simple_bench_receipt=str(attempt_dir),
+            simple_bench_failure="SimpleBench attempt budget exhausted",
+        )
+
+    receipt = AutoresearchLoop(
+        model=Path("model.gguf"),
+        runs_root=tmp_path,
+        attempt_runner=stale_runner,
+        budget_seconds=60,
+        candidate_sequence=candidates,
+    ).run()
+
+    payload = json.loads((receipt.path / "flag-ladder-results.json").read_text(encoding="utf-8"))
+    row = payload["rows"][0]
+
+    assert row["partial"] is True
+    assert row["accuracy"] == 0.25
+    assert row["median_tps"] == 85.77
+    assert row["prefill_tps"] == 3410.4
+    assert row["median_ttft_ms"] == 119.68
+    assert row["score_fraction"] == "2/8"
+    assert row["completed_questions"] == 8
+    assert row["attempted_questions"] == 8
+    markdown = (receipt.path / "flag-ladder-results.md").read_text(encoding="utf-8")
+    assert "2/8" in markdown
+    assert "85.77" in markdown
+
+
 def _question_result(tps, ttft, prompt_tps):
     from gguf_limit_bench.simple_bench import SimpleBenchQuestionResult
 

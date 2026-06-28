@@ -1,0 +1,107 @@
+{
+  "model": "gemma-3-27b-it",
+  "context": 8192,
+  "settings": {
+    "base_url": "http://127.0.0.1:8080",
+    "score_contract": "agent_bench_score",
+    "plan_kind": "wiki_librarian_gemma3_27b_direct",
+    "source_doc": "docs/feature-requests/wiki-librarian-bench/07-model-plan-gemma3-27b.md",
+    "comparison_family": "wiki_librarian_gemma_vs_qwen",
+    "model_plan": {
+      "hf_slug": "google/gemma-3-27b-it",
+      "architecture": "gemma3_dense",
+      "quant_start": "Q4_K_M",
+      "reasoning_mode": "direct",
+      "template_preflight": [
+        "assert exactly one BOS token",
+        "fold system prompt into first user turn",
+        "use text-only GGUF"
+      ],
+      "sampling": {
+        "temperature": 0.0,
+        "top_k": 64,
+        "top_p": 0.95,
+        "min_p": 0.0
+      },
+      "llama_cpp_flags": [
+        "standard ladder",
+        "no MTP"
+      ]
+    },
+    "requires": "A Gemma 3 27B text-only GGUF served by a local OpenAI-compatible llama.cpp endpoint on http://127.0.0.1:8080."
+  },
+  "tasks": [
+    {
+      "id": "gemma_librarian_core",
+      "phase": "general",
+      "harness": "librarian-suite",
+      "commands": [
+        [
+          "uv",
+          "run",
+          "--extra",
+          "dev",
+          "python",
+          "-m",
+          "gguf_limit_bench.librarian_suite",
+          "--model",
+          "{model}",
+          "--base-url",
+          "http://127.0.0.1:8080",
+          "--out-dir",
+          "{task_dir}",
+          "--score-out",
+          "{task_dir}/score.json",
+          "--settings-json",
+          "{\"plan_kind\":\"wiki_librarian_gemma3_27b_direct\",\"reasoning_mode\":\"direct\",\"template\":\"gemma3_text_only\",\"temperature\":0.0,\"source_doc\":\"docs/feature-requests/wiki-librarian-bench/07-model-plan-gemma3-27b.md\"}",
+          "--pack",
+          "librarian-write-entry",
+          "--pack",
+          "librarian-triage",
+          "--pack",
+          "librarian-dedupe"
+        ]
+      ],
+      "score_file": "{task_dir}/score.json",
+      "min_score": 0.01,
+      "timeout_seconds": 3600
+    },
+    {
+      "id": "gemma_librarian_reasoning_jobs",
+      "phase": "agentic",
+      "harness": "librarian-suite",
+      "commands": [
+        [
+          "uv",
+          "run",
+          "--extra",
+          "dev",
+          "python",
+          "-m",
+          "gguf_limit_bench.librarian_suite",
+          "--model",
+          "{model}",
+          "--base-url",
+          "http://127.0.0.1:8080",
+          "--out-dir",
+          "{task_dir}",
+          "--score-out",
+          "{task_dir}/score.json",
+          "--settings-json",
+          "{\"plan_kind\":\"wiki_librarian_gemma3_27b_direct\",\"reasoning_mode\":\"direct\",\"template\":\"gemma3_text_only\",\"temperature\":0.0,\"source_doc\":\"docs/feature-requests/wiki-librarian-bench/07-model-plan-gemma3-27b.md\"}",
+          "--pack",
+          "librarian-gate",
+          "--pack",
+          "librarian-rerank",
+          "--pack",
+          "librarian-compress",
+          "--pack",
+          "librarian-contradiction"
+        ]
+      ],
+      "score_file": "{task_dir}/score.json",
+      "min_score": 0.01,
+      "timeout_seconds": 3600
+    }
+  ]
+}

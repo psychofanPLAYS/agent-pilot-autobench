@@ -53,6 +53,9 @@ def _normalise_pack(pack: dict[str, Any]) -> dict[str, Any]:
     return {
         "pack_id": str(pack["pack_id"]),
         "tier": str(pack.get("tier", "")),
+        "status": str(pack.get("status", "scored")),
+        "failure_class": str(pack.get("failure_class", "none")),
+        "failure": str(pack.get("failure", "none")),
         "asked": int(pack.get("asked", 0)),
         "correct": int(pack.get("correct", 0)),
         "wrong": int(pack.get("wrong", 0)),
@@ -98,9 +101,15 @@ def render_results_markdown(payload: dict[str, Any]) -> str:
         asked = pack["asked"]
         correct = pack["correct"]
         incomplete = pack["incomplete"]
+        status = pack.get("status", "scored")
+        failure_class = pack.get("failure_class", "none")
 
         # Pack header: e.g.  ## easy-gotcha  easy  score 1/2 (incomplete 1)
         header = f"## {pack_id}  [{tier}]  score {correct}/{asked}"
+        if failure_class == "preflight_fail":
+            header = f"## {pack_id}  [{tier}]  preflight_fail ({pack.get('failure', 'unknown')})"
+        elif status != "scored":
+            header += f"  ({status})"
         if incomplete > 0:
             header += f"  (incomplete {incomplete})"
         lines.append(header)

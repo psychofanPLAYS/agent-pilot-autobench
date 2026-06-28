@@ -465,6 +465,7 @@ class AutoresearchLoop:
                 stderr="",
                 returncode=1,
             )
+        best_result = _hydrate_result_from_simple_bench_summary(best_result)
 
         planned_profiles = (
             len(self.candidate_sequence) if self.candidate_sequence is not None else None
@@ -873,16 +874,20 @@ def _write_flag_ladder_comparison(
     provisional_best_profile: str,
     planned_profiles: int,
 ) -> None:
+    hydrated_attempts = [
+        (settings, _hydrate_result_from_simple_bench_summary(result))
+        for settings, result in attempts
+    ]
     baseline_tps = next(
         (
             result.generation_tokens_per_second
-            for settings, result in attempts
+            for settings, result in hydrated_attempts
             if settings.profile_name == "L0-baseline" and (result.ok or _is_partial_result(result))
         ),
         None,
     )
     rows = []
-    for settings, result in attempts:
+    for settings, result in hydrated_attempts:
         partial = _is_partial_result(result)
         tps = result.generation_tokens_per_second if result.ok or partial else None
         slowdown_percent = (
@@ -899,6 +904,7 @@ def _write_flag_ladder_comparison(
                 "champion": settings.profile_name == champion_profile,
                 "score": result.simple_bench_score,
                 "accuracy": result.simple_bench_accuracy,
+                "score_fraction": _score_fraction(result),
                 "median_tps": tps,
                 "prefill_tps": result.prompt_tokens_per_second if result.ok or partial else None,
                 "slowdown_vs_baseline_percent": slowdown_percent,
@@ -942,9 +948,69 @@ def _attempt_warning_count(receipt_path: str | None) -> int | None:
     return int(value) if value is not None else None
 
 
+def _hydrate_result_from_simple_bench_summary(result: AttemptResult) -> AttemptResult:
+    summary = _simple_bench_summary(result.simple_bench_receipt)
+    if summary is None:
+        return result
+
+    completed = int(summary.get("total") or result.completed_questions or 0)
+    attempted = int(summary.get("attempted_questions") or result.attempted_questions or completed)
+    if completed <= 0:
+        return result
+
+    return replace(
+        result,
+        generation_tokens_per_second=_fallback_float(
+            result.generation_tokens_per_second, summary.get("median_tps")
+        ),
+        prompt_tokens_per_second=_fallback_float(
+            result.prompt_tokens_per_second, summary.get("median_prompt_tps")
+        ),
+        ttft_ms=_fallback_optional_float(result.ttft_ms, summary.get("median_ttft_ms")),
+        simple_bench_score=_fallback_optional_float(result.simple_bench_score, summary.get("score")),
+        simple_bench_accuracy=_fallback_optional_float(
+            result.simple_bench_accuracy, summary.get("accuracy")
+        ),
+        simple_bench_failure=(
+            result.simple_bench_failure
+            if result.simple_bench_failure not in {None, "", "none"}
+            else str(summary.get("failure") or "none")
+        ),
+        completed_questions=result.completed_questions or completed,
+        attempted_questions=result.attempted_questions or attempted,
+    )
+
+
+def _simple_bench_summary(receipt_path: str | None) -> dict | None:
+    if not receipt_path:
+        return None
+    summary_path = Path(receipt_path) / "summary.json"
+    try:
+        payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _fallback_float(current: float, fallback) -> float:
+    if current > 0:
+        return current
+    if fallback is None:
+        return current
+    return float(fallback)
+
+
+def _fallback_optional_float(current: float | None, fallback) -> float | None:
+    if current is not None:
+        return current
+    if fallback is None:
+        return None
+    return float(fallback)
+
+
 def _flag_ladder_tsv(rows: list[dict]) -> str:
     header = (
-        "profile\tok\tpartial\tchampion\tscore\taccuracy\tmedian_tps\tprefill_tps\t"
+        "profile\tok\tpartial\tchampion\tscore\taccuracy\tscore_fraction\tmedian_tps\tprefill_tps\t"
         "slowdown_vs_baseline_percent\tmedian_ttft_ms\tcompleted_questions\t"
         "attempted_questions\twarning_count\tfailure\treceipt"
     )
@@ -959,6 +1025,7 @@ def _flag_ladder_tsv(rows: list[dict]) -> str:
                     str(row["champion"]).lower(),
                     _tsv_float(row["score"]),
                     _tsv_float(row["accuracy"]),
+                    str(row.get("score_fraction") or ""),
                     _tsv_float(row["median_tps"]),
                     _tsv_float(row.get("prefill_tps")),
                     _tsv_float(row["slowdown_vs_baseline_percent"]),
@@ -992,16 +1059,17 @@ def _flag_ladder_markdown(payload: dict) -> str:
         "",
         "Positive slowdown means slower than L0; negative means faster.",
         "",
-        "| Profile | OK | Partial | Champion | Accuracy | Gen TPS | Prefill TPS | "
+        "| Profile | OK | Partial | Champion | Score | Accuracy | Gen TPS | Prefill TPS | "
         "Slowdown vs L0 | TTFT ms | Questions | Warnings | Failure |",
-        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
     for row in payload["rows"]:
         lines.append(
             "| "
             f"{row['profile']} | {str(row['ok']).lower()} | "
             f"{str(row.get('partial', False)).lower()} | "
-            f"{str(row['champion']).lower()} | {_md_float(row['accuracy'])} | "
+            f"{str(row['champion']).lower()} | {row.get('score_fraction') or 'n/a'} | "
+            f"{_md_float(row['accuracy'])} | "
             f"{_md_float(row['median_tps'])} | "
             f"{_md_float(row.get('prefill_tps'))} | "
             f"{_md_float(row['slowdown_vs_baseline_percent'])}% | "
@@ -1017,6 +1085,13 @@ def _is_partial_result(result: AttemptResult) -> bool:
     return (
         not result.ok and result.completed_questions > 0 and result.generation_tokens_per_second > 0
     )
+
+
+def _score_fraction(result: AttemptResult) -> str | None:
+    if result.simple_bench_accuracy is None or result.completed_questions <= 0:
+        return None
+    correct = round(result.simple_bench_accuracy * result.completed_questions)
+    return f"{correct}/{result.completed_questions}"
 
 
 def build_autoresearch_llama_bench_command(

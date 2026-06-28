@@ -1,12 +1,12 @@
 # Implementation status
 
-Last updated: 2026-06-24 · branch `codex/wiki-librarian-bench`
+Last updated: 2026-06-28 - branch `codex/wiki-librarian-bench`
 
-## v0 — deterministic job-task layer (DONE)
+## v0 - deterministic job-task layer (DONE)
 
 Each job is a pure, seed-deterministic generator that returns a
 `gguf_limit_bench.packs.QuestionPack` graded by the existing scorer in
-`answer_scoring.py`. No server, no LLM-judge. Files under
+`answer_scoring.py`. No server, no LLM judge. Files live under
 `src/gguf_limit_bench/librarian/`.
 
 | Pack id | Module | Answer type | Q @seed0 | What it measures |
@@ -19,34 +19,72 @@ Each job is a pure, seed-deterministic generator that returns a
 | `librarian-compress` | `compress.py` | MC | 16 | pick the faithful, complete summary |
 | `librarian-contradiction` | `contradiction.py` | MC | 14 | confirms / contradicts / unrelated |
 
-Total: 99 gold-labeled questions at seed 0 (each generator yields 10–16 per seed,
-deterministic per seed, varying across seeds).
-
-Shared scaffolding (authored centrally, not by the parallel workers):
-`librarian/_common.py` (helpers + scorer-contract notes), `librarian/registry.py`
-(id → builder map), `librarian/__init__.py` (exports the registry).
+Total: 99 gold-labeled questions at seed 0. Each generator yields 10-16 questions
+per seed, deterministic per seed and varying across seeds.
 
 Integration: `packs.available_packs()` lists all 7 ids and `packs.load_pack(id)`
-builds them (seed 0), via lazy imports that avoid the circular dependency.
+builds them through the librarian registry.
 
-## v0.1 — hardening applied (DONE)
+## v0.1 - validity hardening (DONE)
 
-Applied the [VALIDITY] fix from [09-hardening-spec.md](09-hardening-spec.md) section C:
-`dedupe`, `gate`, and `contradiction` now randomize the label->letter mapping per
-question via the new `_common.shuffle_choices`, so the answer letter no longer encodes
-the class. Verified empirically across 60 seeds — gold-letter distribution is ~uniform
-and every class now appears at every letter position (e.g. dedupe `duplicate/related/new`
-each -> `ABC`; gate `inject/skip` each -> `AB`). `compress`/`rerank` already randomized
-position and were left unchanged. Remaining hardening items (preflight gates, adversarial
-subtypes, negative controls, two-regime stability) are still open in the spec checklist.
+Applied the section C validity fix from [09-hardening-spec.md](09-hardening-spec.md):
+`dedupe`, `gate`, and `contradiction` randomize the label-to-letter mapping per
+question via `_common.shuffle_choices`, so the answer letter no longer encodes the
+semantic class. `compress` and `rerank` already randomized position.
 
-## Verification (all green)
+## v0.2 - runnable preset artifacts (DONE, preflight-sensitive)
 
-- `pytest tests/test_librarian_*.py` → 94 tests pass
-- full repo `pytest -q` → 598 passed, 1 skipped
-- `ruff format --check` and `ruff check src tests` → clean
-- `mypy` on `src/gguf_limit_bench/librarian` → clean
-  (the 2 mypy errors in `hf_catalog.py` are pre-existing and untouched by this work)
+Bundled benchmark-suite plans exist:
+
+- `benchmarks/plans/wiki-librarian-gemma3-27b-direct.plan.json`
+- `benchmarks/plans/wiki-librarian-qwen3-moe-thinking.plan.json`
+
+They call `python -m gguf_limit_bench.librarian_suite`, split the seven librarian
+packs across general/agentic suite phases, and emit `librarian_bench_score`,
+`agent_bench_score`, per-pack JSON, TSV, Markdown, and suite summaries. See
+[10-runnable-presets.md](10-runnable-presets.md).
+
+Important honesty note: these plans are runnable artifacts, not proof that a cell is
+valid. The live run now performs preflight first. If the model identity/template/BOS/
+thinking/answer-channel evidence is missing or broken, the preset run writes a
+`preflight_fail` receipt instead of scoring the librarian packs.
+
+## v0.3 - preflight gates in real run paths (DONE)
+
+The five fail-fast gates from section A of [09-hardening-spec.md](09-hardening-spec.md)
+now run before librarian questions are scored in both active paths:
+
+- `champion_eval.evaluate_champion_packs()` for integrated benchmark/cockpit mode.
+- `librarian_suite.run_librarian_suite()` for direct benchmark-suite plan tasks.
+
+Implemented gates:
+
+| Gate | Current behavior |
+|------|------------------|
+| Identity | Requires the model to resolve to HF-style identity evidence before scoring. |
+| Single-BOS (Gemma) | Calls `/tokenize` with and without special tokens and requires exactly one added token. Non-Gemma cells skip this gate. |
+| Template-load | Requires `--jinja`; hashes `--chat-template-file` when provided. |
+| Thinking-sanity (Qwen) | With explicit `enable_thinking`, checks that thinking-on emits `<think>` and thinking-off does not. Qwen cells without an explicit thinking knob are recorded as skipped. |
+| Answer-channel | Runs a warmup MC prompt and requires a parseable `Final Answer:` / MC letter. |
+
+Failure behavior: a failed gate writes `preflight.json` plus the normal result
+surface (`results.json/results.md` or `librarian-suite-summary.json/.tsv/.md`) with
+`failure_class: preflight_fail`, `status: preflight_fail`, and `asked: 0`. It does
+not call `run_pack_questions()` and does not record the cell as a zero-quality model
+score.
+
+## Verification
+
+- 2026-06-28:
+  `.\.venv\Scripts\python.exe -m pytest tests\test_librarian_preflight.py tests\test_champion_eval.py tests\test_librarian_suite.py -q`
+  -> 13 passed.
+- 2026-06-28:
+  `.\.venv\Scripts\ruff.exe check src\gguf_limit_bench\librarian\preflight.py src\gguf_limit_bench\champion_eval.py src\gguf_limit_bench\results_report.py src\gguf_limit_bench\librarian_suite.py tests\test_librarian_preflight.py tests\test_champion_eval.py tests\test_librarian_suite.py`
+  -> clean.
+
+Earlier 2026-06-24 full validation remains historical evidence only: the branch had
+`pytest tests/test_librarian_*.py` passing, full repo `pytest -q` at 598 passed / 1
+skipped, Ruff clean, and librarian mypy clean with unrelated `hf_catalog.py` errors.
 
 ## How to use it now
 
@@ -55,26 +93,26 @@ uv run --extra dev python -c "from gguf_limit_bench import packs; print(packs.lo
 uv run --extra dev python -m pytest tests/test_librarian_*.py -q
 ```
 
-The packs are runnable by the existing pack runner / cockpit because they are
-ordinary `QuestionPack`s. Pointing a live `llama-server` model at them, sweeping
-the knobs, and aggregating scores is the next phase (not yet built).
+For live runs, serve a real GGUF through llama.cpp with the intended template flags,
+then run the preset plan. A missing identity/template/thinking contract now blocks
+the cell with `preflight_fail`.
 
-## Decisions made while building (reversible — confirm or correct)
+## Decisions made while building
 
 - Q1 (inject gate): built `librarian-gate` as a model-driven inject/skip decision,
   including correct-skip on keyword distractors and stale/deprecated memories.
-- Q2 (query understanding / HyDE): NOT built yet. `librarian-rerank` covers
-  retrieval reranking; a dedicated query-rewrite/HyDE job is still open.
-- write_entry was scoped to EXACT single-token answers (type + slug) rather than
-  full-JSON emission, because the EXACT scorer normalizes punctuation/case and
-  full-JSON exact-match is fragile. Full-frontmatter emission can be a later job
-  with a dedicated schema validator.
+- Q2 (query understanding / HyDE): not built yet. `librarian-rerank` covers retrieval
+  reranking; a dedicated query-rewrite/HyDE job is still open.
+- `write_entry` is scoped to EXACT single-token answers (type + slug), not full JSON.
 
-## Next phases (not started)
+## Remaining work
 
-1. Query-understanding / HyDE job (resolve Q2).
-2. Knob-sweep harness: thinking on/off, chat template (froggeric v19 vs stock),
-   sampling/seed determinism repeats — produce cube cells.
-3. `librarian_bench_score` aggregation + Pareto recommendation over the new knobs.
-4. Web dashboard (FastAPI + two-way WebSocket, auto-open) and static SVG receipts.
-5. SSOT export/sync grounded on HF slugs.
+1. Query-understanding / HyDE job.
+2. Per-letter accuracy reporting at score time.
+3. Adversarial subtypes and negative-control cases.
+4. Full knob-sweep harness: thinking on/off, chat template, sampling, seed repeats.
+5. Two-regime stability protocol.
+6. Format-adherence and grounding as scored gates.
+7. Seed rotation and seed recorded in every SSOT row.
+8. Difficulty tags and balanced-distribution asserts.
+9. SSOT export/sync grounded on HF slugs.
