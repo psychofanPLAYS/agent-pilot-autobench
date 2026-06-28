@@ -54,9 +54,7 @@ def test_template_override_wins(tmp_path):
     model = tmp_path / "Qwen3.5-9B-Q8_0.gguf"
     model.touch()
 
-    flags = recommended_model_flags(
-        model, search_roots=(tmp_path,), template_override=override
-    )
+    flags = recommended_model_flags(model, search_roots=(tmp_path,), template_override=override)
 
     assert flags == ("--jinja", "--chat-template-file", str(override))
 

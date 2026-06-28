@@ -19,9 +19,7 @@ _QWEN_TEMPLATE_DIR_HINTS = ("Qwen-Fixed-Chat-Templates",)
 _TEMPLATE_FILENAMES = ("chat_template.jinja",)
 
 
-def discover_chat_template(
-    family: str, search_roots: tuple[Path, ...]
-) -> Path | None:
+def discover_chat_template(family: str, search_roots: tuple[Path, ...]) -> Path | None:
     """Return a custom chat-template ``.jinja`` for *family*, if one is on disk.
 
     Only Qwen has a known custom template convention today. Looks for a
@@ -84,9 +82,7 @@ def merge_flags(base: tuple[str, ...], extra: tuple[str, ...]) -> tuple[str, ...
     while index < len(extras):
         token = extras[index]
         if token.startswith("-"):
-            takes_value = (
-                index + 1 < len(extras) and not extras[index + 1].startswith("-")
-            )
+            takes_value = index + 1 < len(extras) and not extras[index + 1].startswith("-")
             if token in present:
                 index += 2 if takes_value else 1
                 continue
