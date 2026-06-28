@@ -63,7 +63,7 @@ terminal cockpit is still available with `apb tui` as a fallback.
 
 - **Quick check** — does it load, and how fast? No questions asked (fast scout).
 - **Find best settings** — walk the flag ladder, ask the questions, crown the best settings.
-- **Librarian bot test** — compare Gemma and Qwen as local memory/RAG workers.
+- **Librarian bot test** — score any local model(s) as memory/RAG agent workers, head-to-head.
 - **How flags affect speed** — see how each llama.cpp flag changes tok/s and TTFT.
 - **Context limits** — how much context fits, and how long context affects tok/s.
 - **Deep / overnight** — everything, big budget; keeps searching and converging.
@@ -378,4 +378,4 @@ the pinned source revision and checksum.
 ## Tiny Glossary
 
 - `apb`: short for Agent Pilot Autobench, the quick command alias.
-- `pilotBENCHY`: the friendly browser-first workflow name for the benchmark cockpit.
+- Agent Pilot cockpit: the browser-first workflow for running benchmarks and comparing models.
