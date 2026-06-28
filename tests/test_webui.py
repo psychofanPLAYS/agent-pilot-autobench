@@ -6,6 +6,8 @@ from pathlib import Path
 import threading
 import time
 
+from fastapi.testclient import TestClient
+
 from gguf_limit_bench.discovery import ModelInfo
 from gguf_limit_bench.librarian.registry import LIBRARIAN_PACK_IDS
 from gguf_limit_bench.webui import (
@@ -13,8 +15,10 @@ from gguf_limit_bench.webui import (
     WebUiState,
     _handler_for,
     build_run_options,
+    create_web_app,
     recent_receipts,
     resolve_run_artifact,
+    serve_webui,
     validate_web_selection,
 )
 
@@ -148,3 +152,129 @@ def test_webui_start_endpoint_rejects_malformed_json(tmp_path):
 
     assert response.status == 400
     assert "valid JSON" in payload
+
+
+def test_webui_websocket_sends_hello_and_state(tmp_path):
+    model_root = tmp_path / "models"
+    model_root.mkdir()
+    (model_root / "Gemma-3-27B-Q4_K_M.gguf").write_bytes(b"1" * 20)
+    state = WebUiState(root=model_root, runs_root=tmp_path / "_runs")
+    client = TestClient(create_web_app(state))
+
+    with client.websocket_connect("/ws") as websocket:
+        hello = websocket.receive_json()
+        state_message = websocket.receive_json()
+
+    assert hello["type"] == "hello"
+    assert hello["protocol"] == 1
+    assert state_message["type"] == "state"
+    assert state_message["payload"]["models"][0]["name"] == "Gemma-3-27B-Q4_K_M.gguf"
+
+
+def test_webui_websocket_start_run_dispatches_backend(tmp_path):
+    model_root = tmp_path / "models"
+    model_root.mkdir()
+    gemma_path = model_root / "Gemma-3-27B-Q4_K_M.gguf"
+    qwen_path = model_root / "Qwen3.6-35B-A3B-Q4_K_M.gguf"
+    gemma_path.write_bytes(b"1" * 20)
+    qwen_path.write_bytes(b"1" * 30)
+    calls: list[tuple[str, WebRunOptions]] = []
+
+    def fake_run_model(model: ModelInfo, options: WebRunOptions):
+        calls.append((model.name, options))
+        receipt = tmp_path / "_runs" / model.name
+        receipt.mkdir(parents=True)
+        return receipt
+
+    state = WebUiState(root=model_root, runs_root=tmp_path / "_runs", run_model=fake_run_model)
+    client = TestClient(create_web_app(state))
+
+    with client.websocket_connect("/ws") as websocket:
+        websocket.receive_json()
+        websocket.receive_json()
+        websocket.send_json(
+            {
+                "type": "start_run",
+                "model_paths": [str(gemma_path), str(qwen_path)],
+                "mode_id": "librarian_bench",
+                "options": {"budget_minutes": 3, "forced_server_args": ["--jinja"]},
+            }
+        )
+        reply = websocket.receive_json()
+
+    assert reply["type"] == "run_started"
+    assert reply["ok"] is True
+    deadline = time.time() + 2
+    while time.time() < deadline and len(calls) < 2:
+        time.sleep(0.02)
+    assert [call[1].budget_minutes for call in calls] == [3, 3]
+
+
+def test_webui_websocket_stop_after_current_marks_run_state(tmp_path):
+    state = WebUiState(root=tmp_path / "models", runs_root=tmp_path / "_runs")
+    client = TestClient(create_web_app(state))
+
+    with client.websocket_connect("/ws") as websocket:
+        websocket.receive_json()
+        websocket.receive_json()
+        websocket.send_json({"type": "stop_after_current"})
+        reply = websocket.receive_json()
+
+    assert reply["type"] == "stop_after_current"
+    assert reply["ok"] is True
+    assert state.run.stop_requested is True
+    assert any(event.kind == "stop" for event in state.run.events)
+
+
+def test_webui_state_lists_benchmark_suite_plans(tmp_path):
+    root = tmp_path
+    plans = root / "benchmarks" / "plans"
+    plans.mkdir(parents=True)
+    (plans / "local-openai-smoke.plan.json").write_text(
+        '{"name": "Local OpenAI smoke", "description": "Requires a local endpoint."}',
+        encoding="utf-8",
+    )
+    state = WebUiState(root=root / "models", runs_root=root / "_runs", project_root=root)
+
+    payload = state.state_payload()
+
+    assert payload["benchmark_suite_plans"] == [
+        {
+            "path": str(plans / "local-openai-smoke.plan.json"),
+            "filename": "local-openai-smoke.plan.json",
+            "name": "Local OpenAI smoke",
+            "description": "Requires a local endpoint.",
+            "warning": "Requires a local endpoint.",
+        }
+    ]
+
+
+def test_serve_webui_builds_fastapi_app_without_starting_benchmark(tmp_path, monkeypatch):
+    captured = {}
+
+    class FakeServer:
+        def __init__(self, config):
+            captured["config"] = config
+
+        def run(self):
+            captured["ran"] = True
+
+    monkeypatch.setattr("gguf_limit_bench.webui.uvicorn.Server", FakeServer)
+    monkeypatch.setattr(
+        "gguf_limit_bench.webui.webbrowser.open", lambda url: captured.setdefault("url", url)
+    )
+
+    url = serve_webui(
+        root=tmp_path / "models",
+        runs_root=tmp_path / "_runs",
+        run_model=None,
+        host="127.0.0.1",
+        port=8765,
+        open_browser=True,
+    )
+
+    assert url == "http://127.0.0.1:8765/"
+    assert captured["url"] == "http://127.0.0.1:8765/"
+    assert captured["ran"] is True
+    assert captured["config"].host == "127.0.0.1"
+    assert captured["config"].port == 8765

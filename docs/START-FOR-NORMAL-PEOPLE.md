@@ -24,13 +24,15 @@ After setup adds `_bin` to your user PATH, open a new terminal and run:
 apb --start
 ```
 
-Plain `apb` also opens the browser cockpit after setup. Use `apb tui` only when
-you specifically want the older terminal cockpit.
+Plain `apb` also opens the browser cockpit after setup. The browser is the
+primary workflow for model selection, benchmark-suite plan selection, live run
+progress, telemetry, and receipt links. Use `apb tui` only when you specifically
+want the older fallback terminal cockpit.
 
 In the browser cockpit, pick models, choose the test type, review the recommended
-forced flags, and start the run. The page shows live activity, telemetry, the
-current best model for this machine, and links to the receipts when the run
-finishes.
+forced flags, and start the run. The page uses a local WebSocket connection to
+show live activity, telemetry, the current best model for this machine, and links
+to the receipts when the run finishes.
 
 The longer command also works:
 

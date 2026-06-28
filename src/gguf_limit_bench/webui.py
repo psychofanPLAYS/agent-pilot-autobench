@@ -3,14 +3,19 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import json
 import mimetypes
 from pathlib import Path, PurePosixPath
+import socket
 import threading
 from typing import Callable
 from urllib.parse import quote, unquote, urlparse
 import webbrowser
+
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, JSONResponse, Response
+import uvicorn
 
 from gguf_limit_bench.discovery import ModelInfo, discover_models
 from gguf_limit_bench.flag_ladder import profile_descriptions, validate_extra_server_args
@@ -48,6 +53,7 @@ OPTIONAL_FORCED_FLAGS = (
     ("--mlock", "Ask the OS to keep model pages resident when supported."),
     ("--no-warmup", "Skip llama.cpp warmup when measuring cold-start behavior."),
 )
+WS_PROTOCOL_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -75,6 +81,7 @@ class WebRunState:
     options: dict | None = None
     events: list[WebRunEvent] = field(default_factory=list)
     error: str | None = None
+    stop_requested: bool = False
 
 
 class WebUiState:
@@ -84,10 +91,12 @@ class WebUiState:
         root: Path,
         runs_root: Path,
         run_model: WebRunModelCallback | None = None,
+        project_root: Path | None = None,
     ) -> None:
         self.root = root
         self.runs_root = runs_root
         self.run_model = run_model
+        self.project_root = project_root or Path.cwd()
         self.run = WebRunState()
         self.run_configuration = run_configuration_payload()
         self._lock = threading.Lock()
@@ -113,6 +122,7 @@ class WebUiState:
             "default_mode": "librarian_bench",
             "librarian_packs": list(LIBRARIAN_PACK_IDS),
             "run_configuration": self.run_configuration,
+            "benchmark_suite_plans": benchmark_suite_plan_payloads(self.project_root),
             "telemetry": telemetry,
             "active_run": active_run_status(self.runs_root),
             "champion": champion,
@@ -163,6 +173,16 @@ class WebUiState:
         thread.start()
         return True, "Benchmark started."
 
+    def request_stop_after_current(self) -> tuple[bool, str]:
+        with self._lock:
+            if self.run.phase not in {"running", "idle"}:
+                return False, "No active benchmark run can be stopped."
+            self.run.stop_requested = True
+            self.run.events.append(
+                _event("stop", "Stop requested. The current benchmark item will finish first.")
+            )
+            return True, "Stop requested after current item."
+
     def _run_models(self, selected: list[ModelInfo], options: WebRunOptions) -> None:
         receipts: list[str] = []
         try:
@@ -187,11 +207,19 @@ class WebUiState:
                     self.run.events.append(
                         _event("receipt", f"Finished {model.name}; receipt: {receipt}")
                     )
+                    stop_requested = self.run.stop_requested
+                if stop_requested:
+                    with self._lock:
+                        self.run.phase = "stopping"
+                        self.run.message = "Stopped after the current benchmark item."
+                        self.run.events.append(_event("stop", "Run queue stopped by request."))
+                    break
             with self._lock:
-                self.run.phase = "complete"
-                self.run.message = "Benchmark complete."
+                if self.run.phase != "stopping":
+                    self.run.phase = "complete"
+                    self.run.message = "Benchmark complete."
+                    self.run.events.append(_event("complete", "Benchmark queue finished."))
                 self.run.receipts = receipts
-                self.run.events.append(_event("complete", "Benchmark queue finished."))
         except Exception as exc:  # noqa: BLE001 - surface background failures to UI
             with self._lock:
                 self.run.phase = "failed"
@@ -268,6 +296,88 @@ def run_configuration_payload() -> dict:
     }
 
 
+def websocket_message(message_type: str, payload: dict | None = None) -> dict:
+    return {"type": message_type, "payload": payload or {}}
+
+
+def websocket_error(message: str) -> dict:
+    return {"type": "error", "message": message}
+
+
+def create_web_app(state: WebUiState) -> FastAPI:
+    app = FastAPI(title="pilotBENCHY local cockpit", docs_url=None, redoc_url=None)
+
+    @app.get("/")
+    async def index() -> HTMLResponse:
+        return HTMLResponse(INDEX_HTML)
+
+    @app.get("/api/state")
+    async def api_state() -> JSONResponse:
+        return JSONResponse(state.state_payload())
+
+    @app.post("/api/start")
+    async def api_start(request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+        except json.JSONDecodeError:
+            return JSONResponse({"ok": False, "message": "Request body must be valid JSON."}, 400)
+        if not isinstance(payload, dict):
+            return JSONResponse({"ok": False, "message": "Request body must be a JSON object."}, 400)
+        ok, message = state.start_run(
+            model_paths=[str(path) for path in payload.get("model_paths", [])],
+            mode_id=str(payload.get("mode_id", "librarian_bench")),
+            options_payload=payload.get("options")
+            if isinstance(payload.get("options"), dict)
+            else {},
+        )
+        return JSONResponse({"ok": ok, "message": message}, 200 if ok else 400)
+
+    @app.get("/runs/{encoded_relative_path:path}")
+    async def run_artifact(encoded_relative_path: str) -> Response:
+        artifact = resolve_run_artifact(state.runs_root, encoded_relative_path)
+        if artifact is None:
+            return Response(status_code=HTTPStatus.NOT_FOUND)
+        data = artifact.read_bytes()
+        return Response(content=data, media_type=_artifact_content_type(artifact))
+
+    @app.websocket("/ws")
+    async def websocket_endpoint(websocket: WebSocket) -> None:
+        await websocket.accept()
+        await websocket.send_json({"type": "hello", "protocol": WS_PROTOCOL_VERSION})
+        await websocket.send_json(websocket_message("state", state.state_payload()))
+        try:
+            while True:
+                message = await websocket.receive_json()
+                response = await handle_websocket_command(state, message)
+                if response is not None:
+                    await websocket.send_json(response)
+        except WebSocketDisconnect:
+            return
+
+    return app
+
+
+async def handle_websocket_command(state: WebUiState, message: object) -> dict | None:
+    if not isinstance(message, dict):
+        return websocket_error("WebSocket message must be a JSON object.")
+    message_type = str(message.get("type") or "")
+    if message_type in {"subscribe", "refresh"}:
+        return websocket_message("state", state.state_payload())
+    if message_type == "start_run":
+        model_paths = [str(path) for path in message.get("model_paths", [])]
+        options = message.get("options") if isinstance(message.get("options"), dict) else {}
+        ok, response_message = state.start_run(
+            model_paths=model_paths,
+            mode_id=str(message.get("mode_id", "librarian_bench")),
+            options_payload=options,
+        )
+        return {"type": "run_started", "ok": ok, "message": response_message}
+    if message_type == "stop_after_current":
+        ok, response_message = state.request_stop_after_current()
+        return {"type": "stop_after_current", "ok": ok, "message": response_message}
+    return websocket_error(f"Unknown WebSocket message type: {message_type}")
+
+
 def serve_webui(
     *,
     root: Path,
@@ -277,19 +387,22 @@ def serve_webui(
     port: int = 0,
     open_browser: bool = True,
 ) -> str:
+    resolved_port = port if port != 0 else _free_local_port(host)
     state = WebUiState(root=root, runs_root=runs_root, run_model=run_model)
-    handler = _handler_for(state)
-    server = ThreadingHTTPServer((host, port), handler)
-    url = f"http://{host}:{server.server_port}/"
+    app = create_web_app(state)
+    config = uvicorn.Config(app, host=host, port=resolved_port, log_level="warning")
+    server = uvicorn.Server(config)
+    url = f"http://{host}:{resolved_port}/"
     if open_browser:
         webbrowser.open(url)
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.server_close()
+    server.run()
     return url
+
+
+def _free_local_port(host: str) -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind((host, 0))
+        return int(sock.getsockname()[1])
 
 
 def _handler_for(state: WebUiState):
@@ -383,6 +496,46 @@ def global_report_payloads(runs_root: Path) -> list[dict]:
         if path.is_file():
             reports.append({"label": label, "url": _runs_url(path, runs_root)})
     return reports
+
+
+def benchmark_suite_plan_payloads(project_root: Path) -> list[dict]:
+    plans_root = project_root / "benchmarks" / "plans"
+    if not plans_root.exists():
+        return []
+    payloads: list[dict] = []
+    for path in sorted(plans_root.glob("*.plan.json")):
+        name = path.name
+        description = ""
+        warning = ""
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            data = {}
+        if isinstance(data, dict):
+            name = str(data.get("name") or data.get("title") or path.name)
+            description = str(data.get("description") or "")
+            warning = _plan_warning(data, description)
+        payloads.append(
+            {
+                "path": str(path),
+                "filename": path.name,
+                "name": name,
+                "description": description,
+                "warning": warning,
+            }
+        )
+    return payloads
+
+
+def _plan_warning(data: dict, description: str) -> str:
+    text = json.dumps(data, ensure_ascii=True).lower() + " " + description.lower()
+    if "endpoint" in text:
+        return description
+    if "external" in text or "uvx" in text:
+        return "This plan may call an external benchmark tool."
+    if "heavy" in text:
+        return "This plan may take a long time."
+    return ""
 
 
 def _event(kind: str, message: str) -> WebRunEvent:
@@ -525,6 +678,13 @@ def _read_best_settings(path: Path) -> dict:
 def _runs_url(path: Path, runs_root: Path) -> str:
     relative = path.resolve().relative_to(runs_root.resolve()).as_posix()
     return f"/runs/{quote(relative)}"
+
+
+def _artifact_content_type(path: Path) -> str:
+    content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    if path.suffix.lower() in {".md", ".txt", ".tsv"}:
+        return "text/plain; charset=utf-8"
+    return content_type
 
 
 def _safe_mtime(path: Path) -> float:
@@ -738,6 +898,7 @@ INDEX_HTML = r"""<!doctype html>
                 <span><strong>Show model thinking if a run records it</strong><small>Only appears when the backend receipt exposes safe thinking text.</small></span>
               </label>
               <button id="start">Start benchmark</button>
+              <button id="stop-after-current" class="ghost-button" type="button">Stop after current</button>
               <p id="guard" class="sub"></p>
             </div>
           </div>
@@ -771,6 +932,7 @@ INDEX_HTML = r"""<!doctype html>
     const sortModes = ["family", "size", "name"];
     let sortIndex = 0;
     let appState = null;
+    let socket = null;
 
     function escapeHtml(value) {
       return String(value ?? "")
@@ -942,9 +1104,37 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
-    async function refresh() {
-      const response = await fetch("/api/state");
-      render(await response.json());
+    function connectSocket() {
+      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+      socket = new WebSocket(`${protocol}://${window.location.host}/ws`);
+      socket.addEventListener("message", event => {
+        const message = JSON.parse(event.data);
+        if (message.type === "state") render(message.payload);
+        if (message.type === "run_started") {
+          document.querySelector("#guard").textContent = message.message;
+          sendSocket({type: "refresh"});
+        }
+        if (message.type === "stop_after_current") {
+          document.querySelector("#guard").textContent = message.message;
+          sendSocket({type: "refresh"});
+        }
+        if (message.type === "error") document.querySelector("#guard").textContent = message.message;
+      });
+      socket.addEventListener("open", () => {
+        document.querySelector("#guard").textContent = "Live connection ready.";
+      });
+      socket.addEventListener("close", () => {
+        document.querySelector("#guard").textContent = "Live connection lost. Reconnecting...";
+        setTimeout(connectSocket, 2000);
+      });
+    }
+
+    function sendSocket(message) {
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
+        document.querySelector("#guard").textContent = "Live connection is not ready yet.";
+        return;
+      }
+      socket.send(JSON.stringify(message));
     }
 
     document.querySelector("#theme").addEventListener("click", () => {
@@ -973,28 +1163,27 @@ INDEX_HTML = r"""<!doctype html>
       }
       updateGuard();
     });
-    document.querySelector("#start").addEventListener("click", async () => {
-      const response = await fetch("/api/start", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          model_paths: Array.from(selected),
-          mode_id: document.querySelector("#mode").value,
-          options: {
-            budget_minutes: Number(document.querySelector("#budget").value),
-            forced_server_args: selectedForcedArgs(),
-            stream_prompts: document.querySelector("#stream-prompts").checked,
-            show_thinking: document.querySelector("#show-thinking").checked
-          }
-        })
+    document.querySelector("#start").addEventListener("click", () => {
+      sendSocket({
+        type: "start_run",
+        model_paths: Array.from(selected),
+        mode_id: document.querySelector("#mode").value,
+        options: {
+          budget_minutes: Number(document.querySelector("#budget").value),
+          forced_server_args: selectedForcedArgs(),
+          stream_prompts: document.querySelector("#stream-prompts").checked,
+          show_thinking: document.querySelector("#show-thinking").checked
+        }
       });
-      const payload = await response.json();
-      document.querySelector("#guard").textContent = payload.message;
-      await refresh();
+    });
+    document.querySelector("#stop-after-current").addEventListener("click", () => {
+      sendSocket({type: "stop_after_current"});
     });
 
-    refresh();
-    setInterval(refresh, 2500);
+    connectSocket();
+    setInterval(() => {
+      if (socket && socket.readyState === WebSocket.OPEN) sendSocket({type: "refresh"});
+    }, 2500);
   </script>
 </body>
 </html>

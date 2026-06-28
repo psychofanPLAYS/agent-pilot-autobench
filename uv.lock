@@ -30,6 +30,7 @@ name = "agent-pilot-autobench"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "fastapi" },
     { name = "huggingface-hub" },
     { name = "nvidia-ml-py" },
     { name = "optuna" },
@@ -37,6 +38,7 @@ dependencies = [
     { name = "rich" },
     { name = "textual" },
     { name = "typer" },
+    { name = "uvicorn" },
 ]
 
 [package.optional-dependencies]
@@ -53,6 +55,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "fastapi", specifier = ">=0.115.0" },
     { name = "huggingface-hub", specifier = ">=0.34" },
     { name = "inspect-ai", marker = "extra == 'bench'", specifier = ">=0.3.226" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.19.0" },
@@ -66,6 +69,7 @@ requires-dist = [
     { name = "textual", specifier = ">=0.80.0" },
     { name = "typer", specifier = ">=0.12.0" },
     { name = "types-psutil", marker = "extra == 'dev'", specifier = ">=7.0.0.20250601" },
+    { name = "uvicorn", specifier = ">=0.30.0" },
 ]
 provides-extras = ["dev", "bench"]
 

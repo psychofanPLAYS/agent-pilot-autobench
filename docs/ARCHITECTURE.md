@@ -7,7 +7,7 @@ repeatable, records evidence, and compares candidates under explicit budgets.
 ## Data Flow
 
 ```text
-CLI, browser cockpit, or terminal TUI fallback
+CLI, WebSocket browser cockpit, or terminal TUI fallback
   -> resolved config and discovered GGUF models
   -> benchmark/autoresearch runner
   -> llama.cpp subprocess or benchmark harness
@@ -25,7 +25,7 @@ receipts stay in ignored project-local directories.
 | Feature | Command | Main implementation | Outputs | Primary tests |
 | --- | --- | --- | --- | --- |
 | First-run setup | `agent-autobench --first-run` | `cli.py`, `installer.py`, `doctor.py` | `_bin/`, `_db/`, `_runs/` | `test_cli.py`, `test_installer.py`, `test_doctor.py` |
-| Browser cockpit | `apb` / `agent-autobench start` | `webui.py`, `cli.py`, `discovery.py` | selected model paths, run status, receipts | `test_webui.py`, `test_cli.py` |
+| Browser cockpit | `apb` / `agent-autobench start` | `webui.py`, `cli.py`, `discovery.py`, FastAPI/WebSocket service | selected model paths, WebSocket run events, telemetry, receipts | `test_webui.py`, `test_cli.py` |
 | Model discovery | `agent-autobench survey` | `discovery.py`, `selection.py`, `tui.py` | selected model paths | `test_discovery.py`, `test_selection.py`, `test_tui.py` |
 | Raw speed probe | `agent-autobench quick` | `runner.py`, `autoresearch.py` | receipt and speed metrics | `test_autoresearch.py` |
 | Adaptive autoresearch | `agent-autobench autoresearch` | `autoresearch.py`, `learning.py` | best settings, attempts/results TSV | `test_autoresearch.py`, `test_learning.py` |

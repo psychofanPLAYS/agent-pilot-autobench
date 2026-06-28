@@ -23,6 +23,11 @@ apb --start
 agent-autobench --start
 ```
 
+Plain `apb` opens the local browser cockpit. The browser is the primary workflow
+for model selection, benchmark-suite plan selection, live WebSocket run progress,
+telemetry, and receipt links. `apb tui` remains available as a fallback terminal
+cockpit.
+
 ## Checks
 
 ```powershell
@@ -222,6 +227,9 @@ List bundled plans:
 ```powershell
 agent-autobench benchmark-suite-plans
 ```
+
+The browser cockpit also lists bundled benchmark-suite plans so a normal run can
+start from the same source-controlled plan files without hand-typing the path.
 
 Run a smoke plan:
 

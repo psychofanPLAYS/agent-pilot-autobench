@@ -53,7 +53,9 @@ that goes straight to the app. Power-user subcommands still exist — run
 ## Cockpit Modes
 
 Plain `apb` (or double-clicking `START.bat`) opens the local browser cockpit.
-Pick model(s) with checkboxes, choose a mode from the menu, review the
+The browser is the primary workflow for model selection, benchmark-suite plan
+selection, live WebSocket run progress, telemetry, and receipt links. Pick
+model(s) with checkboxes, choose a mode from the menu, review the
 recommended/forced llama.cpp flags, then press **Start benchmark**. While a run is
 active, the cockpit shows the live activity feed, telemetry, current winner, and
 receipt/report links so you do not have to dig through `_runs` by hand. The older
@@ -131,7 +133,7 @@ Each receipt also includes:
 - `report.json`: machine-readable itemized report, including metric coverage
 - `context-profile.md`, `context-profile.tsv`, `context-profile.json`: fixed context ladder profile when enabled
 
-The TUI remembers the last selected models and shows truncated previous-run summaries so the current session can be compared against earlier evidence without opening every receipt.
+The fallback TUI remembers the last selected models and shows truncated previous-run summaries so the current session can be compared against earlier evidence without opening every receipt.
 
 For a safe preview that starts no model server, see the
 [sanitized flag-ladder dry-run artifact](docs/examples/flag-ladder-dry-run.md). It shows
@@ -376,4 +378,4 @@ the pinned source revision and checksum.
 ## Tiny Glossary
 
 - `apb`: short for Agent Pilot Autobench, the quick command alias.
-- `pilotBENCHY`: the friendly TUI/workflow name for the benchmark cockpit.
+- `pilotBENCHY`: the friendly browser-first workflow name for the benchmark cockpit.
