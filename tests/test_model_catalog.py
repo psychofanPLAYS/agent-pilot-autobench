@@ -44,6 +44,10 @@ class FakeHub:
             identity_confidence="verified",
             document_confidence="verified",
             readme=README,
+            auxiliary_files={
+                "generation_config.json": '{"top_p": 0.8}',
+                "tokenizer_config.json": '{"chat_template": "template"}',
+            },
         )
 
 
@@ -113,6 +117,11 @@ def test_catalog_exports_stable_json_and_markdown(tmp_path):
     markdown = paths.markdown.read_text(encoding="utf-8")
     assert "Identity confidence" in markdown
     assert "publisher_claim" in markdown
+    recommendations = json.loads(paths.recommendations.read_text(encoding="utf-8"))
+    entry = recommendations["entries"][0]
+    assert entry["model"]["repo_id"] == "bytkim/Qwen3.6-27B-MTP-GGUF"
+    assert entry["values"]["spec_type"] == "draft-mtp"
+    assert entry["recommendations"]
 
 
 def test_local_only_catalog_never_calls_hub(tmp_path):

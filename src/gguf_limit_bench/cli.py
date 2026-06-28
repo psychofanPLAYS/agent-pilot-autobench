@@ -157,6 +157,7 @@ def models_scan(
     console.print(f"Cataloged {len(snapshot.entries)} models without network access.")
     console.print(f"JSON: {paths.json}")
     console.print(f"Markdown: {paths.markdown}")
+    console.print(f"Recommendations DB: {paths.recommendations}")
 
 
 @models_app.command("enrich")
@@ -188,6 +189,7 @@ def models_enrich(
     console.print(f"Enriched {len(snapshot.entries)} models.")
     console.print(f"JSON: {paths.json}")
     console.print(f"Markdown: {paths.markdown}")
+    console.print(f"Recommendations DB: {paths.recommendations}")
 
 
 @models_app.command("list")
@@ -255,6 +257,7 @@ def models_export(
     paths = write_catalog(load_catalog(cache_root), output_dir)
     console.print(f"JSON: {paths.json}")
     console.print(f"Markdown: {paths.markdown}")
+    console.print(f"Recommendations DB: {paths.recommendations}")
 
 
 def _effective_forced_server_args(custom_args: tuple[str, ...] = ()) -> tuple[str, ...]:

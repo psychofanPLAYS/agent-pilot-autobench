@@ -12,6 +12,7 @@ from gguf_limit_bench.model_recommendations import (
     Recommendation,
     RecommendationSource,
     extract_recommendations,
+    recommendation_values,
     validate_recommendations,
 )
 from gguf_limit_bench.runtime_capabilities import LlamaCapabilities
@@ -71,6 +72,7 @@ class CatalogSnapshot:
 class CatalogPaths:
     json: Path
     markdown: Path
+    recommendations: Path
 
 
 class ModelCatalog:
@@ -132,6 +134,7 @@ class ModelCatalog:
                         ),
                         revision=record.revision,
                     ),
+                    auxiliary_files=record.auxiliary_files,
                 )
                 if self.capabilities is not None:
                     recommendations = validate_recommendations(
@@ -166,12 +169,17 @@ def write_catalog(snapshot: CatalogSnapshot, output_dir: Path) -> CatalogPaths:
     output_dir.mkdir(parents=True, exist_ok=True)
     json_path = output_dir / "catalog.json"
     markdown_path = output_dir / "catalog.md"
+    recommendations_path = output_dir / "recommendations.json"
     _atomic_write(
         json_path,
         json.dumps(snapshot.to_dict(), indent=2, sort_keys=True) + "\n",
     )
     _atomic_write(markdown_path, _catalog_markdown(snapshot))
-    return CatalogPaths(json=json_path, markdown=markdown_path)
+    _atomic_write(
+        recommendations_path,
+        json.dumps(_recommendation_database(snapshot), indent=2, sort_keys=True) + "\n",
+    )
+    return CatalogPaths(json=json_path, markdown=markdown_path, recommendations=recommendations_path)
 
 
 def load_catalog(cache_root: Path) -> CatalogSnapshot:
@@ -262,6 +270,43 @@ def _catalog_markdown(snapshot: CatalogSnapshot) -> str:
                     f"{' (conflicted)' if item.conflicted else ''}"
                 )
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _recommendation_database(snapshot: CatalogSnapshot) -> dict:
+    entries = []
+    for entry in snapshot.entries:
+        values = recommendation_values(entry.recommendations)
+        entries.append(
+            {
+                "model": {
+                    "name": entry.name,
+                    "local_path": entry.local_path,
+                    "repo_id": entry.repo_id,
+                    "hub_filename": entry.hub_filename,
+                    "family": entry.family,
+                    "parameters": entry.parameters,
+                    "quant": entry.quant,
+                    "has_mtp": entry.has_mtp,
+                    "is_moe": entry.is_moe,
+                },
+                "identity_confidence": entry.identity_confidence,
+                "document_confidence": entry.document_confidence,
+                "revision": entry.revision,
+                "license": entry.license,
+                "base_models": list(entry.base_models),
+                "datasets": list(entry.datasets),
+                "values": values,
+                "recommendations": [asdict(item) for item in entry.recommendations],
+                "errors": list(entry.errors),
+            }
+        )
+    return {
+        "schema_version": 1,
+        "generated_at": snapshot.generated_at,
+        "network_used": snapshot.network_used,
+        "source_catalog_schema_version": snapshot.schema_version,
+        "entries": entries,
+    }
 
 
 def _atomic_write(path: Path, content: str) -> None:

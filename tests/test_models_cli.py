@@ -107,6 +107,27 @@ def test_models_command_group_exposes_product_commands():
         assert command in result.output
 
 
+def test_models_scan_prints_recommendations_database_path(tmp_path):
+    create_model(tmp_path / "models")
+
+    result = runner.invoke(
+        app,
+        [
+            "models",
+            "scan",
+            "--model-root",
+            str(tmp_path / "models"),
+            "--cache-root",
+            str(tmp_path / "catalog"),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Recommendations DB:" in result.output
+    assert (tmp_path / "catalog" / "recommendations.json").exists()
+
+
+
 def test_models_show_reads_persisted_catalog(tmp_path):
     model = create_model(tmp_path / "models")
     scan = runner.invoke(

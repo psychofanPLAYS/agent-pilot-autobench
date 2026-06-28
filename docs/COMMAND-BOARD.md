@@ -45,6 +45,20 @@ agent-autobench survey --qwen-35b-only
 agent-autobench survey --qwen-35b-only --mtp-only
 ```
 
+## Model Web Evidence Cache
+
+```powershell
+agent-autobench models scan --model-root "_models"
+agent-autobench models enrich --model-root "_models" --cache-root "_db\catalog"
+agent-autobench models recommendations "Qwen3-4B-Q4_K_M.gguf"
+agent-autobench models export "_db\github-sync"
+```
+
+`scan` is local-only. `enrich` resolves Hugging Face repo IDs from LM Studio-style
+folders, pins model-card evidence by HF revision, caches README/config files on
+disk, and extracts useful llama.cpp settings when the model card or Hub config
+contains them. The GitHub-sync seed is `_db\catalog\recommendations.json`.
+
 Default paths are repo-relative and can be overridden in `_CONFIG.toml`:
 
 - `_models`

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 import json
 from pathlib import Path
@@ -31,13 +31,16 @@ class HuggingFaceGateway:
         return self._api.model_info(repo_id, files_metadata=True)
 
     def model_card(self, repo_id: str, revision: str) -> str:
+        return self.optional_file_text(repo_id, revision, "README.md")
+
+    def optional_file_text(self, repo_id: str, revision: str, filename: str) -> str:
         from huggingface_hub import hf_hub_download
         from huggingface_hub.errors import EntryNotFoundError
 
         try:
             path = hf_hub_download(
                 repo_id=repo_id,
-                filename="README.md",
+                filename=filename,
                 revision=revision,
                 cache_dir=self._cache_dir,
             )
@@ -62,11 +65,13 @@ class HubRecord:
     identity_confidence: str
     document_confidence: str
     readme: str
+    auxiliary_files: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self, *, include_readme: bool = False) -> dict[str, Any]:
         payload = asdict(self)
         if not include_readme:
             payload.pop("readme")
+            payload.pop("auxiliary_files")
         return payload
 
 
@@ -102,6 +107,7 @@ class HubCatalog:
         if not revision:
             raise ValueError(f"Hugging Face model info has no revision SHA: {repo_id}")
         readme = self.gateway.model_card(repo_id, revision)
+        auxiliary_files = _fetch_auxiliary_files(self.gateway, repo_id, revision)
         filenames = {
             str(name)
             for sibling in (_attribute(info, "siblings") or [])
@@ -124,6 +130,7 @@ class HubCatalog:
             identity_confidence="verified" if filename_verified else "candidate",
             document_confidence="verified" if readme.strip() else "partial",
             readme=readme,
+            auxiliary_files=auxiliary_files,
         )
         self._write(record)
         return record
@@ -141,6 +148,11 @@ class HubCatalog:
         payload = json.loads(record_path.read_text(encoding="utf-8"))
         readme_path = record_path.with_name("README.md")
         readme = readme_path.read_text(encoding="utf-8") if readme_path.exists() else ""
+        auxiliary_files = {
+            path.name: path.read_text(encoding="utf-8")
+            for path in sorted(record_path.parent.glob("*.json"))
+            if path.name != "record.json"
+        }
         return HubRecord(
             repo_id=str(payload["repo_id"]),
             filename=str(payload["filename"]),
@@ -156,6 +168,7 @@ class HubCatalog:
             identity_confidence=str(payload["identity_confidence"]),
             document_confidence="cached" if readme else "partial",
             readme=readme,
+            auxiliary_files=auxiliary_files,
         )
 
     def _write(self, record: HubRecord) -> None:
@@ -166,6 +179,8 @@ class HubCatalog:
             json.dumps(record.to_dict(), indent=2, sort_keys=True) + "\n",
         )
         _atomic_write_text(target / "README.md", record.readme)
+        for filename, content in sorted(record.auxiliary_files.items()):
+            _atomic_write_text(target / filename, content)
 
 
 def _attribute(value: Any, name: str) -> Any:
@@ -200,6 +215,19 @@ def _optional_text(value: Any) -> str | None:
 
 def _repo_cache_name(repo_id: str) -> str:
     return repo_id.replace("/", "--")
+
+
+def _fetch_auxiliary_files(gateway: HubGateway, repo_id: str, revision: str) -> dict[str, str]:
+    optional_file_text = getattr(gateway, "optional_file_text", None)
+    if not callable(optional_file_text):
+        return {}
+
+    files: dict[str, str] = {}
+    for filename in ("generation_config.json", "tokenizer_config.json", "config.json"):
+        content = optional_file_text(repo_id, revision, filename)
+        if isinstance(content, str) and content.strip():
+            files[filename] = content
+    return files
 
 
 def _atomic_write_text(path: Path, content: str) -> None:

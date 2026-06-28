@@ -69,3 +69,63 @@ llama-server -m model.gguf --mystery-mode turbo --temp 0.7
     recommendations = extract_recommendations(readme, source=SOURCE)
 
     assert recommendation_values(recommendations) == {"temperature": 0.7}
+
+
+def test_huge_wall_of_text_prose_recommendations_are_extracted():
+    filler = " ".join(f"background-{index}" for index in range(800))
+    readme = f"""
+# Large model card
+
+{filler}
+
+For llama.cpp inference we recommend temperature 0.6, top_p 0.95, top_k 20,
+min_p 0.0, repetition_penalty 1.05, and context length 32k for normal use.
+
+{filler}
+"""
+
+    values = recommendation_values(extract_recommendations(readme, source=SOURCE))
+
+    assert values["temperature"] == 0.6
+    assert values["top_p"] == 0.95
+    assert values["top_k"] == 20
+    assert values["min_p"] == 0.0
+    assert values["repetition_penalty"] == 1.05
+    assert values["context_size"] == 32_768
+
+
+def test_hub_config_defaults_are_extracted_when_readme_is_thin():
+    recommendations = extract_recommendations(
+        "# Thin README\nNo sampler table here.",
+        source=SOURCE,
+        auxiliary_files={
+            "generation_config.json": '{"temperature": 0.7, "top_p": 0.8, "top_k": 20}',
+            "tokenizer_config.json": '{"chat_template": "{% for message in messages %}x{% endfor %}"}',
+            "config.json": '{"max_position_embeddings": 131072}',
+        },
+    )
+    values = recommendation_values(recommendations)
+
+    assert values["temperature"] == 0.7
+    assert values["top_p"] == 0.8
+    assert values["top_k"] == 20
+    assert values["jinja"] is True
+    assert values["context_size"] == 131072
+    assert {item.parser for item in recommendations} == {"hub_config_json"}
+
+
+def test_prose_parser_ignores_non_shell_fenced_examples():
+    readme = """
+Recommended settings:
+temperature=0.6, top_p=0.95
+
+```python
+# This unrelated vLLM example mentions sampling.
+client.chat.completions.create(extra_body={"temperature": 1.0, "top_p": 0.8})
+```
+"""
+
+    values = recommendation_values(extract_recommendations(readme, source=SOURCE))
+
+    assert values["temperature"] == 0.6
+    assert values["top_p"] == 0.95
