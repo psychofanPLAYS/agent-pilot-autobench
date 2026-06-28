@@ -642,9 +642,11 @@ def recent_receipts(runs_root: Path, *, limit: int = RECENT_RECEIPT_LIMIT) -> li
 def receipt_event_payloads(runs_root: Path, *, limit: int = 40) -> list[dict]:
     if not runs_root.exists():
         return []
+    # Sort newest first by mtime, breaking ties on the (timestamped) directory
+    # name so two receipts created in the same mtime tick still order correctly.
     receipts = sorted(
         (path for path in runs_root.iterdir() if path.is_dir()),
-        key=_safe_mtime,
+        key=lambda path: (_safe_mtime(path), path.name),
         reverse=True,
     )
     for receipt in receipts:

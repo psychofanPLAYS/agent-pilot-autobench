@@ -205,11 +205,14 @@ def _thinking_sanity_gate(
 
 
 def _answer_channel_gate(base_url: str, timeout_seconds: int) -> PreflightGateReceipt:
+    # Allow enough tokens for a reasoning ("thinking") model to emit its <think>
+    # block and still reach the Final Answer line; 64 tokens starved thinking
+    # models and produced false answer_channel failures.
     text, *_ = _chat(
         base_url=base_url,
         system_prompt="You are a benchmark preflight assistant. Reply with Final Answer: A.",
         user_content=_ANSWER_PROMPT,
-        max_tokens=64,
+        max_tokens=1024,
         timeout_seconds=timeout_seconds,
     )
     answer = extract_answer(text, AnswerType.MULTIPLE_CHOICE)

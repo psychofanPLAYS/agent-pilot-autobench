@@ -83,6 +83,7 @@ from gguf_limit_bench.installer import (
 from gguf_limit_bench.hf_catalog import HubCatalog, HuggingFaceGateway
 from gguf_limit_bench.learning import OptunaSettingsLearner
 from gguf_limit_bench.librarian.registry import LIBRARIAN_PACK_IDS
+from gguf_limit_bench.template_recommend import merge_flags, recommended_model_flags
 from gguf_limit_bench.model_catalog import (
     ModelCatalog,
     find_catalog_entry,
@@ -460,7 +461,10 @@ def _start_app(
                 or benchmark_suite_plan,
                 enable_mtp=model.has_mtp,
                 evaluation=mode_by_id(options.mode_id).evaluation,
-                forced_server_args=options.forced_server_args,
+                forced_server_args=merge_flags(
+                    options.forced_server_args,
+                    recommended_model_flags(model.path, search_roots=(root,)),
+                ),
                 champion_pack_ids=tuple(LIBRARIAN_PACK_IDS)
                 if options.mode_id == "librarian_bench"
                 else None,
