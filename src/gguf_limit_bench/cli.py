@@ -300,7 +300,7 @@ def main(
     needs_setup = first_run_now or (not start_now and not is_setup_complete(project_root()))
     if needs_setup:
         if not first_run_now:
-            console.print("First run detected. Setting up pilotBENCHY (one time)...")
+            console.print("First run detected. Setting up Agent Pilot (one time)...")
         _setup_app(
             root=config.paths.model_roots[0],
             llama_bench=config.paths.llama_bench,

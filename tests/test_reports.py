@@ -218,8 +218,11 @@ def test_results_html_is_actionable_and_beautiful_enough_to_open(tmp_path):
     assert "agent-autobench export-profile" in html
     assert "LOAD FAIL" in html
     assert "Evidence" in html
-    assert "Best models on this hardware" in html
+    assert "Model comparison" in html
     assert "_runs\\model-comparison.md" in html
+    # Must not carry the old branding.
+    assert "pilotBENCHY" not in html
+    assert "Gemma vs Qwen" not in html
 
 
 def test_write_leaderboard_handles_missing_runs_folder(tmp_path):
@@ -332,12 +335,138 @@ def test_write_leaderboard_writes_model_level_comparison_report(tmp_path):
 
     markdown = (tmp_path / "model-comparison.md").read_text(encoding="utf-8")
     payload = json.loads((tmp_path / "model-comparison.json").read_text(encoding="utf-8"))
-    assert "pilotBENCHY Model Comparison" in markdown
+    assert "Agent Pilot Model Comparison" in markdown
+    assert "pilotBENCHY" not in markdown
     assert "winner.gguf" in markdown
     assert "per-model champion" in markdown or "Keep iterating" in markdown
     assert payload[0]["model_name"] == "winner.gguf"
     assert payload[0]["run_count"] == 1
     assert payload[0]["browser_report_path"].endswith("report.html")
+
+
+def test_results_json_yields_agent_quality_and_pack_scores(tmp_path):
+    run = _write_run(tmp_path, "librarian-model", 50.0, 40.0, context=32768)
+    (run / "results.json").write_text(
+        json.dumps(
+            {
+                "model": "G:/AI/models/librarian-model.gguf",
+                "selection_mode": "rolling",
+                "sample_size": 6,
+                "gpu": "rtx",
+                "recommended_flags": [],
+                "packs": [
+                    {
+                        "pack_id": "librarian-gate",
+                        "tier": "core",
+                        "status": "scored",
+                        "failure_class": "",
+                        "asked": 4,
+                        "correct": 3,
+                        "wrong": 1,
+                        "incomplete": 0,
+                        "accuracy": 0.75,
+                        "median_tps": 30.0,
+                        "median_ttft_ms": 200.0,
+                        "questions": [],
+                    },
+                    {
+                        "pack_id": "librarian-dedupe",
+                        "tier": "core",
+                        "status": "scored",
+                        "failure_class": "",
+                        "asked": 4,
+                        "correct": 1,
+                        "wrong": 3,
+                        "incomplete": 0,
+                        "accuracy": 0.25,
+                        "median_tps": 28.0,
+                        "median_ttft_ms": 210.0,
+                        "questions": [],
+                    },
+                    {
+                        "pack_id": "librarian-compress",
+                        "tier": "core",
+                        "status": "preflight_fail",
+                        "failure_class": "preflight",
+                        "asked": 0,
+                        "correct": 0,
+                        "wrong": 0,
+                        "incomplete": 0,
+                        "accuracy": 0.0,
+                        "median_tps": 0.0,
+                        "median_ttft_ms": None,
+                        "questions": [],
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    leaderboard = build_leaderboard(tmp_path)
+    entry = next(e for e in leaderboard.entries if e.run_id == "librarian-model")
+
+    # Mean over scored packs only (0.75 + 0.25) / 2 == 0.5; preflight_fail skipped.
+    assert entry.librarian_score == 0.5
+    assert entry.scored_pack_count == 2
+    assert entry.pack_scores == {"librarian-gate": 0.75, "librarian-dedupe": 0.25}
+    # agent_bench_score is populated from librarian_score when otherwise None.
+    assert entry.agent_bench_score == 0.5
+
+    comparison = build_model_comparison(leaderboard)
+    model = next(e for e in comparison.entries if e.model_name == "librarian-model.gguf")
+    assert model.librarian_score == 0.5
+    assert model.pack_scores == {"librarian-gate": 0.75, "librarian-dedupe": 0.25}
+    assert model.scored_pack_count == 2
+
+
+def test_results_html_renders_agent_quality_matrix(tmp_path):
+    run = _write_run(tmp_path, "librarian-model", 50.0, 40.0, context=32768)
+    (run / "results.json").write_text(
+        json.dumps(
+            {
+                "packs": [
+                    {"pack_id": "librarian-gate", "status": "scored", "accuracy": 0.9},
+                    {"pack_id": "librarian-rerank", "status": "scored", "accuracy": 0.4},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    write_leaderboard(tmp_path)
+    html = (tmp_path / "results.html").read_text(encoding="utf-8")
+    markdown = (tmp_path / "model-comparison.md").read_text(encoding="utf-8")
+
+    assert "Best model by agent quality" in html
+    assert "gate" in html and "rerank" in html
+    assert "90%" in html
+    assert "Agent score" in markdown
+    assert "90%" in markdown
+
+
+def test_librarian_suite_summary_is_used_when_results_json_missing(tmp_path):
+    run = _write_run(tmp_path, "suite-model", 50.0, 40.0, context=32768)
+    (run / "librarian-suite-summary.json").write_text(
+        json.dumps(
+            {
+                "librarian_bench_score": 0.6,
+                "agent_bench_score": 0.6,
+                "accuracy": 0.6,
+                "status": "scored",
+                "packs": [
+                    {"pack_id": "librarian-triage", "status": "scored", "accuracy": 0.6},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    entry = next(
+        e for e in build_leaderboard(tmp_path).entries if e.run_id == "suite-model"
+    )
+    assert entry.librarian_score == 0.6
+    assert entry.pack_scores == {"librarian-triage": 0.6}
 
 
 def test_leaderboard_excludes_non_generative_models(tmp_path):

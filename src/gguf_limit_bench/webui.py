@@ -190,7 +190,7 @@ class WebUiState:
         thread = threading.Thread(
             target=self._run_models,
             args=(selected, options),
-            name="pilotBENCHY-WebUI-runner",
+            name="AgentPilot-WebUI-runner",
             daemon=True,
         )
         thread.start()
@@ -351,7 +351,7 @@ def websocket_error(message: str) -> dict:
 
 
 def create_web_app(state: WebUiState) -> FastAPI:
-    app = FastAPI(title="pilotBENCHY local cockpit", docs_url=None, redoc_url=None)
+    app = FastAPI(title="Agent Pilot local cockpit", docs_url=None, redoc_url=None)
 
     @app.get("/")
     async def index() -> HTMLResponse:
@@ -800,7 +800,7 @@ INDEX_HTML = r"""<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>pilotBENCHY</title>
+  <title>Agent Pilot</title>
   <style>
     :root {
       color-scheme: dark;

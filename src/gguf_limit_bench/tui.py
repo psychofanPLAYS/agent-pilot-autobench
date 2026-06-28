@@ -136,7 +136,7 @@ class BenchTui(App):
     def compose(self) -> ComposeResult:
         yield Header()
         with Vertical():
-            yield Static("pilotBENCHY — local GGUF + llama.cpp autobench", id="banner")
+            yield Static("Agent Pilot — local GGUF + llama.cpp agent benchmark", id="banner")
             yield Static("Sampling hardware telemetry...", id="telemetry")
             yield Static("Loading GGUF models...", id="status")
             yield DataTable(id="models")
