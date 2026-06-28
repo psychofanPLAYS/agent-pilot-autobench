@@ -175,7 +175,7 @@ class WebUiState:
 
     def request_stop_after_current(self) -> tuple[bool, str]:
         with self._lock:
-            if self.run.phase not in {"running", "idle"}:
+            if self.run.phase != "running":
                 return False, "No active benchmark run can be stopped."
             self.run.stop_requested = True
             self.run.events.append(
@@ -319,17 +319,9 @@ def create_web_app(state: WebUiState) -> FastAPI:
     async def api_start(request: Request) -> JSONResponse:
         try:
             payload = await request.json()
-        except json.JSONDecodeError:
+        except ValueError:
             return JSONResponse({"ok": False, "message": "Request body must be valid JSON."}, 400)
-        if not isinstance(payload, dict):
-            return JSONResponse({"ok": False, "message": "Request body must be a JSON object."}, 400)
-        ok, message = state.start_run(
-            model_paths=[str(path) for path in payload.get("model_paths", [])],
-            mode_id=str(payload.get("mode_id", "librarian_bench")),
-            options_payload=payload.get("options")
-            if isinstance(payload.get("options"), dict)
-            else {},
-        )
+        ok, message = start_run_from_payload(state, payload)
         return JSONResponse({"ok": ok, "message": message}, 200 if ok else 400)
 
     @app.get("/runs/{encoded_relative_path:path}")
@@ -347,7 +339,11 @@ def create_web_app(state: WebUiState) -> FastAPI:
         await websocket.send_json(websocket_message("state", state.state_payload()))
         try:
             while True:
-                message = await websocket.receive_json()
+                try:
+                    message = await websocket.receive_json()
+                except json.JSONDecodeError:
+                    await websocket.send_json(websocket_error("WebSocket message must be valid JSON."))
+                    continue
                 response = await handle_websocket_command(state, message)
                 if response is not None:
                     await websocket.send_json(response)
@@ -357,6 +353,22 @@ def create_web_app(state: WebUiState) -> FastAPI:
     return app
 
 
+def start_run_from_payload(state: WebUiState, payload: object) -> tuple[bool, str]:
+    if not isinstance(payload, dict):
+        return False, "Request body must be a JSON object."
+    raw_model_paths = payload.get("model_paths", [])
+    if not isinstance(raw_model_paths, list):
+        return False, "model_paths must be a list."
+    if not all(isinstance(path, str) for path in raw_model_paths):
+        return False, "model_paths entries must be strings."
+    options = payload.get("options") if isinstance(payload.get("options"), dict) else {}
+    return state.start_run(
+        model_paths=raw_model_paths,
+        mode_id=str(payload.get("mode_id", "librarian_bench")),
+        options_payload=options,
+    )
+
+
 async def handle_websocket_command(state: WebUiState, message: object) -> dict | None:
     if not isinstance(message, dict):
         return websocket_error("WebSocket message must be a JSON object.")
@@ -364,13 +376,7 @@ async def handle_websocket_command(state: WebUiState, message: object) -> dict |
     if message_type in {"subscribe", "refresh"}:
         return websocket_message("state", state.state_payload())
     if message_type == "start_run":
-        model_paths = [str(path) for path in message.get("model_paths", [])]
-        options = message.get("options") if isinstance(message.get("options"), dict) else {}
-        ok, response_message = state.start_run(
-            model_paths=model_paths,
-            mode_id=str(message.get("mode_id", "librarian_bench")),
-            options_payload=options,
-        )
+        ok, response_message = start_run_from_payload(state, message)
         return {"type": "run_started", "ok": ok, "message": response_message}
     if message_type == "stop_after_current":
         ok, response_message = state.request_stop_after_current()
@@ -434,13 +440,7 @@ def _handler_for(state: WebUiState):
             except ValueError as exc:
                 self._send_json({"ok": False, "message": str(exc)}, status=400)
                 return
-            ok, message = state.start_run(
-                model_paths=[str(path) for path in payload.get("model_paths", [])],
-                mode_id=str(payload.get("mode_id", "librarian_bench")),
-                options_payload=payload.get("options")
-                if isinstance(payload.get("options"), dict)
-                else {},
-            )
+            ok, message = start_run_from_payload(state, payload)
             self._send_json({"ok": ok, "message": message}, status=200 if ok else 400)
 
         def log_message(self, format: str, *args) -> None:  # noqa: A002

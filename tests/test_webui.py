@@ -212,6 +212,7 @@ def test_webui_websocket_start_run_dispatches_backend(tmp_path):
 
 def test_webui_websocket_stop_after_current_marks_run_state(tmp_path):
     state = WebUiState(root=tmp_path / "models", runs_root=tmp_path / "_runs")
+    state.run.phase = "running"
     client = TestClient(create_web_app(state))
 
     with client.websocket_connect("/ws") as websocket:
@@ -224,6 +225,72 @@ def test_webui_websocket_stop_after_current_marks_run_state(tmp_path):
     assert reply["ok"] is True
     assert state.run.stop_requested is True
     assert any(event.kind == "stop" for event in state.run.events)
+
+
+def test_webui_websocket_stop_after_current_rejects_idle_run(tmp_path):
+    state = WebUiState(root=tmp_path / "models", runs_root=tmp_path / "_runs")
+    client = TestClient(create_web_app(state))
+
+    with client.websocket_connect("/ws") as websocket:
+        websocket.receive_json()
+        websocket.receive_json()
+        websocket.send_json({"type": "stop_after_current"})
+        reply = websocket.receive_json()
+
+    assert reply["type"] == "stop_after_current"
+    assert reply["ok"] is False
+    assert state.run.stop_requested is False
+    assert "No active benchmark run" in reply["message"]
+
+
+def test_webui_websocket_rejects_invalid_json_without_crashing(tmp_path):
+    state = WebUiState(root=tmp_path / "models", runs_root=tmp_path / "_runs")
+    client = TestClient(create_web_app(state))
+
+    with client.websocket_connect("/ws") as websocket:
+        websocket.receive_json()
+        websocket.receive_json()
+        websocket.send_text("{not-json")
+        reply = websocket.receive_json()
+
+    assert reply["type"] == "error"
+    assert "valid JSON" in reply["message"]
+
+
+def test_webui_websocket_rejects_non_list_model_paths(tmp_path):
+    state = WebUiState(root=tmp_path / "models", runs_root=tmp_path / "_runs")
+    client = TestClient(create_web_app(state))
+
+    with client.websocket_connect("/ws") as websocket:
+        websocket.receive_json()
+        websocket.receive_json()
+        websocket.send_json(
+            {
+                "type": "start_run",
+                "model_paths": "not-a-list",
+                "mode_id": "quick",
+            }
+        )
+        reply = websocket.receive_json()
+
+    assert reply["type"] == "run_started"
+    assert reply["ok"] is False
+    assert "model_paths must be a list" in reply["message"]
+
+
+def test_webui_api_start_rejects_non_list_model_paths(tmp_path):
+    state = WebUiState(root=tmp_path / "models", runs_root=tmp_path / "_runs")
+    client = TestClient(create_web_app(state))
+
+    response = client.post(
+        "/api/start",
+        json={"model_paths": "not-a-list", "mode_id": "quick"},
+    )
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["ok"] is False
+    assert "model_paths must be a list" in payload["message"]
 
 
 def test_webui_state_lists_benchmark_suite_plans(tmp_path):
