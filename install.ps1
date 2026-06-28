@@ -1,4 +1,4 @@
-# pilotBENCHY one-command installer.
+# Agent Pilot one-command installer.
 #
 #   powershell -ExecutionPolicy Bypass -File install.ps1
 #
@@ -9,8 +9,8 @@ $ErrorActionPreference = "Stop"
 Set-Location -LiteralPath $PSScriptRoot
 
 Write-Host ""
-Write-Host "pilotBENCHY setup" -ForegroundColor Cyan
-Write-Host "=================="
+Write-Host "Agent Pilot setup" -ForegroundColor Cyan
+Write-Host "================="
 Write-Host ""
 
 # 1. Ensure uv (the Python toolchain) is available.

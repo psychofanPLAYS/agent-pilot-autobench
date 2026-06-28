@@ -25,18 +25,19 @@ negative-control expansions, the web dashboard, and SSOT sync.
 
 ## What this is
 
-A new capability suite for Agent Pilot Autobench (pilotBENCHY) that measures how
+A new capability suite for Agent Pilot Autobench that measures how
 well a **local model performs the jobs of a memory/RAG "librarian"** that serves
 Claude Code / Codex.
 
 The "wiki" here is **not** human-facing prose. It is a local-model-powered memory
 layer: markdown notes + a vector store, retrieved with a hybrid **RRF** fusion of
 vector and full-text search over `sqlite-vec`, with **autonomous injection** of
-relevant memories / lessons / logs into the *agent's* context. The local model
-(gemma3-27b, qwen3.5 / qwen3.6 ~35B MoE, variants) is the librarian doing the
-cognitive work. pilotBENCHY is the instrument that captures **every conceivable
-data point** about that model's librarian performance across every knob we can
-turn, then draws trends and a recommendation out of them.
+relevant memories / lessons / logs into the *agent's* context. Any local model
+(for example gemma3-27b, or a qwen3.5 / qwen3.6 ~35B MoE, and other variants) is
+the librarian doing the cognitive work. Agent Pilot is the instrument that
+captures **every conceivable data point** about that model's librarian
+performance across every knob we can turn, then draws trends and a
+recommendation out of them.
 
 ## The core mental model: the measurement cube
 

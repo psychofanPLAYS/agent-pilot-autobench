@@ -8,7 +8,7 @@ Status: draft
 > grounded against OEM Hugging Face slugs -> single source of truth ->
 > recommended flags per model.
 
-Today pilotBENCHY produces **local receipts** (`_runs/*.tsv`, `champion.json`,
+Today Agent Pilot produces **local receipts** (`_runs/*.tsv`, `champion.json`,
 HTML reports). The vision extends this into a **shared, self-improving knowledge
 base**: the more people run the librarian suite, the better the recommendations
 get for everyone, per model.

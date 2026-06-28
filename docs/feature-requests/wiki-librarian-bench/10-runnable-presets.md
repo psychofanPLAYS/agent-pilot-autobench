@@ -2,7 +2,8 @@
 
 Status: runnable plan artifacts, 2026-06-27
 
-The Gemma and Qwen model plans now have bundled benchmark-suite plans:
+The first two example model plans now have bundled benchmark-suite plans (Gemma 3
+27B and a Qwen3 MoE, used here only because they are convenient local models):
 
 - `benchmarks/plans/wiki-librarian-gemma3-27b-direct.plan.json`
 - `benchmarks/plans/wiki-librarian-qwen3-moe-thinking.plan.json`
@@ -20,7 +21,7 @@ preflight gates. If model identity, template loading, Gemma BOS, Qwen thinking, 
 answer-channel checks fail, the task emits `preflight_fail` receipts with `asked: 0`
 instead of a bad quality score.
 
-## First live Gemma-vs-Qwen comparison
+## First live model-vs-model comparison (Gemma and Qwen as examples)
 
 Run one model at a time through the same path. First serve the Gemma GGUF on
 `127.0.0.1:8080`, then run:

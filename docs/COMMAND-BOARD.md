@@ -85,7 +85,7 @@ agent-autobench autoresearch --model "path\to\model.gguf" --no-learning
 
 ## Corrected Program Order
 
-This is the target order for the next useful pilotBENCHY campaign. The current
+This is the target order for the next useful Agent Pilot campaign. The current
 legacy commands are still listed below, but the 2026-06-23 9B run proved that a
 single 4k SimpleBench flag ladder is not a useful benchmark program.
 

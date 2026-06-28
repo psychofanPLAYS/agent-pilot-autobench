@@ -16,6 +16,6 @@ workflow_eval = true
 ttft_probe = true
 
 # Optional quality falloff profiling. Leave blank until you choose a local text
-# corpus; then pilotBENCHY can run llama-perplexity across these context tiers.
+# corpus; then Agent Pilot can run llama-perplexity across these context tiers.
 perplexity_corpus = ""
 perplexity_contexts = [4096, 8192, 16384]

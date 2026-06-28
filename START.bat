@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0"
 
 echo.
-echo pilotBENCHY
+echo Agent Pilot
 echo ===========
 echo.
 echo Opening the app. If this is a brand new copy, run INSTALL.bat first.
