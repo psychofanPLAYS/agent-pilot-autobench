@@ -254,13 +254,9 @@ class WebUiState:
 def validate_web_selection(selected: list[ModelInfo], mode_id: str) -> str | None:
     if not selected:
         return "Select at least one model first."
-    if mode_id != "librarian_bench":
-        return None
-    has_gemma = any(_looks_like_family(model, "gemma") for model in selected)
-    has_qwen = any(_looks_like_family(model, "qwen") for model in selected)
-    if has_gemma and has_qwen:
-        return None
-    return "Librarian bot test needs at least one Gemma model and one Qwen model."
+    # Agent Pilot benchmarks any GGUF model on agent workloads. There is no
+    # hardcoded Gemma-vs-Qwen requirement; one model runs, two or more compare.
+    return None
 
 
 def build_run_options(
@@ -732,11 +728,6 @@ def _mode_payload(mode) -> dict:
     }
 
 
-def _looks_like_family(model: ModelInfo, family: str) -> bool:
-    target = family.lower()
-    return model.family.lower() == target or target in model.name.lower()
-
-
 def _size_label(size_gb: float) -> str:
     if size_gb <= 0:
         return "0"
@@ -955,7 +946,7 @@ INDEX_HTML = r"""<!doctype html>
 <body>
   <div class="shell">
     <aside>
-      <div class="brand">pilotBENCHY</div>
+      <div class="brand">Agent Pilot</div>
       <div class="navitem"><span>Control</span><span>local</span></div>
       <div class="navitem"><span>Models</span><span id="nav-models">0</span></div>
       <div class="navitem"><span>Receipts</span><span>_runs</span></div>
@@ -964,8 +955,8 @@ INDEX_HTML = r"""<!doctype html>
     <main>
       <header>
         <div>
-          <h1>Local bot benchmark cockpit</h1>
-          <div class="sub">Pick Gemma and Qwen models, choose the librarian worker test, and launch repeatable local receipts from the browser.</div>
+          <h1>Agent Pilot benchmark cockpit</h1>
+          <div class="sub">Pick any local GGUF models, choose an agent-workload test, and launch repeatable local receipts from the browser.</div>
         </div>
         <button id="theme" class="ghost-button" type="button">Sepia dark</button>
       </header>
@@ -1221,16 +1212,15 @@ INDEX_HTML = r"""<!doctype html>
       const mode = document.querySelector("#mode").value;
       const plan = document.querySelector("#benchmark-suite-plan").value;
       const models = appState.models.filter(model => selected.has(model.path));
-      const hasGemma = models.some(model => model.family === "gemma" || model.name.toLowerCase().includes("gemma"));
-      const hasQwen = models.some(model => model.family === "qwen" || model.name.toLowerCase().includes("qwen"));
       const guard = document.querySelector("#guard");
-      if (mode === "librarian_bench" && (!hasGemma || !hasQwen)) {
-        guard.textContent = "Select at least one Gemma and one Qwen model for a direct worker comparison.";
-      } else if (models.length === 0) {
-        guard.textContent = "Select one or more models.";
+      if (models.length === 0) {
+        guard.textContent = "Select one or more models to benchmark.";
       } else {
         const planText = plan ? ` Benchmark suite plan: ${plan.split(/[\\\\/]/).pop()}.` : "";
-        guard.textContent = `${models.length} model(s) ready.${planText}`;
+        const compareHint = (mode === "librarian_bench" && models.length === 1)
+          ? " Add a second model to compare them head-to-head."
+          : "";
+        guard.textContent = `${models.length} model(s) ready.${planText}${compareHint}`;
       }
     }
 

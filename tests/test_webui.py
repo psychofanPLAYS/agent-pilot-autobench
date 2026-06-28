@@ -41,14 +41,17 @@ def test_webui_state_lists_models_modes_and_librarian_packs(tmp_path):
     assert "receipts" in payload
 
 
-def test_librarian_web_selection_requires_gemma_and_qwen():
+def test_librarian_web_selection_accepts_any_models():
     gemma = ModelInfo(path=Path("Gemma-3-27B.gguf"), name="Gemma-3-27B.gguf", family="gemma")
     qwen = ModelInfo(path=Path("Qwen3.6-35B-A3B.gguf"), name="Qwen3.6-35B-A3B.gguf", family="qwen")
 
-    assert validate_web_selection([qwen], "librarian_bench") is not None
-    assert validate_web_selection([gemma], "librarian_bench") is not None
+    # Agent Pilot benchmarks any GGUF model — no hardcoded Gemma-vs-Qwen requirement.
+    assert validate_web_selection([qwen], "librarian_bench") is None
+    assert validate_web_selection([gemma], "librarian_bench") is None
     assert validate_web_selection([gemma, qwen], "librarian_bench") is None
     assert validate_web_selection([qwen], "quick") is None
+    # An empty selection is still rejected for every mode.
+    assert validate_web_selection([], "librarian_bench") is not None
 
 
 def test_webui_start_run_calls_backend_for_selected_models(tmp_path):
