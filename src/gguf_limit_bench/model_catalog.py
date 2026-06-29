@@ -179,7 +179,9 @@ def write_catalog(snapshot: CatalogSnapshot, output_dir: Path) -> CatalogPaths:
         recommendations_path,
         json.dumps(_recommendation_database(snapshot), indent=2, sort_keys=True) + "\n",
     )
-    return CatalogPaths(json=json_path, markdown=markdown_path, recommendations=recommendations_path)
+    return CatalogPaths(
+        json=json_path, markdown=markdown_path, recommendations=recommendations_path
+    )
 
 
 def load_catalog(cache_root: Path) -> CatalogSnapshot:

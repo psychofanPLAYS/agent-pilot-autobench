@@ -131,9 +131,7 @@ def _load_settings(value: str) -> dict[str, Any]:
     return payload
 
 
-def _pack_summary(
-    pack_id: str, tier: str, batch, prompts_by_id: dict[str, str]
-) -> dict[str, Any]:
+def _pack_summary(pack_id: str, tier: str, batch, prompts_by_id: dict[str, str]) -> dict[str, Any]:
     wrong = sum(
         1 for result in batch.results if not result.correct and result.outcome != "incomplete"
     )

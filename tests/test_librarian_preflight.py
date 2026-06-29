@@ -92,9 +92,7 @@ def test_librarian_preflight_gemma_single_bos_uses_tokenize_endpoint(tmp_path, m
     assert gates["single_bos"].status == "pass"
 
 
-def test_librarian_preflight_qwen_thinking_gate_rejects_missing_think_block(
-    tmp_path, monkeypatch
-):
+def test_librarian_preflight_qwen_thinking_gate_rejects_missing_think_block(tmp_path, monkeypatch):
     model = _identity_model(tmp_path, "Qwen3.5-9B-Q4_K_M.gguf")
     monkeypatch.setattr(
         "gguf_limit_bench.librarian.preflight._chat",

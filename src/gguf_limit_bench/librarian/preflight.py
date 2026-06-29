@@ -117,9 +117,7 @@ def _identity_gate(model: Path) -> PreflightGateReceipt:
     )
 
 
-def _single_bos_gate(
-    base_url: str, family: str, timeout_seconds: int
-) -> PreflightGateReceipt:
+def _single_bos_gate(base_url: str, family: str, timeout_seconds: int) -> PreflightGateReceipt:
     if family != "gemma":
         return PreflightGateReceipt("single_bos", "skip", "Only applies to Gemma models.")
     plain = _tokenize(base_url, _KNOWN_STRING, add_special=False, timeout_seconds=timeout_seconds)
@@ -250,9 +248,9 @@ def _thinking_mode(args: tuple[str, ...]) -> str | None:
     joined = " ".join(args).lower()
     if "enable_thinking" not in joined:
         return None
-    if "enable_thinking\":true" in joined or "enable_thinking:true" in joined:
+    if 'enable_thinking":true' in joined or "enable_thinking:true" in joined:
         return "on"
-    if "enable_thinking\":false" in joined or "enable_thinking:false" in joined:
+    if 'enable_thinking":false' in joined or "enable_thinking:false" in joined:
         return "off"
     return None
 

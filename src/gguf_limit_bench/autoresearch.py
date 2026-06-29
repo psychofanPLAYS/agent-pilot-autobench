@@ -967,7 +967,9 @@ def _hydrate_result_from_simple_bench_summary(result: AttemptResult) -> AttemptR
             result.prompt_tokens_per_second, summary.get("median_prompt_tps")
         ),
         ttft_ms=_fallback_optional_float(result.ttft_ms, summary.get("median_ttft_ms")),
-        simple_bench_score=_fallback_optional_float(result.simple_bench_score, summary.get("score")),
+        simple_bench_score=_fallback_optional_float(
+            result.simple_bench_score, summary.get("score")
+        ),
         simple_bench_accuracy=_fallback_optional_float(
             result.simple_bench_accuracy, summary.get("accuracy")
         ),

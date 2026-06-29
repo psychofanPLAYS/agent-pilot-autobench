@@ -69,9 +69,9 @@ def test_librarian_suite_writes_score_and_receipts(tmp_path, monkeypatch):
     assert summary["librarian_bench_score"] == 1.0
     assert summary["agent_bench_score"] == 1.0
     assert summary["asked"] == 2
-    assert json.loads((tmp_path / "librarian-suite-summary.json").read_text())[
-        "settings"
-    ] == {"reasoning_mode": "direct"}
+    assert json.loads((tmp_path / "librarian-suite-summary.json").read_text())["settings"] == {
+        "reasoning_mode": "direct"
+    }
     assert (tmp_path / "librarian-suite.tsv").exists()
     assert (tmp_path / "librarian-suite.md").exists()
     assert (tmp_path / "librarian-gate.json").exists()
@@ -93,9 +93,7 @@ def test_librarian_suite_preflight_failure_writes_blocked_receipts(tmp_path, mon
         raise AssertionError("run_pack_questions should not run after preflight failure")
 
     monkeypatch.setattr("gguf_limit_bench.librarian_suite.run_librarian_preflight", fake_preflight)
-    monkeypatch.setattr(
-        "gguf_limit_bench.librarian_suite.run_pack_questions", fail_if_scored
-    )
+    monkeypatch.setattr("gguf_limit_bench.librarian_suite.run_pack_questions", fail_if_scored)
 
     summary = run_librarian_suite(
         model="qwen3.6-35b-a3b",

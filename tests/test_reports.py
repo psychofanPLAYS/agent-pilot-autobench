@@ -462,9 +462,7 @@ def test_librarian_suite_summary_is_used_when_results_json_missing(tmp_path):
         encoding="utf-8",
     )
 
-    entry = next(
-        e for e in build_leaderboard(tmp_path).entries if e.run_id == "suite-model"
-    )
+    entry = next(e for e in build_leaderboard(tmp_path).entries if e.run_id == "suite-model")
     assert entry.librarian_score == 0.6
     assert entry.pack_scores == {"librarian-triage": 0.6}
 

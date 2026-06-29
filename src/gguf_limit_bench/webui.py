@@ -125,9 +125,9 @@ class WebUiState:
             }
         with self._lock:
             run_payload = asdict(self.run)
-        if run_payload.get("phase") == "running" and (
-            run_payload.get("options") or {}
-        ).get("stream_prompts", True):
+        if run_payload.get("phase") == "running" and (run_payload.get("options") or {}).get(
+            "stream_prompts", True
+        ):
             run_payload["events"] = run_payload["events"] + receipt_event_payloads(self.runs_root)
         return {
             "models": [_model_payload(model) for model in models],
@@ -393,7 +393,9 @@ def create_web_app(state: WebUiState) -> FastAPI:
                 try:
                     message = await websocket.receive_json()
                 except json.JSONDecodeError:
-                    await websocket.send_json(websocket_error("WebSocket message must be valid JSON."))
+                    await websocket.send_json(
+                        websocket_error("WebSocket message must be valid JSON.")
+                    )
                     continue
                 response = await handle_websocket_command(state, message)
                 if response is not None:

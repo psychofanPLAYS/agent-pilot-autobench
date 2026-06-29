@@ -127,7 +127,6 @@ def test_models_scan_prints_recommendations_database_path(tmp_path):
     assert (tmp_path / "catalog" / "recommendations.json").exists()
 
 
-
 def test_models_show_reads_persisted_catalog(tmp_path):
     model = create_model(tmp_path / "models")
     scan = runner.invoke(

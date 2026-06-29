@@ -61,7 +61,10 @@ _BOOLEAN_FLAGS = {
 
 _CODE_BLOCK_RE = re.compile(r"```[^\n]*\n(.*?)```", re.I | re.S)
 _PROSE_PATTERNS: dict[str, tuple[re.Pattern[str], Callable[[str], Any]]] = {
-    "temperature": (re.compile(r"\btemp(?:erature)?\b\s*[:=]?\s*([0-9]+(?:\.[0-9]+)?)", re.I), float),
+    "temperature": (
+        re.compile(r"\btemp(?:erature)?\b\s*[:=]?\s*([0-9]+(?:\.[0-9]+)?)", re.I),
+        float,
+    ),
     "top_p": (re.compile(r"\btop[_ -]?p\b\s*[:=]?\s*([0-9]+(?:\.[0-9]+)?)", re.I), float),
     "top_k": (re.compile(r"\btop[_ -]?k\b\s*[:=]?\s*([0-9]+)", re.I), int),
     "min_p": (re.compile(r"\bmin[_ -]?p\b\s*[:=]?\s*([0-9]+(?:\.[0-9]+)?)", re.I), float),

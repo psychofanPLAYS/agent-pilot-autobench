@@ -509,9 +509,7 @@ def _model_comparison_markdown(comparison: ModelComparison) -> str:
     )
     lines.append("|---:|---|---:|" + pack_sep + "---:|---|---:|---:|---:|---|---|")
     for rank, entry in enumerate(comparison.entries, start=1):
-        pack_cells = "".join(
-            f" {_format_pct(entry.pack_scores.get(pid))} |" for pid in pack_ids
-        )
+        pack_cells = "".join(f" {_format_pct(entry.pack_scores.get(pid))} |" for pid in pack_ids)
         lines.append(
             f"| {rank} | `{entry.model_name}` | {_format_pct(entry.librarian_score)} |"
             + pack_cells
@@ -580,7 +578,9 @@ def _agent_verdict(comparison: ModelComparison) -> str:
         f"{best.scored_pack_count} librarian pack(s)."
     )
     if runner_up is not None:
-        verdict += f" Next best is {runner_up.model_name} at {_format_pct(runner_up.librarian_score)}."
+        verdict += (
+            f" Next best is {runner_up.model_name} at {_format_pct(runner_up.librarian_score)}."
+        )
     return verdict
 
 
@@ -729,7 +729,11 @@ def _accuracy_color(value: float) -> str:
     else:
         # amber -> green
         ratio = (value - 0.5) / 0.5
-        r, g, b = int(220 - ratio * (220 - 60)), int(170 + ratio * (200 - 170)), int(70 + ratio * 20)
+        r, g, b = (
+            int(220 - ratio * (220 - 60)),
+            int(170 + ratio * (200 - 170)),
+            int(70 + ratio * 20),
+        )
     return f"rgba({r}, {g}, {b}, 0.28)"
 
 
@@ -752,7 +756,7 @@ def _model_html_row(rank: int, entry: ModelComparisonEntry, pack_ids: list[str])
     return (
         f'<tr class="{status_class}">'
         f"<td>{rank}</td>"
-        f'<td><code>{escape(entry.model_name)}</code></td>'
+        f"<td><code>{escape(entry.model_name)}</code></td>"
         f"{agent_cell}"
         f"{pack_cells}"
         f"<td>{entry.generation_tps:.2f}</td>"
