@@ -49,6 +49,10 @@ def write_itemized_run_report(receipt_path: Path) -> None:
     )
     (receipt_path / "itemized-report.md").write_text(_markdown(payload), encoding="utf-8")
     (receipt_path / "report.html").write_text(_html(payload), encoding="utf-8")
+    # Sync-ready metrics record (Agent Index, speed, efficiency) from this receipt.
+    from gguf_limit_bench.metrics import write_run_metrics
+
+    write_run_metrics(receipt_path)
 
 
 def _attempts_from_events(events_path: Path) -> list[AttemptReport]:
