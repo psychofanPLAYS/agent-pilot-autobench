@@ -45,9 +45,18 @@ def test_tags_and_choices() -> None:
         assert "librarian" in q.tags
         assert "rerank" in q.tags
         assert q.choices is not None
+        # Every question carries the abstention option, so k is one larger than
+        # before: distractors (+ maybe the answer) + the None option.
         k = len(q.choices)
-        assert k in (4, 5)
+        assert k in (4, 5, 6)
         assert f"n_choices={k}" in q.tags
+        assert rerank._NONE_OPTION in q.choices
+        subtypes = {t.removeprefix("subtype=") for t in q.tags if t.startswith("subtype=")}
+        assert subtypes <= {"answerable", "abstention"} and len(subtypes) == 1
+        difficulties = {
+            t.removeprefix("difficulty=") for t in q.tags if t.startswith("difficulty=")
+        }
+        assert difficulties <= {"medium", "adversarial"} and len(difficulties) == 1
         assert q.answer_source == "librarian:rerank"
 
 
@@ -76,18 +85,38 @@ def test_scorer_round_trip() -> None:
 
 
 def test_gold_sanity() -> None:
-    """The gold-letter choice is the planted correct snippet, present exactly once."""
+    """The gold choice is the planted correct snippet, or the abstention option."""
     correct_set = {item.correct for item in rerank._ITEM_BANK}
     for seed in (0, 1, 7, 42):
         pack = rerank.build(seed)
         for q in pack.questions:
             assert q.choices is not None
-            idx = _LETTERS.index(q.answer)
-            gold_choice = q.choices[idx]
-            # The gold choice is one of the planted correct snippets.
-            assert gold_choice in correct_set
-            # And it appears exactly once among the choices.
+            gold_choice = q.choices[_LETTERS.index(q.answer)]
+            is_abstention = "subtype=abstention" in q.tags
+            if is_abstention:
+                # No snippet answers: gold must be the None option.
+                assert gold_choice == rerank._NONE_OPTION
+            else:
+                # The gold choice is one of the planted correct snippets.
+                assert gold_choice in correct_set
             assert q.choices.count(gold_choice) == 1
+
+
+def test_abstention_negative_controls_are_balanced() -> None:
+    """Every pack has at least one abstention and one answerable question, and the
+    abstention questions' gold is exactly the None-of-these option."""
+    for seed in (0, 1, 2, 7, 42, 99):
+        pack = rerank.build(seed)
+        abstention = [q for q in pack.questions if "subtype=abstention" in q.tags]
+        answerable = [q for q in pack.questions if "subtype=answerable" in q.tags]
+        assert abstention, f"seed {seed}: no abstention negative controls"
+        assert answerable, f"seed {seed}: no answerable questions"
+        assert len(abstention) + len(answerable) == len(pack.questions)
+        for q in abstention:
+            assert q.choices is not None
+            assert q.choices[_LETTERS.index(q.answer)] == rerank._NONE_OPTION
+            # The planted correct snippet for this item is absent.
+            assert not any(c in {it.correct for it in rerank._ITEM_BANK} for c in q.choices)
 
 
 @pytest.mark.parametrize("seed", [0, 1, 2, 3, 17, 99])

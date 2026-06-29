@@ -6,11 +6,15 @@ query. The hard part is that good distractors *look* relevant: they share the
 query's keywords and topic but do not contain the answer. This job measures
 whether the local model can tell the answering snippet from the lookalikes.
 
-Each question presents a QUERY and ``k`` candidate snippets (``k`` is 4 or 5)
-rendered as MULTIPLE_CHOICE options A..E. Exactly one snippet answers the query;
-the rest are keyword-overlap distractors. The option order is shuffled
-deterministically with :func:`gguf_limit_bench.librarian._common.make_rng`, and
-the gold ``answer`` is the letter at the correct snippet's shuffled position.
+Each question presents a QUERY and several candidate snippets rendered as
+MULTIPLE_CHOICE options, always including a ``None of these`` abstention option.
+Most questions have exactly one answering snippet among keyword-overlap
+distractors; a deterministic share are *no-answer* negative controls where the
+answering snippet is absent and the only correct response is ``None of these``
+(this measures over-confidence, spec 09-hardening-spec section E). The option
+order is shuffled deterministically with
+:func:`gguf_limit_bench.librarian._common.make_rng`, and the gold ``answer`` is
+the letter at the correct option's shuffled position.
 
 Pure and seed-deterministic: :func:`build` called twice with the same seed
 returns byte-identical questions. All randomness flows through
@@ -36,8 +40,15 @@ _LETTERS = "ABCDEF"
 
 _INSTRUCTION = (
     "Pick the single snippet that actually answers the query. "
-    "Reply with the letter of that snippet."
+    "If none of the snippets answers it, pick the 'None of these' option. "
+    "Reply with the letter of your choice."
 )
+
+# Abstention / negative-control option. A share of questions have NO answering
+# snippet; the correct action is to pick this option instead of forcing a guess.
+# Picking a real snippet when none answers is the over-confidence failure mode
+# this measures (spec 09-hardening-spec section E).
+_NONE_OPTION = "None of these snippets answer the query."
 
 
 @dataclass(frozen=True)
@@ -196,19 +207,32 @@ _ITEM_BANK: tuple[_RerankItem, ...] = (
 )
 
 
-def _make_question(rng: random.Random, seed: int, index: int, item: _RerankItem) -> PackQuestion:
-    """Build one shuffled MULTIPLE_CHOICE rerank question from ``item``."""
-    # k = 4 or 5: the correct snippet plus 3 or 4 distractors.
+def _make_question(
+    rng: random.Random, seed: int, index: int, item: _RerankItem, *, no_answer: bool
+) -> PackQuestion:
+    """Build one shuffled MULTIPLE_CHOICE rerank question from ``item``.
+
+    When ``no_answer`` is True the answering snippet is omitted, so the only
+    correct response is the ``None of these`` abstention option.
+    """
     n_distractors = rng.choice((3, 4))
     n_distractors = min(n_distractors, len(item.distractors))
     distractors = rng.sample(item.distractors, n_distractors)
 
-    options = [item.correct, *distractors]
+    if no_answer:
+        options = [*distractors, _NONE_OPTION]
+        gold = _NONE_OPTION
+        subtype = "abstention"
+        difficulty = "adversarial"
+    else:
+        options = [item.correct, *distractors, _NONE_OPTION]
+        gold = item.correct
+        subtype = "answerable"
+        difficulty = "medium"
     rng.shuffle(options)
 
     k = len(options)
-    correct_pos = options.index(item.correct)
-    answer = _LETTERS[correct_pos]
+    answer = _LETTERS[options.index(gold)]
 
     rendered = "\n".join(f"{_LETTERS[i]}. {opt}" for i, opt in enumerate(options))
     prompt = f"Query: {item.query}\n\nCandidate snippets:\n{rendered}\n\n{_INSTRUCTION}"
@@ -219,7 +243,13 @@ def _make_question(rng: random.Random, seed: int, index: int, item: _RerankItem)
         answer=answer,
         answer_source="librarian:rerank",
         choices=tuple(options),
-        tags=("librarian", "rerank", f"n_choices={k}"),
+        tags=(
+            "librarian",
+            "rerank",
+            f"n_choices={k}",
+            f"subtype={subtype}",
+            f"difficulty={difficulty}",
+        ),
         accept=(),
     )
 
@@ -235,8 +265,15 @@ def build(seed: int = 0) -> QuestionPack:
     count = rng.randint(10, min(16, len(bank)))
     chosen = bank[:count]
 
+    # About a third are no-answer (abstention) negative controls, with at least
+    # one of each kind so the pack always exercises both precision and recall.
+    n_none = min(count - 1, max(1, round(count / 3)))
+    no_answer_flags = [True] * n_none + [False] * (count - n_none)
+    rng.shuffle(no_answer_flags)
+
     questions: list[PackQuestion] = [
-        _make_question(rng, seed, index, item) for index, item in enumerate(chosen)
+        _make_question(rng, seed, index, item, no_answer=no_answer_flags[index])
+        for index, item in enumerate(chosen)
     ]
 
     return QuestionPack(
