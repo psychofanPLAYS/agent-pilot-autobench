@@ -211,7 +211,7 @@ def test_results_html_is_actionable_and_beautiful_enough_to_open(tmp_path):
 
     html = (tmp_path / "results.html").read_text(encoding="utf-8")
     assert "<!doctype html>" in html
-    assert "Agent Pilot Autobench Results" in html
+    assert "pilotBENCHY Results" in html
     assert "Plain-English takeaway" in html
     assert "winner.gguf" in html
     assert "What to do next" in html
@@ -220,8 +220,8 @@ def test_results_html_is_actionable_and_beautiful_enough_to_open(tmp_path):
     assert "Evidence" in html
     assert "Model comparison" in html
     assert "_runs\\model-comparison.md" in html
-    # Must not carry the old branding.
-    assert "pilotBENCHY" not in html
+    # Must not carry the old Agent Pilot browser branding.
+    assert "Agent Pilot Autobench Results" not in html
     assert "Gemma vs Qwen" not in html
 
 
@@ -335,8 +335,8 @@ def test_write_leaderboard_writes_model_level_comparison_report(tmp_path):
 
     markdown = (tmp_path / "model-comparison.md").read_text(encoding="utf-8")
     payload = json.loads((tmp_path / "model-comparison.json").read_text(encoding="utf-8"))
-    assert "Agent Pilot Model Comparison" in markdown
-    assert "pilotBENCHY" not in markdown
+    assert "pilotBENCHY Model Comparison" in markdown
+    assert "Agent Pilot Model Comparison" not in markdown
     assert "winner.gguf" in markdown
     assert "per-model champion" in markdown or "Keep iterating" in markdown
     assert payload[0]["model_name"] == "winner.gguf"

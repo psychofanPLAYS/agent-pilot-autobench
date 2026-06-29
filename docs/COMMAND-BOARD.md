@@ -23,10 +23,10 @@ apb --start
 agent-autobench --start
 ```
 
-Plain `apb` opens the local browser cockpit at `http://127.0.0.1:36939/`. The
+Plain `apb` opens the local pilotBENCHY web UI at `http://127.0.0.1:36939/`. The
 browser is the primary workflow for model selection, benchmark-suite plan
 selection, live WebSocket run progress, telemetry, and receipt links. `apb tui`
-remains available as a fallback terminal cockpit.
+remains available as a fallback terminal TUI.
 
 ## Checks
 
@@ -245,7 +245,7 @@ List bundled plans:
 agent-autobench benchmark-suite-plans
 ```
 
-The browser cockpit also lists bundled benchmark-suite plans so a normal run can
+The pilotBENCHY web UI also lists bundled benchmark-suite plans so a normal run can
 start from the same source-controlled plan files without hand-typing the path.
 
 Run a smoke plan:

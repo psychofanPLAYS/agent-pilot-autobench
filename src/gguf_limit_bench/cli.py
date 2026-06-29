@@ -444,7 +444,7 @@ def _start_app(
     if check_only:
         console.print("Remove --check-only to open the picker.")
         return
-    console.print("Opening the browser cockpit.")
+    console.print("Opening the pilotBENCHY web UI.")
     run_config = _run_config_from_inputs(
         preset=preset, budget_minutes=budget_minutes, max_attempts=max_attempts
     )

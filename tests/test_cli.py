@@ -587,7 +587,7 @@ def test_start_command_opens_webui_after_ready_check(tmp_path, monkeypatch):
 
     assert result.exit_code == 0
     assert opened_roots == [tmp_path]
-    assert "Opening the browser cockpit" in result.output
+    assert "Opening the pilotBENCHY web UI" in result.output
 
 
 def test_start_command_webui_callback_runs_librarian_pack_models(tmp_path, monkeypatch):

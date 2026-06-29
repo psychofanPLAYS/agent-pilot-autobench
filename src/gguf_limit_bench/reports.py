@@ -395,7 +395,7 @@ def write_leaderboard(runs_root: Path) -> Leaderboard:
     leaderboard = build_leaderboard(runs_root)
     if not leaderboard.entries:
         (runs_root / "leaderboard.md").write_text(
-            "# Agent Pilot Autobench Leaderboard\n\nNo runs found.\n",
+            "# pilotBENCHY Leaderboard\n\nNo runs found.\n",
             encoding="utf-8",
         )
         _write_empty_model_comparison(runs_root)
@@ -423,7 +423,7 @@ def write_leaderboard(runs_root: Path) -> Leaderboard:
 def _leaderboard_markdown(leaderboard: Leaderboard) -> str:
     champion = leaderboard.champion
     lines = [
-        "# Agent Pilot Autobench Leaderboard",
+        "# pilotBENCHY Leaderboard",
         "",
         "## Plain-English Takeaway",
         "",
@@ -471,7 +471,7 @@ def _leaderboard_markdown(leaderboard: Leaderboard) -> str:
 
 def _write_empty_model_comparison(runs_root: Path) -> None:
     (runs_root / "model-comparison.md").write_text(
-        "# Agent Pilot Model Comparison\n\nNo model runs found yet.\n",
+        "# pilotBENCHY Model Comparison\n\nNo model runs found yet.\n",
         encoding="utf-8",
     )
     (runs_root / "model-comparison.json").write_text("[]\n", encoding="utf-8")
@@ -509,9 +509,9 @@ def _short_pack_label(pack_id: str) -> str:
 def _model_comparison_markdown(comparison: ModelComparison) -> str:
     pack_ids = _ordered_pack_ids(comparison)
     lines = [
-        "# Agent Pilot Model Comparison",
+        "# pilotBENCHY Model Comparison",
         "",
-        "This is the model-level view. It groups repeated runs by model so Agent Pilot can "
+        "This is the model-level view. It groups repeated runs by model so pilotBENCHY can "
         "compare best-known settings per model instead of treating every receipt folder as a "
         "separate universe. Models are ranked by agent-quality score (librarian accuracy) "
         "first, then by speed evidence.",
@@ -547,7 +547,7 @@ def _empty_html() -> str:
             '<html lang="en">',
             "<head>",
             '  <meta charset="utf-8">',
-            "  <title>Agent Pilot Autobench Results</title>",
+            "  <title>pilotBENCHY Results</title>",
             "  <style>",
             _html_css(),
             "  </style>",
@@ -556,7 +556,7 @@ def _empty_html() -> str:
             '  <main class="shell">',
             '    <section class="hero">',
             '      <p class="eyebrow">No runs yet</p>',
-            "      <h1>Agent Pilot Autobench Results</h1>",
+            "      <h1>pilotBENCHY Results</h1>",
             "      <p>Run a benchmark first, then refresh this report.</p>",
             "    </section>",
             "  </main>",
@@ -633,7 +633,7 @@ def _leaderboard_html(leaderboard: Leaderboard) -> str:
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Agent Pilot Autobench Results</title>
+  <title>pilotBENCHY Results</title>
   <style>
 {_html_css()}
   </style>
@@ -642,7 +642,7 @@ def _leaderboard_html(leaderboard: Leaderboard) -> str:
   <main class="shell">
     <section class="hero">
       <p class="eyebrow">{escape(hero_eyebrow)}</p>
-      <h1>Agent Pilot Autobench Results</h1>
+      <h1>pilotBENCHY Results</h1>
       <p class="lede">{escape(hero_lede)}</p>
       <p class="verdict">{escape(verdict)}</p>
     </section>

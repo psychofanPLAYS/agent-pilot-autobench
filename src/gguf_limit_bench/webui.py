@@ -258,7 +258,7 @@ class WebUiState:
 def validate_web_selection(selected: list[ModelInfo], mode_id: str) -> str | None:
     if not selected:
         return "Select at least one model first."
-    # Agent Pilot benchmarks any GGUF model on agent workloads. There is no
+    # pilotBENCHY benchmarks any GGUF model on agent workloads. There is no
     # hardcoded Gemma-vs-Qwen requirement; one model runs, two or more compare.
     return None
 
@@ -365,7 +365,7 @@ def websocket_error(message: str) -> dict:
 
 
 def create_web_app(state: WebUiState) -> FastAPI:
-    app = FastAPI(title="Agent Pilot local cockpit", docs_url=None, redoc_url=None)
+    app = FastAPI(title="pilotBENCHY local web UI", docs_url=None, redoc_url=None)
 
     @app.get("/")
     async def index() -> HTMLResponse:
@@ -742,7 +742,7 @@ INDEX_HTML = r"""<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Agent Pilot</title>
+  <title>pilotBENCHY</title>
   <style>
     :root {
       color-scheme: dark;
@@ -859,6 +859,16 @@ INDEX_HTML = r"""<!doctype html>
     .status { margin-top: 16px; padding: 14px 16px; }
     .reports { margin-top: 16px; }
     .links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .top-results { margin-bottom: 16px; }
+    .top-results .body {
+      display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+      gap: 12px; align-items: start;
+    }
+    .quick-results .links { margin-top: 0; }
+    .quick-results .receipt-list { margin-top: 10px; }
+    .quick-results .receipt-card { grid-template-columns: 1fr; }
+    .quick-results .receipt-actions { justify-content: flex-start; }
+    .quick-results .receipt-actions a:nth-child(n+4) { display: none; }
     .links a, .receipt-card a {
       color: var(--text); text-decoration: none; border: 1px solid var(--line);
       border-radius: 6px; padding: 7px 9px; background: var(--panel-2);
@@ -891,6 +901,7 @@ INDEX_HTML = r"""<!doctype html>
     @media (max-width: 980px) {
       .shell { grid-template-columns: 1fr; }
       aside { display: none; }
+      .top-results .body { grid-template-columns: 1fr; }
       .grid { grid-template-columns: 1fr; }
       .grid > .panel:first-child { position: static; }
       .telemetry { grid-template-columns: repeat(2, 1fr); }
@@ -900,7 +911,7 @@ INDEX_HTML = r"""<!doctype html>
 <body>
   <div class="shell">
     <aside>
-      <div class="brand">Agent Pilot</div>
+      <div class="brand">pilotBENCHY</div>
       <div class="navitem"><span>Control</span><span>local</span></div>
       <div class="navitem"><span>Models</span><span id="nav-models">0</span></div>
       <div class="navitem"><span>Receipts</span><span>_runs</span></div>
@@ -909,11 +920,18 @@ INDEX_HTML = r"""<!doctype html>
     <main>
       <header>
         <div>
-          <h1>Agent Pilot benchmark cockpit</h1>
-          <div class="sub">Pick any local GGUF models, choose an agent-workload test, and launch repeatable local receipts from the browser.</div>
+          <h1>pilotBENCHY</h1>
+          <div class="sub">Pick local GGUF models, choose an agent-workload test, and get repeatable results with receipts you can inspect later.</div>
         </div>
         <button id="theme" class="ghost-button" type="button">Sepia dark</button>
       </header>
+      <section class="panel top-results quick-results">
+        <h2>Previous results</h2>
+        <div class="body">
+          <div id="quick-reports" class="links"></div>
+          <div id="quick-receipts" class="receipt-list"></div>
+        </div>
+      </section>
       <section class="grid">
         <div class="panel">
           <h2>Model selection</h2>
@@ -1157,7 +1175,7 @@ INDEX_HTML = r"""<!doctype html>
     function renderWinner(state) {
       const winner = document.querySelector("#winner");
       if (!state.champion) {
-        winner.innerHTML = "<span class=\"sub\">No winner yet. Run Gemma and Qwen, then this panel will show the current champion.</span>";
+        winner.innerHTML = "<span class=\"sub\">No winner yet. Run one or more models, then this panel will show the current best result for this machine.</span>";
         return;
       }
       winner.innerHTML = `<strong>Current best for this machine:</strong> ${escapeHtml(state.champion.model)} (${Number(state.champion.score).toFixed(2)})`;
@@ -1172,14 +1190,24 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function renderReceipts(state) {
-      const globalReports = document.querySelector("#global-reports");
-      globalReports.innerHTML = state.global_reports.length
+      const reportLinks = state.global_reports.length
         ? state.global_reports.map(report => `<a href="${escapeHtml(report.url)}" target="_blank" rel="noreferrer">${escapeHtml(report.label)}</a>`).join("")
-        : `<span class="sub">Reports appear here after the first run.</span>`;
+        : `<span class="sub">No saved report files found under _runs yet.</span>`;
+      document.querySelector("#global-reports").innerHTML = reportLinks;
+      document.querySelector("#quick-reports").innerHTML = reportLinks;
 
-      const receipts = document.querySelector("#receipts");
-      receipts.innerHTML = state.receipts.length
-        ? state.receipts.map(receipt => `
+      const receiptCards = state.receipts.length
+        ? state.receipts.map(receipt => receiptCard(receipt)).join("")
+        : `<div class="sub">No saved run folders found under _runs yet.</div>`;
+      document.querySelector("#receipts").innerHTML = receiptCards;
+
+      document.querySelector("#quick-receipts").innerHTML = state.receipts.length
+        ? state.receipts.slice(0, 3).map(receipt => receiptCard(receipt)).join("")
+        : `<div class="sub">Saved run folders will appear here after a benchmark completes.</div>`;
+    }
+
+    function receiptCard(receipt) {
+      return `
             <div class="receipt-card">
               <div>
                 <strong>${escapeHtml(receipt.model)}</strong>
@@ -1188,8 +1216,7 @@ INDEX_HTML = r"""<!doctype html>
               <div class="receipt-actions">
                 ${receipt.artifacts.map(artifact => `<a href="${escapeHtml(artifact.url)}" target="_blank" rel="noreferrer">${escapeHtml(artifact.label)}</a>`).join("")}
               </div>
-            </div>`).join("")
-        : `<div class="sub">No receipt folders found yet.</div>`;
+            </div>`;
     }
 
     function packDescription(pack) {

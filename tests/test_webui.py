@@ -42,6 +42,13 @@ def test_webui_state_lists_models_modes_and_librarian_packs(tmp_path):
 
 
 def test_webui_shell_explains_run_cost_and_evidence():
+    assert "<title>pilotBENCHY</title>" in INDEX_HTML
+    assert '<div class="brand">pilotBENCHY</div>' in INDEX_HTML
+    assert "<h1>pilotBENCHY</h1>" in INDEX_HTML
+    assert "Agent Pilot benchmark cockpit" not in INDEX_HTML
+    assert "Previous results" in INDEX_HTML
+    assert 'id="quick-reports"' in INDEX_HTML
+    assert 'id="quick-receipts"' in INDEX_HTML
     assert 'id="run-summary"' in INDEX_HTML
     assert "127.0.0.1:36939" in INDEX_HTML
     assert "window.location.host" in INDEX_HTML

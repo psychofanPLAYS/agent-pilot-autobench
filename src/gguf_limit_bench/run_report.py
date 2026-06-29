@@ -411,7 +411,7 @@ def _html(payload: dict) -> str:
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Agent Pilot Itemized Report</title>
+  <title>pilotBENCHY Itemized Report</title>
   <style>
     body {{ margin: 0; background: #101418; color: #e8edf2; font: 15px/1.5 Segoe UI, sans-serif; }}
     main {{ max-width: 1100px; margin: 0 auto; padding: 28px; }}
@@ -424,7 +424,7 @@ def _html(payload: dict) -> str:
 </head>
 <body>
   <main>
-    <h1>Agent Pilot Itemized Report</h1>
+    <h1>pilotBENCHY Itemized Report</h1>
     <section class="panel">
       <h2>{escape(Path(payload["model"]).name)}</h2>
       <p>Status: <strong>{escape(str(payload.get("status")))}</strong></p>
