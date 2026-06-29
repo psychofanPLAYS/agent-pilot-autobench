@@ -1,6 +1,7 @@
 # Implementation status
 
-Last updated: 2026-06-28 - branch `codex/wiki-librarian-bench`
+Last updated: 2026-06-28 - branch `codex/huggingface_recommended_settings_auto-rec+pull`
+(see [SESSION-2026-06-28-handoff](../../superpowers/SESSION-2026-06-28-handoff.md))
 
 ## v0 - deterministic job-task layer (DONE)
 
@@ -73,8 +74,36 @@ surface (`results.json/results.md` or `librarian-suite-summary.json/.tsv/.md`) w
 not call `run_pack_questions()` and does not record the cell as a zero-quality model
 score.
 
+## v0.4 - first real end-to-end model-vs-model run (DONE, live)
+
+Scored two real GGUFs end-to-end through `champion_eval` (each model self-served via
+`llama_server_session`, preflight-gated, full 7-pack), with the froggeric chat template
+applied per-model by the new `template_recommend` recommender:
+
+| Pack | Qwen3.5-9B Q8 | Qwen3.5-4B Q8 (thinking) |
+|------|---------------|--------------------------|
+| write-entry | 0.812 | 0.125 |
+| triage | 0.812 | 0.250 |
+| dedupe | 1.000 | 1.000 |
+| gate | 0.909 | 0.909 |
+| rerank | 1.000 | 1.000 |
+| compress | 1.000 | 0.688 |
+| contradiction | 1.000 | 1.000 |
+| **agent quality (mean)** | **0.933** | **0.710** |
+
+Findings: the 9B is the better librarian (wins write-entry/triage/compress, ties on
+retrieval). Chat template matters: the same 9B scored compress 0.688 with builtin
+chatml vs 1.000 with froggeric. `results.html` renders this as an OpenRouter-style
+per-pack matrix with a winner verdict. Two-pack samples were not discriminating (false
+tie); the full suite separated the models by 22 points.
+
+Also fixed: the answer-channel preflight warmup budget (64 -> 1024 tokens) so reasoning
+models can emit their `<think>` block and still reach `Final Answer`.
+
 ## Verification
 
+- 2026-06-28: full repo `.\.venv\Scripts\python.exe -m pytest -q` -> 644 passed, 1
+  skipped; `ruff check` clean; `mypy src` clean (71 files). Live 7-pack runs above.
 - 2026-06-28:
   `.\.venv\Scripts\python.exe -m pytest tests\test_librarian_preflight.py tests\test_champion_eval.py tests\test_librarian_suite.py -q`
   -> 13 passed.
