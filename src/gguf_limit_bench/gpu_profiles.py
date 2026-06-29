@@ -4,6 +4,7 @@ Each profile is matched by case-insensitive substring against the GPU name
 returned by the system (e.g. nvidia-smi or pynvml).  The first matching entry
 wins, so order matters – put more specific substrings first.
 """
+
 from __future__ import annotations
 
 import subprocess

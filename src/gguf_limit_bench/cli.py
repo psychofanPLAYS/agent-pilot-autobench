@@ -82,14 +82,16 @@ from gguf_limit_bench.installer import (
 )
 from gguf_limit_bench.hf_catalog import HubCatalog, HuggingFaceGateway
 from gguf_limit_bench.learning import OptunaSettingsLearner
+from gguf_limit_bench.librarian.registry import LIBRARIAN_PACK_IDS
+from gguf_limit_bench.template_recommend import merge_flags, recommended_model_flags
 from gguf_limit_bench.model_catalog import (
     ModelCatalog,
     find_catalog_entry,
     load_catalog,
     write_catalog,
 )
-from gguf_limit_bench.modes import KARPATHY_ROUND_SECONDS
-from gguf_limit_bench.packs import load_benchmark_packs
+from gguf_limit_bench.modes import KARPATHY_ROUND_SECONDS, mode_by_id
+from gguf_limit_bench.packs import available_packs, load_benchmark_packs, load_pack
 from gguf_limit_bench.programs import (
     MIN_SERIOUS_CONTEXT_SIZE,
     ProgramId,
@@ -124,6 +126,7 @@ from gguf_limit_bench.state_db import (
     record_context_limit,
 )
 from gguf_limit_bench.tui import BenchTui
+from gguf_limit_bench.webui import serve_webui
 from gguf_limit_bench.workflows import WorkflowAugmentedAttemptRunner, WorkflowEvaluator
 
 
@@ -154,6 +157,7 @@ def models_scan(
     console.print(f"Cataloged {len(snapshot.entries)} models without network access.")
     console.print(f"JSON: {paths.json}")
     console.print(f"Markdown: {paths.markdown}")
+    console.print(f"Recommendations DB: {paths.recommendations}")
 
 
 @models_app.command("enrich")
@@ -185,6 +189,7 @@ def models_enrich(
     console.print(f"Enriched {len(snapshot.entries)} models.")
     console.print(f"JSON: {paths.json}")
     console.print(f"Markdown: {paths.markdown}")
+    console.print(f"Recommendations DB: {paths.recommendations}")
 
 
 @models_app.command("list")
@@ -252,6 +257,7 @@ def models_export(
     paths = write_catalog(load_catalog(cache_root), output_dir)
     console.print(f"JSON: {paths.json}")
     console.print(f"Markdown: {paths.markdown}")
+    console.print(f"Recommendations DB: {paths.recommendations}")
 
 
 def _effective_forced_server_args(custom_args: tuple[str, ...] = ()) -> tuple[str, ...]:
@@ -295,12 +301,10 @@ def main(
     # Bare `apb` is the front door. Set up on the very first run, then launch.
     # Explicit --first-run always re-runs setup; --start always skips it.
     config = load_config()
-    needs_setup = first_run_now or (
-        not start_now and not is_setup_complete(project_root())
-    )
+    needs_setup = first_run_now or (not start_now and not is_setup_complete(project_root()))
     if needs_setup:
         if not first_run_now:
-            console.print("First run detected. Setting up pilotBENCHY (one time)...")
+            console.print("First run detected. Setting up Agent Pilot (one time)...")
         _setup_app(
             root=config.paths.model_roots[0],
             llama_bench=config.paths.llama_bench,
@@ -432,14 +436,14 @@ def _start_app(
     if check_only:
         console.print("Remove --check-only to open the picker.")
         return
-    console.print("Opening the model picker.")
+    console.print("Opening the browser cockpit.")
     run_config = _run_config_from_inputs(
         preset=preset, budget_minutes=budget_minutes, max_attempts=max_attempts
     )
-    picker = BenchTui(
+    serve_webui(
         root=root,
         runs_root=runs_root,
-        run_model=lambda model: (
+        run_model=lambda model, options: (
             _run_one_autoresearch(
                 model=model.path,
                 llama_bench=llama_bench,
@@ -447,46 +451,29 @@ def _start_app(
                 llama_server=llama_server,
                 llama_perplexity=llama_perplexity,
                 runs_root=runs_root,
-                budget_seconds=run_config.budget_minutes * 60,
+                budget_seconds=options.budget_minutes * 60,
                 parallel_max=parallel_max,
                 max_attempts=run_config.max_attempts,
                 learning=learning,
                 workflow_eval=workflow_eval,
                 ttft_probe=ttft_probe,
                 context_ladder=_context_ladder_or_none(context_ladder)
+                or _context_ladder_or_none(mode_by_id(options.mode_id).context_ladder)
                 or _context_ladder_or_none(run_config.context_ladder),
-                benchmark_suite_plan=benchmark_suite_plan,
+                benchmark_suite_plan=options.benchmark_suite_plan
+                or benchmark_suite_plan,
                 enable_mtp=model.has_mtp,
+                evaluation=mode_by_id(options.mode_id).evaluation,
+                forced_server_args=merge_flags(
+                    options.forced_server_args,
+                    recommended_model_flags(model.path, search_roots=(root,)),
+                ),
+                champion_pack_ids=tuple(LIBRARIAN_PACK_IDS)
+                if options.mode_id == "librarian_bench"
+                else None,
             ).path
         ),
     )
-    picker.run_config = run_config
-    picker.run()
-    if getattr(picker, "ran_inside_tui", False):
-        leaderboard = write_leaderboard(runs_root)
-        if leaderboard.entries:
-            console.print(
-                f"Champion: {leaderboard.champion.model_name} ({leaderboard.champion.score:.2f})"
-            )
-            console.print(f"Leaderboard: {runs_root / 'leaderboard.md'}")
-    else:
-        _run_tui_selection(
-            selected_models=picker.models_to_run,
-            llama_bench=llama_bench,
-            llama_cli=llama_cli,
-            llama_server=llama_server,
-            llama_perplexity=llama_perplexity,
-            runs_root=runs_root,
-            budget_minutes=run_config.budget_minutes,
-            parallel_max=parallel_max,
-            max_attempts=run_config.max_attempts,
-            learning=learning,
-            workflow_eval=workflow_eval,
-            ttft_probe=ttft_probe,
-            context_ladder=_context_ladder_or_none(context_ladder)
-            or _context_ladder_or_none(run_config.context_ladder),
-            benchmark_suite_plan=benchmark_suite_plan,
-        )
 
 
 @app.command()
@@ -553,9 +540,7 @@ def _autoconfigure_paths(
     if not any(root.exists() for root in config.paths.model_roots):
         model_roots = detect_models()
         if model_roots:
-            detected["PILOTBENCH_MODEL_ROOTS"] = os.pathsep.join(
-                str(path) for path in model_roots
-            )
+            detected["PILOTBENCH_MODEL_ROOTS"] = os.pathsep.join(str(path) for path in model_roots)
 
     configured_binaries = {
         "llama-server": config.paths.llama_server,
@@ -563,9 +548,7 @@ def _autoconfigure_paths(
         "llama-cli": config.paths.llama_cli,
         "llama-perplexity": config.paths.llama_perplexity,
     }
-    missing_binaries = {
-        stem for stem, path in configured_binaries.items() if not path.exists()
-    }
+    missing_binaries = {stem for stem, path in configured_binaries.items() if not path.exists()}
     if missing_binaries:
         found = detect_binaries()
         for stem in missing_binaries:
@@ -880,6 +863,51 @@ def packs(plugin_dir: Path = Path("plugins/benchmarks"), json_out: bool = False)
     table.add_column("Description")
     for pack in sorted(available.values(), key=lambda item: item.id):
         table.add_row(pack.id, pack.version, pack.safety_policy, pack.description)
+    console.print(table)
+
+
+@app.command("question-packs")
+def question_packs(
+    json_out: bool = False,
+    librarian_only: bool = typer.Option(
+        False,
+        "--librarian-only",
+        help="Show only the memory/RAG librarian packs used by librarian-bench.",
+    ),
+) -> None:
+    """List question packs that can be used for champion evaluation."""
+    ids = tuple(LIBRARIAN_PACK_IDS) if librarian_only else available_packs()
+    rows = []
+    for pack_id in ids:
+        pack = load_pack(pack_id)
+        rows.append(
+            {
+                "pack_id": pack.pack_id,
+                "title": pack.title,
+                "tier": pack.tier,
+                "answer_type": pack.answer_type.value,
+                "questions": str(len(pack.questions)),
+            }
+        )
+
+    if json_out:
+        _print_json(rows)
+        return
+
+    table = Table(title="Question Packs")
+    table.add_column("Pack")
+    table.add_column("Tier")
+    table.add_column("Answer")
+    table.add_column("Questions", justify="right")
+    table.add_column("Title")
+    for row in rows:
+        table.add_row(
+            row["pack_id"],
+            row["tier"],
+            row["answer_type"],
+            row["questions"],
+            row["title"],
+        )
     console.print(table)
 
 
@@ -1268,9 +1296,7 @@ def context_limit_command(
             samples=1,
             timeout_seconds=timeout_seconds,
         )
-        return LaunchOutcome(
-            ok=result.ok, stderr=result.stderr_tail, detail=result.failure
-        )
+        return LaunchOutcome(ok=result.ok, stderr=result.stderr_tail, detail=result.failure)
 
     result = find_context_limit(
         attempt,
@@ -1582,9 +1608,7 @@ def autoresearch(
     resolved_sample_size = (
         sample_size if sample_size is not None else config.benchmark.question_sample_size
     )
-    resolved_selection = (
-        selection if selection is not None else config.benchmark.question_selection
-    )
+    resolved_selection = selection if selection is not None else config.benchmark.question_selection
     receipt = _run_one_autoresearch(
         model=model,
         llama_bench=config.paths.llama_bench,

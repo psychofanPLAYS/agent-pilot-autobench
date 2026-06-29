@@ -23,6 +23,11 @@ apb --start
 agent-autobench --start
 ```
 
+Plain `apb` opens the local browser cockpit. The browser is the primary workflow
+for model selection, benchmark-suite plan selection, live WebSocket run progress,
+telemetry, and receipt links. `apb tui` remains available as a fallback terminal
+cockpit.
+
 ## Checks
 
 ```powershell
@@ -39,6 +44,20 @@ agent-autobench survey --qwen-only
 agent-autobench survey --qwen-35b-only
 agent-autobench survey --qwen-35b-only --mtp-only
 ```
+
+## Model Web Evidence Cache
+
+```powershell
+agent-autobench models scan --model-root "_models"
+agent-autobench models enrich --model-root "_models" --cache-root "_db\catalog"
+agent-autobench models recommendations "Qwen3-4B-Q4_K_M.gguf"
+agent-autobench models export "_db\github-sync"
+```
+
+`scan` is local-only. `enrich` resolves Hugging Face repo IDs from LM Studio-style
+folders, pins model-card evidence by HF revision, caches README/config files on
+disk, and extracts useful llama.cpp settings when the model card or Hub config
+contains them. The GitHub-sync seed is `_db\catalog\recommendations.json`.
 
 Default paths are repo-relative and can be overridden in `_CONFIG.toml`:
 
@@ -80,7 +99,7 @@ agent-autobench autoresearch --model "path\to\model.gguf" --no-learning
 
 ## Corrected Program Order
 
-This is the target order for the next useful pilotBENCHY campaign. The current
+This is the target order for the next useful Agent Pilot campaign. The current
 legacy commands are still listed below, but the 2026-06-23 9B run proved that a
 single 4k SimpleBench flag ladder is not a useful benchmark program.
 
@@ -222,6 +241,9 @@ List bundled plans:
 ```powershell
 agent-autobench benchmark-suite-plans
 ```
+
+The browser cockpit also lists bundled benchmark-suite plans so a normal run can
+start from the same source-controlled plan files without hand-typing the path.
 
 Run a smoke plan:
 

@@ -67,7 +67,11 @@ def test_vram_guard_skips_and_stops_before_launch():
 def test_refine_recovers_more_context_between_pass_and_oom():
     # Passes <= 112k. Ladder jumps 96k -> 128k; refinement probes 112k.
     def attempt(ctx):
-        return LaunchOutcome(ok=True) if ctx <= 114_688 else LaunchOutcome(ok=False, stderr=_OOM_STDERR)
+        return (
+            LaunchOutcome(ok=True)
+            if ctx <= 114_688
+            else LaunchOutcome(ok=False, stderr=_OOM_STDERR)
+        )
 
     result = find_context_limit(attempt, max_context=262_144, refine=True)
 
@@ -80,7 +84,11 @@ def test_refine_after_failed_backoff_tries_last_working_plus_8k():
 
     def attempt(ctx):
         seen.append(ctx)
-        return LaunchOutcome(ok=True) if ctx <= 106_496 else LaunchOutcome(ok=False, stderr=_OOM_STDERR)
+        return (
+            LaunchOutcome(ok=True)
+            if ctx <= 106_496
+            else LaunchOutcome(ok=False, stderr=_OOM_STDERR)
+        )
 
     result = find_context_limit(attempt, max_context=262_144, refine=True)
 

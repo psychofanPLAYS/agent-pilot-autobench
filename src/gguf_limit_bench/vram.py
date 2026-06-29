@@ -141,8 +141,7 @@ def plan_context_fit(
             reason = f"~{needed} MB needed (weights {weights} + kv {kv_mb} + {overhead_mb})"
         else:
             reason = (
-                f"~{needed} MB needed > {budget_mb} MB budget "
-                f"(kv {kv_mb} MB at {context // 1024}k)"
+                f"~{needed} MB needed > {budget_mb} MB budget (kv {kv_mb} MB at {context // 1024}k)"
             )
         plan.append(ContextFit(context_size=context, needed_mb=needed, fits=fits, reason=reason))
     return plan

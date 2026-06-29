@@ -13,6 +13,7 @@ from already-collected timing data (no extra dependency, fully offline):
 These upgrade the speed program from a single-stream tok/s number to a real
 serving profile and enable the concurrency / request-rate programs.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

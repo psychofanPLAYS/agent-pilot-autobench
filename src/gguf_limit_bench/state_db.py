@@ -118,8 +118,7 @@ def lifetime_pack_stats(
     """
     # Count of distinct questions attempted
     row_seen = conn.execute(
-        "SELECT COUNT(DISTINCT question_id) FROM question_attempts"
-        " WHERE model_key=? AND pack_id=?",
+        "SELECT COUNT(DISTINCT question_id) FROM question_attempts WHERE model_key=? AND pack_id=?",
         (model_key, pack_id),
     ).fetchone()
     seen: int = row_seen[0] if row_seen else 0

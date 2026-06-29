@@ -53,6 +53,24 @@ def test_benchmark_suite_writes_general_agentic_and_agent_score_ledgers(tmp_path
         encoding="utf-8"
     )
     assert "inspect-ai" in (tmp_path / "runs" / "agentic-suite.tsv").read_text(encoding="utf-8")
+    event_types = [
+        json.loads(line)["type"]
+        for line in (tmp_path / "runs" / suite_run.run_id / "events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert event_types == [
+        "benchmark_suite_started",
+        "benchmark_suite_task_started",
+        "benchmark_suite_command_started",
+        "benchmark_suite_command_finished",
+        "benchmark_suite_task_finished",
+        "benchmark_suite_task_started",
+        "benchmark_suite_command_started",
+        "benchmark_suite_command_finished",
+        "benchmark_suite_task_finished",
+        "benchmark_suite_finished",
+    ]
 
 
 def test_benchmark_suite_records_harness_missing_as_failed_evidence(tmp_path):

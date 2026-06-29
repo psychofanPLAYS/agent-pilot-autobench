@@ -1,4 +1,5 @@
 """The autoresearch run must emit a flag recommendation, not just a leaderboard."""
+
 from __future__ import annotations
 
 import json

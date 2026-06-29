@@ -9,6 +9,7 @@ a mysterious crash that aborts the whole run.
 
 from __future__ import annotations
 
+
 def is_oom_failure(stderr: str, returncode: int | None = None) -> bool:
     """True when *stderr* shows a memory-allocation failure (not a plain timeout).
 

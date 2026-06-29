@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0"
 
 echo.
-echo pilotBENCHY first run
+echo Agent Pilot first run
 echo =====================
 echo.
 echo This installs everything one time, then you just type:  apb

@@ -76,6 +76,13 @@ def available_packs() -> tuple[str, ...]:
     for pid in procedural_longctx_pack_ids():
         if pid not in known:
             known.append(pid)
+    # Local import avoids a circular dependency: the librarian package imports
+    # PackQuestion/QuestionPack from this module.
+    from gguf_limit_bench.librarian.registry import LIBRARIAN_PACK_IDS
+
+    for pid in LIBRARIAN_PACK_IDS:
+        if pid not in known:
+            known.append(pid)
     return tuple(known)
 
 
@@ -99,6 +106,13 @@ def load_pack(pack_id: str) -> QuestionPack:
             seed=0,
         )
 
+    # Local import avoids a circular dependency: the librarian package imports
+    # PackQuestion/QuestionPack from this module.
+    from gguf_limit_bench.librarian.registry import LIBRARIAN_BUILDERS
+
+    if pack_id in LIBRARIAN_BUILDERS:
+        return LIBRARIAN_BUILDERS[pack_id](0)
+
     pack_path = _PACKS_DIR / f"{pack_id}.json"
     if not pack_path.exists():
         raise KeyError(f"Unknown question pack: {pack_id!r}")
@@ -113,6 +127,7 @@ def load_pack(pack_id: str) -> QuestionPack:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _load_simple_bench() -> QuestionPack:
     data_path = _DATA_DIR / "simple_bench_public.json"
@@ -180,7 +195,9 @@ def _load_json_pack(payload: dict[str, Any], pack_path: Path) -> QuestionPack:
     for raw in raw_questions:
         qid = str(raw["question_id"])
         choices_raw: list[str] | None = raw.get("choices")
-        choices: tuple[str, ...] | None = tuple(str(c) for c in choices_raw) if choices_raw else None
+        choices: tuple[str, ...] | None = (
+            tuple(str(c) for c in choices_raw) if choices_raw else None
+        )
         tags: tuple[str, ...] = tuple(str(t) for t in raw.get("tags", []))
         accept: tuple[str, ...] = tuple(str(a) for a in raw.get("accept", []))
         answer = str(raw["answer"]).strip()

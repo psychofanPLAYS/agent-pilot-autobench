@@ -163,6 +163,64 @@ def test_autoresearch_loop_keeps_only_better_setting_and_writes_receipts(tmp_pat
     assert "\tdiscard\t" in attempts_text
 
 
+def test_itemized_report_recovers_stale_simplebench_summary_metrics(tmp_path):
+    def fake_runner(settings: AutoresearchSettings) -> AttemptResult:
+        attempt_dir = tmp_path / "simplebench-L0-baseline"
+        attempt_dir.mkdir()
+        (attempt_dir / "summary.json").write_text(
+            json.dumps(
+                {
+                    "ok": True,
+                    "score": 360.2,
+                    "accuracy": 0.25,
+                    "correct": 2,
+                    "total": 8,
+                    "median_tps": 85.77,
+                    "median_prompt_tps": 3410.4,
+                    "median_ttft_ms": 119.68,
+                    "failure": "none",
+                }
+            ),
+            encoding="utf-8",
+        )
+        return AttemptResult(
+            ok=False,
+            generation_tokens_per_second=0.0,
+            prompt_tokens_per_second=0.0,
+            ttft_ms=None,
+            context_size=settings.context_size,
+            failure="SimpleBench attempt budget exhausted",
+            stdout="",
+            stderr="SimpleBench attempt budget exhausted",
+            returncode=124,
+            flag_profile=settings.profile_name,
+            simple_bench_receipt=str(attempt_dir),
+            simple_bench_failure="SimpleBench attempt budget exhausted",
+        )
+
+    receipt = AutoresearchLoop(
+        model=Path("G:/AI/models/Qwen3-Test-Q4_K_M.gguf"),
+        runs_root=tmp_path,
+        attempt_runner=fake_runner,
+        budget_seconds=60,
+        max_attempts=1,
+        candidate_sequence=(AutoresearchSettings(profile_name="L0-baseline"),),
+    ).run()
+
+    report = json.loads((receipt.path / "report.json").read_text(encoding="utf-8"))
+    attempt = report["attempts"][0]
+    markdown = (receipt.path / "itemized-report.md").read_text(encoding="utf-8")
+
+    assert attempt["decision"] == "partial"
+    assert attempt["generation_tps"] == 85.77
+    assert attempt["prompt_tps"] == 3410.4
+    assert attempt["questions"] == "8/8"
+    assert attempt["simple_bench_score_fraction"] == "2/8"
+    assert attempt["simple_bench_accuracy"] == 0.25
+    assert "2/8" in markdown
+    assert "85.77" in markdown
+
+
 def test_autoresearch_loop_uses_agent_bench_score_when_suite_plan_is_provided(tmp_path):
     seen: list[AutoresearchSettings] = []
 

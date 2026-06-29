@@ -1,7 +1,7 @@
 # Question packs
 
 This folder is the single home for benchmark **question packs**. Drop a new
-`*.json` file here and pilotBENCHY will pick it up automatically — no code
+`*.json` file here and Agent Pilot will pick it up automatically — no code
 changes needed. Each pack is **self-contained**: it carries its own system
 prompt, its questions, and the correct answers, so the exact same prompt is
 loaded with the questions every time.

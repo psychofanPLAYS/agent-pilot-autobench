@@ -12,6 +12,7 @@ neutral local filler (no third-party corpus) so the tasks are:
 
 Pure functions: fully unit-testable without a server.
 """
+
 from __future__ import annotations
 
 import random
@@ -24,8 +25,16 @@ _CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXYZ23456789"
 _CODE_LEN = 6
 
 _TOPICS = (
-    "harbor", "glacier", "meadow", "canyon", "lantern",
-    "orchard", "comet", "reef", "summit", "delta",
+    "harbor",
+    "glacier",
+    "meadow",
+    "canyon",
+    "lantern",
+    "orchard",
+    "comet",
+    "reef",
+    "summit",
+    "delta",
 )
 
 # Neutral filler with no digits, no "VAR", no "code" — so it never collides with
@@ -79,8 +88,7 @@ def generate_needle_single(
     topic = rng.choice(_TOPICS)
     needle = f"The secret access code for the {topic} vault is {code}."
     question_line = (
-        f"Question: What is the secret access code for the {topic} vault? "
-        "Reply with the code only."
+        f"Question: What is the secret access code for the {topic} vault? Reply with the code only."
     )
     char_budget = max(0, target_tokens * 4 - len(needle) - len(question_line) - 4)
     sentences = _build_filler(rng, char_budget)
@@ -94,14 +102,17 @@ def generate_needle_single(
         answer=code,
         answer_source="procedural:ruler-needle-single",
         choices=None,
-        tags=("ruler", "needle_single", f"depth={depth_fraction}", f"target_tokens={target_tokens}"),
+        tags=(
+            "ruler",
+            "needle_single",
+            f"depth={depth_fraction}",
+            f"target_tokens={target_tokens}",
+        ),
         accept=(),
     )
 
 
-def generate_variable_tracking(
-    *, target_tokens: int, hops: int = 4, seed: int = 0
-) -> PackQuestion:
+def generate_variable_tracking(*, target_tokens: int, hops: int = 4, seed: int = 0) -> PackQuestion:
     """A multi-hop variable-tracking task: resolve VAR_hops back to its value."""
     rng = random.Random(seed)
     value = rng.randint(10000, 99999)

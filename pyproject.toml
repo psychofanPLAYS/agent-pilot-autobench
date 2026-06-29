@@ -19,6 +19,7 @@ classifiers = [
     "Topic :: System :: Benchmark",
 ]
 dependencies = [
+    "fastapi>=0.115.0",
     "huggingface_hub>=0.34",
     "nvidia-ml-py>=12.0.0",
     "optuna>=4.8.0",
@@ -26,6 +27,8 @@ dependencies = [
     "rich>=13.0.0",
     "textual>=0.80.0",
     "typer>=0.12.0",
+    "uvicorn>=0.30.0",
+    "websockets>=12.0",
 ]
 
 [project.optional-dependencies]

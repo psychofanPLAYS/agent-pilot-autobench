@@ -2,6 +2,7 @@
 
 All tests use monkeypatching — no real llama-server is started.
 """
+
 from __future__ import annotations
 
 import json
@@ -100,9 +101,7 @@ def _make_fake_load_pack(pack_id: str) -> QuestionPack:
 
 def test_evaluate_champion_packs_writes_results_json(tmp_path, monkeypatch):
     """evaluate_champion_packs writes results.json into run_dir."""
-    monkeypatch.setattr(
-        "gguf_limit_bench.champion_eval.llama_server_session", _fake_server_session
-    )
+    monkeypatch.setattr("gguf_limit_bench.champion_eval.llama_server_session", _fake_server_session)
     monkeypatch.setattr(
         "gguf_limit_bench.champion_eval.run_pack_questions",
         lambda **kwargs: _make_fake_run_pack_questions(**kwargs),
@@ -140,9 +139,7 @@ def test_evaluate_champion_packs_writes_results_json(tmp_path, monkeypatch):
 
 def test_evaluate_champion_packs_results_references_packs(tmp_path, monkeypatch):
     """The written results.json references the requested pack IDs."""
-    monkeypatch.setattr(
-        "gguf_limit_bench.champion_eval.llama_server_session", _fake_server_session
-    )
+    monkeypatch.setattr("gguf_limit_bench.champion_eval.llama_server_session", _fake_server_session)
     monkeypatch.setattr(
         "gguf_limit_bench.champion_eval.run_pack_questions",
         lambda **kwargs: _make_fake_run_pack_questions(**kwargs),
@@ -181,9 +178,7 @@ def test_evaluate_champion_packs_results_references_packs(tmp_path, monkeypatch)
 
 def test_evaluate_champion_packs_advances_state_db_cursor(tmp_path, monkeypatch):
     """After the call the selection cursor in the state DB must have advanced."""
-    monkeypatch.setattr(
-        "gguf_limit_bench.champion_eval.llama_server_session", _fake_server_session
-    )
+    monkeypatch.setattr("gguf_limit_bench.champion_eval.llama_server_session", _fake_server_session)
     monkeypatch.setattr(
         "gguf_limit_bench.champion_eval.run_pack_questions",
         lambda **kwargs: _make_fake_run_pack_questions(**kwargs),
@@ -228,9 +223,7 @@ def test_evaluate_champion_packs_advances_state_db_cursor(tmp_path, monkeypatch)
 
 def test_evaluate_champion_packs_results_json_contains_model_name(tmp_path, monkeypatch):
     """results.json must record the model path."""
-    monkeypatch.setattr(
-        "gguf_limit_bench.champion_eval.llama_server_session", _fake_server_session
-    )
+    monkeypatch.setattr("gguf_limit_bench.champion_eval.llama_server_session", _fake_server_session)
     monkeypatch.setattr(
         "gguf_limit_bench.champion_eval.run_pack_questions",
         lambda **kwargs: _make_fake_run_pack_questions(**kwargs),
@@ -269,9 +262,7 @@ def test_evaluate_champion_packs_results_json_contains_model_name(tmp_path, monk
 
 def test_evaluate_champion_packs_unknown_pack_skipped(tmp_path, monkeypatch):
     """An unknown pack ID is skipped; results.json is still written."""
-    monkeypatch.setattr(
-        "gguf_limit_bench.champion_eval.llama_server_session", _fake_server_session
-    )
+    monkeypatch.setattr("gguf_limit_bench.champion_eval.llama_server_session", _fake_server_session)
     monkeypatch.setattr(
         "gguf_limit_bench.champion_eval.run_pack_questions",
         lambda **kwargs: _make_fake_run_pack_questions(**kwargs),
@@ -305,3 +296,61 @@ def test_evaluate_champion_packs_unknown_pack_skipped(tmp_path, monkeypatch):
     payload = json.loads(results_json.read_text(encoding="utf-8"))
     assert payload["packs"][0]["pack_id"] == "definitely-not-a-pack"
     assert payload["packs"][0]["asked"] == 0
+
+
+def test_librarian_preflight_failure_writes_receipts_without_scoring(tmp_path, monkeypatch):
+    """Librarian preflight failure is a blocked cell, not a bad score."""
+    monkeypatch.setattr("gguf_limit_bench.champion_eval.llama_server_session", _fake_server_session)
+
+    def fail_if_scored(**_kwargs):
+        raise AssertionError("run_pack_questions should not run after preflight failure")
+
+    monkeypatch.setattr("gguf_limit_bench.champion_eval.run_pack_questions", fail_if_scored)
+
+    from gguf_limit_bench.librarian.preflight import LibrarianPreflightReceipt
+    from gguf_limit_bench.librarian.preflight import PreflightGateReceipt
+
+    def fake_preflight(**kwargs):
+        return LibrarianPreflightReceipt(
+            ok=False,
+            failure_class="preflight_fail",
+            model=str(kwargs["model"]),
+            family="qwen",
+            quant="Q4_K_M",
+            settings={},
+            gates=(PreflightGateReceipt("template_load", "fail", "missing --jinja"),),
+        )
+
+    monkeypatch.setattr("gguf_limit_bench.champion_eval.run_librarian_preflight", fake_preflight)
+
+    from gguf_limit_bench.champion_eval import evaluate_champion_packs
+
+    model = tmp_path / "model.gguf"
+    model.touch()
+    llama_server = tmp_path / "llama-server.exe"
+    llama_server.touch()
+    run_dir = tmp_path / "run-preflight"
+    run_dir.mkdir()
+
+    evaluate_champion_packs(
+        model=model,
+        llama_server=llama_server,
+        best_settings=_FAKE_SETTINGS,
+        run_dir=run_dir,
+        pack_ids=("librarian-gate",),
+        sample_size=2,
+        selection="sequential",
+        seed=None,
+        state_db_path=None,
+        gpu_name="",
+    )
+
+    preflight = json.loads((run_dir / "preflight.json").read_text(encoding="utf-8"))
+    payload = json.loads((run_dir / "results.json").read_text(encoding="utf-8"))
+    markdown = (run_dir / "results.md").read_text(encoding="utf-8")
+
+    assert preflight["failure_class"] == "preflight_fail"
+    assert payload["packs"][0]["status"] == "preflight_fail"
+    assert payload["packs"][0]["failure_class"] == "preflight_fail"
+    assert payload["packs"][0]["asked"] == 0
+    assert "preflight_fail" in markdown

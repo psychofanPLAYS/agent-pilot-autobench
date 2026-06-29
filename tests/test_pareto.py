@@ -5,6 +5,7 @@ tradeoff" rather than a raw leaderboard. These pure functions compute the
 non-dominated frontier over multiple objectives (speed, accuracy, context,
 VRAM, ...) and pick a recommendation by weighted preference.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -41,15 +42,15 @@ def test_equal_candidates_do_not_dominate_each_other():
 
 def test_tradeoff_means_neither_dominates():
     a = _c("a", tps=100, ttft_ms=60)  # faster gen, slower first token
-    b = _c("b", tps=90, ttft_ms=50)   # slower gen, faster first token
+    b = _c("b", tps=90, ttft_ms=50)  # slower gen, faster first token
     assert dominates(a, b, SPEED_LATENCY) is False
     assert dominates(b, a, SPEED_LATENCY) is False
 
 
 def test_pareto_front_drops_dominated_candidates():
-    a = _c("a", tps=100, accuracy=0.5)   # frontier
-    b = _c("b", tps=50, accuracy=0.9)    # frontier (tradeoff)
-    c = _c("c", tps=40, accuracy=0.4)    # dominated by both
+    a = _c("a", tps=100, accuracy=0.5)  # frontier
+    b = _c("b", tps=50, accuracy=0.9)  # frontier (tradeoff)
+    c = _c("c", tps=40, accuracy=0.4)  # dominated by both
     front = pareto_front([a, b, c], SPEED_QUALITY)
     labels = {cand.label for cand in front}
     assert labels == {"a", "b"}
@@ -74,7 +75,7 @@ def test_recommend_follows_weights():
 
 
 def test_recommend_only_considers_frontier():
-    a = _c("a", tps=100, accuracy=0.9)   # dominates c
+    a = _c("a", tps=100, accuracy=0.9)  # dominates c
     c = _c("c", tps=10, accuracy=0.1)
     # even weighting everything on accuracy, c is dominated so a still wins
     assert recommend([a, c], SPEED_QUALITY, weights={"tps": 0.0, "accuracy": 1.0}).label == "a"

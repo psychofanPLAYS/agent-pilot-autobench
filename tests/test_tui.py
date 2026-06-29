@@ -227,6 +227,10 @@ def test_tui_m_key_cycles_run_mode(tmp_path):
 
             await pilot.press("m")
             await pilot.pause()
+            assert app.run_mode.id == "librarian_bench"
+
+            await pilot.press("m")
+            await pilot.pause()
             assert app.run_mode.id == "flag_effect"
 
             # Cycle through to the quick mode; its evaluation is the speed scout.

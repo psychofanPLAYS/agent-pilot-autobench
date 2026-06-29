@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0"
 
 echo.
-echo Installing pilotBENCHY. This sets up everything one time.
+echo Installing Agent Pilot. This sets up everything one time.
 echo.
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1"

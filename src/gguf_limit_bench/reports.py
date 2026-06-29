@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from html import escape
 import json
 from pathlib import Path
@@ -36,6 +36,9 @@ class LeaderboardEntry:
     failure: str
     settings: dict
     receipt_path: str
+    librarian_score: float | None = None
+    pack_scores: dict[str, float] = field(default_factory=dict)
+    scored_pack_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -67,6 +70,9 @@ class ModelComparisonEntry:
     itemized_report_path: str
     browser_report_path: str
     recommendation: str
+    librarian_score: float | None = None
+    pack_scores: dict[str, float] = field(default_factory=dict)
+    scored_pack_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -94,6 +100,10 @@ def build_leaderboard(runs_root: Path) -> Leaderboard:
         failure = normalize_success_failure(ok, str(result.get("failure", "unknown")))
         context = int(settings.get("context_size") or 0)
         score = _normalized_score(payload, result)
+        librarian_score, pack_scores, scored_pack_count = _load_agent_quality(best_path.parent)
+        agent_bench_score = _float_or_none(result.get("agent_bench_score"))
+        if agent_bench_score is None:
+            agent_bench_score = librarian_score
         if failure == "model_load":
             status = "LOAD FAIL"
         elif result.get("benchmark_suite_ok") is True:
@@ -157,7 +167,7 @@ def build_leaderboard(runs_root: Path) -> Leaderboard:
                     else None
                 ),
                 serving_failure=result.get("serving_failure"),
-                agent_bench_score=_float_or_none(result.get("agent_bench_score")),
+                agent_bench_score=agent_bench_score,
                 benchmark_suite_general_score=_float_or_none(
                     result.get("benchmark_suite_general_score")
                 ),
@@ -170,9 +180,56 @@ def build_leaderboard(runs_root: Path) -> Leaderboard:
                 failure=failure,
                 settings=settings,
                 receipt_path=str(best_path.parent),
+                librarian_score=librarian_score,
+                pack_scores=pack_scores,
+                scored_pack_count=scored_pack_count,
             )
         )
     return Leaderboard(entries=sorted(entries, key=_leaderboard_rank_key, reverse=True))
+
+
+def _load_agent_quality(receipt_dir: Path) -> tuple[float | None, dict[str, float], int]:
+    """Aggregate librarian/agent per-pack accuracy from a receipt directory.
+
+    Reads ``results.json`` (champion_eval output) if present, otherwise falls back
+    to ``librarian-suite-summary.json``. Returns the mean accuracy over packs whose
+    ``status == "scored"``, a ``{pack_id: accuracy}`` map, and the scored-pack count.
+    """
+    payload: dict | None = None
+    for name in ("results.json", "librarian-suite-summary.json"):
+        candidate = receipt_dir / name
+        if not candidate.exists():
+            continue
+        try:
+            payload = json.loads(candidate.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            payload = None
+            continue
+        if isinstance(payload, dict):
+            break
+        payload = None
+    if not isinstance(payload, dict):
+        return None, {}, 0
+
+    pack_scores: dict[str, float] = {}
+    for pack in payload.get("packs", []) or []:
+        if not isinstance(pack, dict):
+            continue
+        if str(pack.get("status", "")) != "scored":
+            continue
+        pack_id = pack.get("pack_id")
+        accuracy = pack.get("accuracy")
+        if pack_id is None or accuracy is None:
+            continue
+        try:
+            pack_scores[str(pack_id)] = float(accuracy)
+        except (TypeError, ValueError):
+            continue
+
+    if not pack_scores:
+        return None, {}, 0
+    librarian_score = sum(pack_scores.values()) / len(pack_scores)
+    return librarian_score, pack_scores, len(pack_scores)
 
 
 def build_model_comparison(leaderboard: Leaderboard) -> ModelComparison:
@@ -205,6 +262,9 @@ def build_model_comparison(leaderboard: Leaderboard) -> ModelComparison:
                 itemized_report_path=str(receipt / "itemized-report.md"),
                 browser_report_path=str(receipt / "report.html"),
                 recommendation=_model_recommendation(best, len(runs)),
+                librarian_score=best.librarian_score,
+                pack_scores=dict(best.pack_scores),
+                scored_pack_count=best.scored_pack_count,
             )
         )
     return ModelComparison(
@@ -212,8 +272,12 @@ def build_model_comparison(leaderboard: Leaderboard) -> ModelComparison:
     )
 
 
-def _model_comparison_rank_key(entry: ModelComparisonEntry) -> tuple[int, float, int]:
+def _model_comparison_rank_key(entry: ModelComparisonEntry) -> tuple[float, int, float, int]:
+    # Rank by agent-quality first (so the comparison leads with quality, not speed),
+    # then fall back to evidence tier + speed score for models without a librarian run.
+    agent_quality = entry.librarian_score if entry.librarian_score is not None else -1.0
     return (
+        agent_quality,
         {
             "BENCHMARK SUITE": 700,
             "WORKFLOW SMOKE": 600,
@@ -391,29 +455,68 @@ def _leaderboard_markdown(leaderboard: Leaderboard) -> str:
 
 def _write_empty_model_comparison(runs_root: Path) -> None:
     (runs_root / "model-comparison.md").write_text(
-        "# pilotBENCHY Model Comparison\n\nNo model runs found yet.\n",
+        "# Agent Pilot Model Comparison\n\nNo model runs found yet.\n",
         encoding="utf-8",
     )
     (runs_root / "model-comparison.json").write_text("[]\n", encoding="utf-8")
 
 
-def _model_comparison_markdown(comparison: ModelComparison) -> str:
-    lines = [
-        "# pilotBENCHY Model Comparison",
-        "",
-        "This is the model-level view. It groups repeated runs by model so pilotBENCHY can "
-        "compare best-known settings per model instead of treating every receipt folder as a "
-        "separate universe.",
-        "",
-        "| Rank | Model | Runs | Best status | Best score | Context | Gen TPS | Prompt TPS | Cold TTFT | Warm TTFT | Serving TPS | Suite | Best receipt |",
-        "|---:|---|---:|---|---:|---|---:|---:|---:|---:|---:|---|---|",
+def _ordered_pack_ids(comparison: ModelComparison) -> list[str]:
+    """Stable, ordered list of every librarian pack id seen across the comparison.
+
+    Known librarian packs are listed first in a canonical order; any extra pack ids
+    that appear in the data are appended in first-seen order.
+    """
+    preferred = [
+        "librarian-gate",
+        "librarian-dedupe",
+        "librarian-compress",
+        "librarian-rerank",
+        "librarian-contradiction",
+        "librarian-triage",
+        "librarian-write-entry",
     ]
+    seen: list[str] = []
+    for entry in comparison.entries:
+        for pack_id in entry.pack_scores:
+            if pack_id not in seen:
+                seen.append(pack_id)
+    ordered = [pid for pid in preferred if pid in seen]
+    ordered.extend(pid for pid in seen if pid not in preferred)
+    return ordered
+
+
+def _short_pack_label(pack_id: str) -> str:
+    return pack_id[len("librarian-") :] if pack_id.startswith("librarian-") else pack_id
+
+
+def _model_comparison_markdown(comparison: ModelComparison) -> str:
+    pack_ids = _ordered_pack_ids(comparison)
+    lines = [
+        "# Agent Pilot Model Comparison",
+        "",
+        "This is the model-level view. It groups repeated runs by model so Agent Pilot can "
+        "compare best-known settings per model instead of treating every receipt folder as a "
+        "separate universe. Models are ranked by agent-quality score (librarian accuracy) "
+        "first, then by speed evidence.",
+        "",
+    ]
+    pack_header = "".join(f" {_short_pack_label(pid)} |" for pid in pack_ids)
+    pack_sep = "".join(" ---: |" for _ in pack_ids)
+    lines.append(
+        "| Rank | Model | Agent score |" + pack_header + " Runs | Best status | "
+        "Gen TPS | Cold TTFT | Serving TPS | Suite | Best receipt |"
+    )
+    lines.append("|---:|---|---:|" + pack_sep + "---:|---|---:|---:|---:|---|---|")
     for rank, entry in enumerate(comparison.entries, start=1):
+        pack_cells = "".join(
+            f" {_format_pct(entry.pack_scores.get(pid))} |" for pid in pack_ids
+        )
         lines.append(
-            f"| {rank} | `{entry.model_name}` | {entry.run_count} | {entry.best_status} | "
-            f"{entry.best_score:.2f} | {entry.best_context_label} | "
-            f"{entry.generation_tps:.2f} | {entry.prompt_tps:.2f} | "
-            f"{_format_ms(entry.cold_ttft_ms)} | {_format_ms(entry.warm_ttft_ms)} | "
+            f"| {rank} | `{entry.model_name}` | {_format_pct(entry.librarian_score)} |"
+            + pack_cells
+            + f" {entry.run_count} | {entry.best_status} | "
+            f"{entry.generation_tps:.2f} | {_format_ms(entry.cold_ttft_ms)} | "
             f"{_format_tps(entry.serving_tps)} | {entry.benchmark_suite_status} | "
             f"`{entry.best_receipt_path}` |"
         )
@@ -449,15 +552,63 @@ def _empty_html() -> str:
     )
 
 
+def _best_by_agent_quality(comparison: ModelComparison) -> ModelComparisonEntry | None:
+    scored = [e for e in comparison.entries if e.librarian_score is not None]
+    if not scored:
+        return None
+    return max(scored, key=lambda e: e.librarian_score or 0.0)
+
+
+def _agent_verdict(comparison: ModelComparison) -> str:
+    best = _best_by_agent_quality(comparison)
+    if best is None:
+        return (
+            "No agent-quality scores yet. Run a librarian benchmark to measure how well each "
+            "model actually performs the agent tasks, not just how fast it generates tokens."
+        )
+    runner_up = next(
+        (
+            e
+            for e in comparison.entries
+            if e.librarian_score is not None and e.model_name != best.model_name
+        ),
+        None,
+    )
+    verdict = (
+        f"{best.model_name} leads on agent quality with "
+        f"{_format_pct(best.librarian_score)} accuracy across "
+        f"{best.scored_pack_count} librarian pack(s)."
+    )
+    if runner_up is not None:
+        verdict += f" Next best is {runner_up.model_name} at {_format_pct(runner_up.librarian_score)}."
+    return verdict
+
+
 def _leaderboard_html(leaderboard: Leaderboard) -> str:
     champion = leaderboard.champion
     model_comparison = build_model_comparison(leaderboard)
+    pack_ids = _ordered_pack_ids(model_comparison)
     rows = "\n".join(
         _html_row(rank, entry) for rank, entry in enumerate(leaderboard.entries, start=1)
     )
     model_rows = "\n".join(
-        _model_html_row(rank, entry) for rank, entry in enumerate(model_comparison.entries, start=1)
+        _model_html_row(rank, entry, pack_ids)
+        for rank, entry in enumerate(model_comparison.entries, start=1)
     )
+    pack_headers = "".join(
+        f'<th class="pack">{escape(_short_pack_label(pid))}</th>' for pid in pack_ids
+    )
+    quality_best = _best_by_agent_quality(model_comparison)
+    if quality_best is not None:
+        hero_eyebrow = "Best model by agent quality"
+        hero_lede = (
+            f"{quality_best.model_name} scores {_format_pct(quality_best.librarian_score)} "
+            "on agent-quality tasks."
+        )
+    else:
+        hero_eyebrow = "Best model by speed (no agent scores yet)"
+        hero_lede = f"{champion.model_name} is the fastest measured model so far."
+    verdict = _agent_verdict(model_comparison)
     settings = "\n".join(
         f"<li><span>{escape(str(key))}</span><strong>{escape(str(value))}</strong></li>"
         for key, value in sorted(champion.settings.items())
@@ -474,22 +625,30 @@ def _leaderboard_html(leaderboard: Leaderboard) -> str:
 <body>
   <main class="shell">
     <section class="hero">
-      <p class="eyebrow">Current champion</p>
+      <p class="eyebrow">{escape(hero_eyebrow)}</p>
       <h1>Agent Pilot Autobench Results</h1>
-      <p class="lede">{escape(champion.model_name)} is the current measured winner.</p>
-      <div class="score-grid">
-        <div><span>Score</span><strong>{champion.score:.2f}</strong></div>
-        <div><span>Status</span><strong>{escape(champion.status)}</strong></div>
-        <div><span>Generation</span><strong>{champion.generation_tps:.2f} tok/s</strong></div>
-        <div><span>Prompt</span><strong>{champion.prompt_tps:.2f} tok/s</strong></div>
-        <div><span>Cold TTFT</span><strong>{escape(_format_ms(champion.serving_ttft_ms))}</strong></div>
-        <div><span>Warm TTFT</span><strong>{escape(_format_ms(champion.serving_warm_ttft_ms))}</strong></div>
-        <div><span>Warmup Penalty</span><strong>{escape(_format_ms(champion.serving_warmup_penalty_ms))}</strong></div>
-        <div><span>Server Ready</span><strong>{escape(_format_ms(champion.serving_server_ready_ms))}</strong></div>
-        <div><span>Start To First Token</span><strong>{escape(_format_ms(champion.serving_cold_start_to_first_token_ms))}</strong></div>
-        <div><span>Serving</span><strong>{escape(_format_tps(champion.serving_tps))}</strong></div>
-        <div><span>Agent Bench</span><strong>{escape(_format_score(champion.agent_bench_score))}</strong></div>
-        <div><span>Suite</span><strong>{escape(champion.benchmark_suite_status)}</strong></div>
+      <p class="lede">{escape(hero_lede)}</p>
+      <p class="verdict">{escape(verdict)}</p>
+    </section>
+    <section class="panel">
+      <h2>Model comparison</h2>
+      <p class="receipt">
+        Ranked by agent-quality score (librarian accuracy), with per-pack scores and
+        secondary speed metrics. Cells use a red-to-green scale by accuracy.
+      </p>
+      <div class="table-wrap">
+        <table class="matrix">
+          <thead>
+            <tr>
+              <th>Rank</th><th>Model</th><th>Agent score</th>
+              {pack_headers}
+              <th>Gen tok/s</th><th>Cold TTFT</th>
+            </tr>
+          </thead>
+          <tbody>
+            {model_rows}
+          </tbody>
+        </table>
       </div>
     </section>
     <section class="panel">
@@ -518,33 +677,20 @@ def _leaderboard_html(leaderboard: Leaderboard) -> str:
       </ul>
     </section>
     <section class="panel">
-      <h2>Best models on this hardware</h2>
-      <p class="receipt">Grouped by model name and path, ranked by the best proven run for each model.</p>
-      <table>
-        <thead>
-          <tr>
-            <th>Rank</th><th>Model</th><th>Runs</th><th>Status</th><th>Score</th>
-            <th>Context</th><th>Gen TPS</th><th>Cold TTFT</th><th>Serving</th><th>Receipt</th>
-          </tr>
-        </thead>
-        <tbody>
-          {model_rows}
-        </tbody>
-      </table>
-    </section>
-    <section class="panel">
       <h2>All runs</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Rank</th><th>Status</th><th>Score</th><th>Generation</th>
-            <th>Agent Bench</th><th>Suite</th><th>Prompt</th><th>Cold TTFT</th><th>Warm TTFT</th><th>Warmup</th><th>Serving</th><th>Context</th><th>Model</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows}
-        </tbody>
-      </table>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Rank</th><th>Status</th><th>Score</th><th>Generation</th>
+              <th>Agent Bench</th><th>Suite</th><th>Prompt</th><th>Cold TTFT</th><th>Warm TTFT</th><th>Warmup</th><th>Serving</th><th>Context</th><th>Model</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows}
+          </tbody>
+        </table>
+      </div>
     </section>
   </main>
 </body>
@@ -573,20 +719,44 @@ def _html_row(rank: int, entry: LeaderboardEntry) -> str:
     )
 
 
-def _model_html_row(rank: int, entry: ModelComparisonEntry) -> str:
+def _accuracy_color(value: float) -> str:
+    """Red (0.0) -> amber (0.5) -> green (1.0) background for a 0..1 accuracy."""
+    value = max(0.0, min(1.0, value))
+    if value < 0.5:
+        # red -> amber
+        ratio = value / 0.5
+        r, g, b = 220, int(70 + ratio * (170 - 70)), 70
+    else:
+        # amber -> green
+        ratio = (value - 0.5) / 0.5
+        r, g, b = int(220 - ratio * (220 - 60)), int(170 + ratio * (200 - 170)), int(70 + ratio * 20)
+    return f"rgba({r}, {g}, {b}, 0.28)"
+
+
+def _pack_cell(value: float | None) -> str:
+    if value is None:
+        return '<td class="pack empty">—</td>'
+    color = _accuracy_color(value)
+    return f'<td class="pack" style="background:{color}">{_format_pct(value)}</td>'
+
+
+def _model_html_row(rank: int, entry: ModelComparisonEntry, pack_ids: list[str]) -> str:
     status_class = "pass" if entry.best_status in {"WORKFLOW SMOKE", "BENCHMARK SUITE"} else "fail"
+    pack_cells = "".join(_pack_cell(entry.pack_scores.get(pid)) for pid in pack_ids)
+    agent_cell = (
+        f'<td class="agent" style="background:{_accuracy_color(entry.librarian_score)}">'
+        f"{_format_pct(entry.librarian_score)}</td>"
+        if entry.librarian_score is not None
+        else '<td class="agent empty">—</td>'
+    )
     return (
         f'<tr class="{status_class}">'
         f"<td>{rank}</td>"
-        f"<td><code>{escape(entry.model_name)}</code></td>"
-        f"<td>{entry.run_count}</td>"
-        f"<td>{escape(entry.best_status)}</td>"
-        f"<td>{entry.best_score:.2f}</td>"
-        f"<td>{escape(entry.best_context_label)}</td>"
+        f'<td><code>{escape(entry.model_name)}</code></td>'
+        f"{agent_cell}"
+        f"{pack_cells}"
         f"<td>{entry.generation_tps:.2f}</td>"
         f"<td>{escape(_format_ms(entry.cold_ttft_ms))}</td>"
-        f"<td>{escape(_format_tps(entry.serving_tps))}</td>"
-        f"<td><code>{escape(entry.best_receipt_path)}</code></td>"
         "</tr>"
     )
 
@@ -670,6 +840,10 @@ def _format_score(value: float | None) -> str:
     return "unmeasured" if value is None else f"{value:.4f}"
 
 
+def _format_pct(value: float | None) -> str:
+    return "—" if value is None else f"{value * 100:.0f}%"
+
+
 def _html_css() -> str:
     return """
     :root {
@@ -720,6 +894,15 @@ def _html_css() -> str:
     h1 { font-size: 2.4rem; }
     h2 { font-size: 1.25rem; }
     .lede, .receipt, li { color: var(--muted); }
+    .lede { font-size: 1.15rem; color: var(--text); margin: 0 0 6px; }
+    .verdict {
+      margin: 12px 0 0;
+      padding: 12px 14px;
+      border-left: 3px solid var(--green);
+      background: rgba(61, 220, 132, 0.08);
+      border-radius: 0 8px 8px 0;
+      color: var(--text);
+    }
     code {
       color: var(--text);
       background: #0b0f14;
@@ -749,6 +932,7 @@ def _html_css() -> str:
       padding: 0;
       margin: 0;
     }
+    .table-wrap { overflow-x: auto; }
     table {
       width: 100%;
       border-collapse: collapse;
@@ -763,6 +947,15 @@ def _html_css() -> str:
     th { color: var(--muted); font-size: 0.84rem; }
     tr.pass td:first-child { color: var(--green); }
     tr.fail td:first-child { color: var(--red); }
+    table.matrix th, table.matrix td { white-space: nowrap; }
+    table.matrix tbody tr:hover { background: rgba(101, 183, 255, 0.06); }
+    th.pack, td.pack, td.agent {
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+    td.agent { font-weight: 700; color: var(--text); }
+    td.pack { color: var(--text); }
+    td.pack.empty, td.agent.empty { color: var(--muted); background: transparent; }
     @media (max-width: 720px) {
       h1 { font-size: 1.8rem; }
       .hero, .panel { padding: 18px; }
