@@ -58,7 +58,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "huggingface-hub", specifier = ">=0.34" },
-    { name = "inspect-ai", marker = "extra == 'bench'", specifier = ">=0.3.226" },
+    { name = "inspect-ai", marker = "extra == 'bench'", specifier = ">=0.3.241" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.19.0" },
     { name = "nvidia-ml-py", specifier = ">=12.0.0" },
     { name = "openai", marker = "extra == 'bench'", specifier = ">=1.0.0" },
@@ -969,7 +969,7 @@ wheels = [
 
 [[package]]
 name = "inspect-ai"
-version = "0.3.226"
+version = "0.3.241"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "agent-client-protocol" },
@@ -1012,9 +1012,9 @@ dependencies = [
     { name = "zipp" },
     { name = "zstandard" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f0/04/83c5e5e5964cdabc94880dc9a9fc23c9c3fda6f75b9642b1af250a7df094/inspect_ai-0.3.226.tar.gz", hash = "sha256:61af2b60e37da835778d8670cb6a8d2c789fb14fc3f6f52bdad3846e5c3866ac", size = 46842500, upload-time = "2026-05-25T13:27:38.195Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d9/2d/7164fdf06530840dc5a8aa662dd67d87f0b5d6591ee832fb4fdae09de29e/inspect_ai-0.3.241.tar.gz", hash = "sha256:a79eda08dcb573aa2c1459d7b60610220671a3e3318cb68aadf7a42b97822bbf", size = 48450959, upload-time = "2026-06-22T14:39:38.798Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/63/39/40c8c84154905a3bbbf33b0125ed65f5e566704669b38cb7db033a08c3b1/inspect_ai-0.3.226-py3-none-any.whl", hash = "sha256:bd483ebf5b23eea767830e90e8332766bb53419bad808a9ad43af2d1d2332427", size = 36567248, upload-time = "2026-05-25T13:27:29.361Z" },
+    { url = "https://files.pythonhosted.org/packages/a3/33/068c58116f053f56efe5d85db9505398dd5e91cb09bf2bc40ef9263d540e/inspect_ai-0.3.241-py3-none-any.whl", hash = "sha256:3ef2708d5f4854475f8f7bc4bc42b55079f00ba3eba2b4f5733fab66e3f53fd1", size = 36159399, upload-time = "2026-06-22T14:39:34.325Z" },
 ]
 
 [[package]]
@@ -3037,7 +3037,7 @@ name = "zipfile-zstd"
 version = "0.0.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "zstandard" },
+    { name = "zstandard", marker = "python_full_version < '3.14'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/f7/2a/2e0941bc0058d10ab37d8c578b94a19f611f6ae54f124140f2fb451f0932/zipfile-zstd-0.0.4.tar.gz", hash = "sha256:c1498e15b7922a3d1af0ea55df8b11b2af4e8f7e0e80e414e25d66899f7def89", size = 4603, upload-time = "2021-12-08T07:38:16.245Z" }
 wheels = [

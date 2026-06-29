@@ -39,7 +39,7 @@ dev = [
     "types-psutil>=7.0.0.20250601",
 ]
 bench = [
-    "inspect-ai>=0.3.226",
+    "inspect-ai>=0.3.241",
     "openai>=1.0.0",
 ]
 
