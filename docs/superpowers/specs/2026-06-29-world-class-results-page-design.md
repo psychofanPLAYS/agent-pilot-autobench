@@ -56,27 +56,46 @@ sample_size, status }`. Metrics fall on three axes.
 
 ### 3.1 Quality axis (hardware-independent → poolable across users)
 
-**Agent Index (0–100)** — the headline. Standardized weighted mean of available
-quality signals, each normalized to 0–1:
+**Agent Index (0–100)** — the headline. Composition follows the **mid-2026 gold
+standard** (Artificial Analysis Intelligence Index v4.1): a **category-weighted
+average**, not a flat mean, with **transparency-forward** reporting (show the
+components, not just the composite) — the cutting-edge best practice that answers
+the standing critique that composites hide thin evidence.
 
-- Librarian pack accuracies: `librarian-gate`, `-dedupe`, `-compress`, `-rerank`,
-  `-contradiction`, `-triage`, `-write-entry`.
-- Benchmark-suite `general` and `agentic` scores when present (agentic weighted
-  higher).
+**Categories and default weights** (agent-worker analogue of AA's Agents-heavy
+split). Each signal is an accuracy already in `[0,1]`, so min-max normalization is
+the identity here — no hidden "normalization fudging," which is itself the
+transparent choice:
+
+| Category | Weight | Signals |
+|---|---|---|
+| Agentic execution | 38% | benchmark-suite `agentic` score, `librarian-triage`, `librarian-write-entry` |
+| Retrieval & synthesis | 30% | `librarian-rerank`, `librarian-compress`, `librarian-dedupe` |
+| Reasoning & correctness | 32% | `librarian-contradiction`, benchmark-suite `general` score |
+
+`Agent Index = 100 × Σ_category ( weight × mean(category signals present) )`,
+weights renormalized over **categories that have ≥1 measured signal**.
 
 Rules:
-- **Gate is must-pass.** If `librarian-gate` fails, the index is capped (model is
-  flagged "gate-failed") regardless of other packs.
-- **Single canonical formula** lives in one function. No competing score formulas.
-- **Coverage %** = measured signals ÷ intended signals. Reported next to the index
-  so partial runs cannot silently overclaim.
-- **N-repeat:** when a signal is measured K>1 times, report **median + IQR**.
-  Default K configurable; single-shot runs are marked `unreplicated`.
-- Missing signals are excluded and weights renormalized; coverage carries the
-  caveat.
+- **Gate is a must-pass prerequisite, not a weighted term.** `librarian-gate` acts
+  as a multiplier: pass → ×1; fail → the model is flagged `gate-failed` and the
+  index is capped (≤ 40) regardless of other categories.
+- **Single canonical formula** in one function. No competing score formulas.
+- **Transparency block** travels with the index: every category sub-score, every
+  raw component, the **coverage %** (measured ÷ intended signals), and the
+  **confidence interval** from N-repeat. A 1-signal index and a full-coverage index
+  are never shown as equivalent.
+- Index is hardware-independent → across synced machines it is **poolable**
+  (community mean per model, weighted by coverage).
 
-Index is hardware-independent, so across synced machines it is **poolable**
-(community mean per model).
+### 3.1a Standardized variance — applies to ALL metrics
+
+Repeat-with-variance is a **global standard**, not quality-only. Every metric
+(quality *and* speed: tok/s, TTFT, etc.) is sampled **K=3 by default** and stored
+as **median + IQR** (P25/P75). Single-shot values are marked `unreplicated`. This
+fixes the recorded "no N-repeat" validity gap uniformly and makes both the index
+CI and the speed bars honest about spread. K is configurable (lower for fast
+smoke, higher for publishable runs).
 
 ### 3.2 Speed axis (hardware-dependent → bucket by GPU when synced)
 
@@ -121,8 +140,9 @@ merged and bucketed:
 | power | `nvidia-ml-py` power draw (new sampling) |
 | run history (trends) | `run_history.py` |
 
-**New work:** Agent Index function; per-run peak-VRAM (+ optional power) capture;
-the normalized `metrics.json` writer; total-time-100 derivation.
+**New work:** Agent Index function; **K=3 repeat-sampling harness with median+IQR
+standardized across all metrics**; per-run peak-VRAM + power capture; the
+normalized `metrics.json` writer; total-time-100 derivation.
 
 ## 4. The diagrams
 
@@ -201,13 +221,44 @@ understandable and testable without touching HTML or the vendored lib.
 - No new benchmark *workloads*; we model and visualize what runs already produce
   (plus VRAM/power capture).
 
-## 9. Open questions for review
+## 9. Resolved decisions
 
-1. **Agent Index weights** — equal across packs with agentic-suite boosted, or a
-   specific weighting you want?
-2. **Default N-repeat (K)** — keep single-shot default (mark `unreplicated`) for
-   speed, or default K=3 for trustworthy variance from day one?
-3. **Power/energy** — include tokens/Joule in Phase 1, or defer to Phase 2 to keep
-   Phase 1 minimal?
-4. **Chart.js vendor size** — confirmed OK to commit ~200 KB of MIT JS into the
-   package and inline it into every generated HTML file.
+1. **Agent Index weights** — category-weighted (AA v4.1-style), transparency-forward
+   with components + coverage + CI; gate must-pass (see §3.1).
+2. **N-repeat** — **K=3 median + IQR, standardized across ALL metrics** (§3.1a).
+3. **Power/energy** — **in Phase 1** with graceful fallback when power is
+   unreadable (user: "do it, in parallel, I don't care how — as long as it's done").
+4. **Chart.js vendor** — confirmed: commit MIT JS into the package, inline it.
+
+## 10. Design vision — near future (captured, not built in this spec)
+
+The user flagged two larger directions that this metrics foundation must enable.
+They are out of scope for Phases 1–2 implementation but the schema and modules are
+designed so they slot in additively.
+
+### 10.1 Adaptive auto-planner ("the program that chooses for itself")
+
+A planner that, given **run history** (`run_history.py`) and **available Hugging
+Face metadata** for the selected model(s), decides *for itself*:
+- which tests/packs to run (skip what's already well-established for this model),
+- how long / how many repeats (K) to spend per signal for a target confidence,
+- and shows a live **ETA** before and during the run.
+
+Hooks this spec provides: standardized per-signal records with coverage + CI mean
+"confidence reached" is queryable; the metrics schema + history are the planner's
+inputs. The Agent Index coverage/CI is the natural stopping criterion.
+
+### 10.2 In-flight testing page (preflight → live run experience)
+
+Today launching a run leaves the user on a static page. Vision: the **pre-flight
+page transforms into a beautiful in-flight testing view** that shows what's
+happening behind the scenes in real time:
+- streamed **questions**, model **thinking** (when enabled for the run), and
+  **answers**,
+- live **insights**, running **score**, and **history** context,
+- progress + ETA from the auto-planner (§10.1).
+
+This is a separate page/redesign (the cockpit run flow), not `results.html`. The
+event stream (`events.jsonl`, the existing WS feed) and the per-signal metric
+records are the data source; the Agent Index can update live as signals land.
+Tracked as the next major UI effort after the results pages ship.
