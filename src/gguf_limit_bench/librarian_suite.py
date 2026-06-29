@@ -16,6 +16,8 @@ from gguf_limit_bench.pack_runner import run_pack_questions
 from gguf_limit_bench.packs import load_pack
 from gguf_limit_bench.results_report import render_results_markdown
 
+DEFAULT_REPEATS = 3
+
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
@@ -27,6 +29,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--score-out", required=True, type=Path)
     parser.add_argument("--settings-json", default="{}", help="Plan metadata copied into summary.")
     parser.add_argument("--sample-size", type=int, default=0, help="0 means full pack.")
+    parser.add_argument(
+        "--repeats",
+        type=int,
+        default=DEFAULT_REPEATS,
+        help="Number of independent passes over each selected question set.",
+    )
     parser.add_argument("--timeout-seconds", type=int, default=600)
     parser.add_argument("--pack", action="append", dest="packs", help="Pack id; repeatable.")
     args = parser.parse_args(argv)
@@ -39,6 +47,7 @@ def main(argv: list[str] | None = None) -> None:
         out_dir=args.out_dir,
         pack_ids=pack_ids,
         sample_size=args.sample_size,
+        repeats=args.repeats,
         timeout_seconds=args.timeout_seconds,
         settings=settings,
     )
@@ -55,9 +64,12 @@ def run_librarian_suite(
     out_dir: Path,
     pack_ids: tuple[str, ...],
     sample_size: int = 0,
+    repeats: int = DEFAULT_REPEATS,
     timeout_seconds: int = 600,
     settings: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    if repeats < 1:
+        raise ValueError("repeats must be at least 1.")
     out_dir.mkdir(parents=True, exist_ok=True)
     pack_summaries: list[dict[str, Any]] = []
     settings_payload = settings or {}
@@ -88,14 +100,18 @@ def run_librarian_suite(
         questions = list(pack.questions)
         if sample_size > 0:
             questions = questions[:sample_size]
-        batch = run_pack_questions(
-            pack=pack,
-            questions=questions,
-            base_url=base_url,
-            timeout_seconds=timeout_seconds,
-        )
+        repeat_batches = [
+            run_pack_questions(
+                pack=pack,
+                questions=questions,
+                base_url=base_url,
+                timeout_seconds=timeout_seconds,
+                sampling=_sampling_from_settings(settings_payload),
+            )
+            for _repeat in range(repeats)
+        ]
         prompts_by_id = {str(question.question_id): question.prompt for question in questions}
-        pack_summary = _pack_summary(pack_id, pack.tier, batch, prompts_by_id)
+        pack_summary = _pack_summary(pack_id, pack.tier, repeat_batches, prompts_by_id, repeats)
         pack_summaries.append(pack_summary)
         (out_dir / f"{_safe_id(pack_id)}.json").write_text(
             json.dumps(pack_summary, ensure_ascii=True, indent=2),
@@ -131,25 +147,60 @@ def _load_settings(value: str) -> dict[str, Any]:
     return payload
 
 
-def _pack_summary(pack_id: str, tier: str, batch, prompts_by_id: dict[str, str]) -> dict[str, Any]:
+def _pack_summary(
+    pack_id: str,
+    tier: str,
+    repeat_batches,
+    prompts_by_id: dict[str, str],
+    repeats: int,
+) -> dict[str, Any]:
+    all_results = [
+        (repeat_index, result)
+        for repeat_index, batch in enumerate(repeat_batches, start=1)
+        for result in batch.results
+    ]
+    total = sum(batch.total for batch in repeat_batches)
+    correct = sum(batch.correct for batch in repeat_batches)
+    incomplete = sum(batch.incomplete for batch in repeat_batches)
     wrong = sum(
-        1 for result in batch.results if not result.correct and result.outcome != "incomplete"
+        1
+        for _repeat_index, result in all_results
+        if not result.correct and result.outcome != "incomplete"
     )
+    accuracy = correct / total if total else 0.0
+    completion_rate = (total - incomplete) / total if total else 0.0
+    medians_tps = [batch.median_tps for batch in repeat_batches if batch.median_tps > 0]
+    medians_prompt_tps = [
+        batch.median_prompt_tps for batch in repeat_batches if batch.median_prompt_tps > 0
+    ]
+    medians_ttft = [
+        batch.median_ttft_ms for batch in repeat_batches if batch.median_ttft_ms is not None
+    ]
     return {
         "pack_id": pack_id,
         "tier": tier,
-        "asked": batch.total,
-        "correct": batch.correct,
+        "status": "scored",
+        "repeats": repeats,
+        "asked": total,
+        "correct": correct,
         "wrong": wrong,
-        "incomplete": batch.incomplete,
-        "accuracy": batch.accuracy,
-        "completion_rate": batch.completion_rate,
-        "median_tps": batch.median_tps,
-        "median_prompt_tps": batch.median_prompt_tps,
-        "median_ttft_ms": batch.median_ttft_ms,
-        "score": batch.score,
+        "incomplete": incomplete,
+        "accuracy": accuracy,
+        "completion_rate": completion_rate,
+        "median_tps": _median(medians_tps) or 0.0,
+        "median_prompt_tps": _median(medians_prompt_tps) or 0.0,
+        "median_ttft_ms": _median(medians_ttft),
+        "score": accuracy * completion_rate,
+        "letter_accuracy": _letter_accuracy([result for _repeat, result in all_results]),
+        "predicted_letter_counts": _letter_counts(
+            result.predicted_answer for _repeat, result in all_results
+        ),
+        "expected_letter_counts": _letter_counts(
+            result.expected_answer for _repeat, result in all_results
+        ),
         "questions": [
             {
+                "repeat": repeat_index,
                 "question_id": result.question_id,
                 "prompt": prompts_by_id.get(str(result.question_id), ""),
                 "expected": result.expected_answer,
@@ -158,7 +209,7 @@ def _pack_summary(pack_id: str, tier: str, batch, prompts_by_id: dict[str, str])
                 "ttft_ms": result.ttft_ms,
                 "tokens_per_second": result.tokens_per_second,
             }
-            for result in batch.results
+            for repeat_index, result in all_results
         ],
     }
 
@@ -214,6 +265,7 @@ def _suite_summary(
         "score": librarian_bench_score,
         "failure_class": failure_class,
         "failure": failure,
+        "score_contract": "librarian_bench_score = accuracy * completion_rate over scored attempts",
         "status": "preflight_fail" if failure_class == PREFLIGHT_FAILURE_CLASS else "scored",
     }
 
@@ -267,6 +319,59 @@ def _summary_markdown(summary: dict[str, Any]) -> str:
 
 def _fmt_float(value: float) -> str:
     return f"{float(value):.6f}"
+
+
+def _median(values: list[float]) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) / 2.0
+
+
+def _sampling_from_settings(settings: dict[str, Any]) -> dict[str, object]:
+    nested = settings.get("sampling")
+    if isinstance(nested, dict):
+        source = dict(nested)
+    else:
+        source = settings
+    return {
+        key: source[key]
+        for key in ("temperature", "top_p", "top_k", "min_p", "repeat_penalty")
+        if source.get(key) is not None
+    }
+
+
+def _letter_counts(values) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in values:
+        if isinstance(value, str) and len(value) == 1 and value.upper() in "ABCDEF":
+            letter = value.upper()
+            counts[letter] = counts.get(letter, 0) + 1
+    return counts
+
+
+def _letter_accuracy(results) -> dict[str, dict[str, float | int]]:
+    totals: dict[str, int] = {}
+    correct: dict[str, int] = {}
+    for result in results:
+        expected = result.expected_answer
+        if not isinstance(expected, str) or len(expected) != 1 or expected.upper() not in "ABCDEF":
+            continue
+        letter = expected.upper()
+        totals[letter] = totals.get(letter, 0) + 1
+        if result.correct:
+            correct[letter] = correct.get(letter, 0) + 1
+    return {
+        letter: {
+            "asked": totals[letter],
+            "correct": correct.get(letter, 0),
+            "accuracy": correct.get(letter, 0) / totals[letter],
+        }
+        for letter in sorted(totals)
+    }
 
 
 def _safe_id(value: str) -> str:

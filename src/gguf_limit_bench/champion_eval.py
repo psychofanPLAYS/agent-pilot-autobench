@@ -61,6 +61,7 @@ def evaluate_champion_packs(
     state_db_path: Path | None = None,
     gpu_name: str = "",
     timeout_seconds: int = 600,
+    repeats: int = 3,
 ) -> None:
     """Evaluate *pack_ids* on the best champion settings and write results.json.
 
@@ -91,7 +92,13 @@ def evaluate_champion_packs(
     timeout_seconds:
         Server startup timeout forwarded to
         :func:`~gguf_limit_bench.server_session.llama_server_session`.
+    repeats:
+        How many times to run the selected question slice. The selection cursor
+        advances once per pack, so repeats measure variance without consuming
+        additional question-bank positions.
     """
+    if repeats < 1:
+        raise ValueError("repeats must be at least 1.")
     model_key = model.name
 
     # Open (or create) the state-DB connection.
@@ -133,6 +140,7 @@ def evaluate_champion_packs(
                         sample_size=sample_size,
                         gpu_name=gpu_name,
                         pack_dicts=pack_dicts,
+                        repeats=repeats,
                     )
             for pack_id in pack_ids:
                 pack_dict = _eval_one_pack(
@@ -143,6 +151,7 @@ def evaluate_champion_packs(
                     sample_size=sample_size,
                     selection=selection,
                     seed=seed,
+                    repeats=repeats,
                 )
                 pack_dicts.append(pack_dict)
     finally:
@@ -156,6 +165,7 @@ def evaluate_champion_packs(
         sample_size=sample_size,
         gpu_name=gpu_name,
         pack_dicts=pack_dicts,
+        repeats=repeats,
     )
 
 
@@ -168,6 +178,7 @@ def _write_results(
     sample_size: int,
     gpu_name: str,
     pack_dicts: list[dict],
+    repeats: int,
 ) -> None:
     recommended_flags = list(recommended_always_on(gpu_name))
     payload = build_results_payload(
@@ -178,6 +189,10 @@ def _write_results(
         gpu=gpu_name,
         recommended_flags=recommended_flags,
         packs=pack_dicts,
+    )
+    payload["repeats"] = repeats
+    payload["score_contract"] = (
+        "agent_bench_score = accuracy * completion_rate over scored attempts"
     )
     write_results(run_dir, payload)
 
@@ -196,6 +211,7 @@ def _eval_one_pack(
     sample_size: int,
     selection: str,
     seed: int | None,
+    repeats: int,
 ) -> dict:
     """Run a single pack and return a pack dict suitable for build_results_payload."""
     try:
@@ -214,62 +230,88 @@ def _eval_one_pack(
         cursor=cursor,
     )
 
-    batch = run_pack_questions(
-        pack=pack,
-        questions=chosen,
-        base_url=base_url,
-    )
+    batches = [
+        run_pack_questions(
+            pack=pack,
+            questions=chosen,
+            base_url=base_url,
+        )
+        for _repeat in range(repeats)
+    ]
 
     set_selection_cursor(conn, model_key=model_key, pack_id=pack_id, cursor=next_cursor)
 
     ts = datetime.now(timezone.utc).isoformat()
-    for result in batch.results:
-        record_question_attempt(
-            conn,
-            model_key=model_key,
-            pack_id=pack_id,
-            question_id=str(result.question_id),
-            outcome=result.outcome
-            if result.outcome is not None
-            else ("correct" if result.correct else "wrong"),
-            ts=ts,
-        )
+    for batch in batches:
+        for result in batch.results:
+            record_question_attempt(
+                conn,
+                model_key=model_key,
+                pack_id=pack_id,
+                question_id=str(result.question_id),
+                outcome=result.outcome
+                if result.outcome is not None
+                else ("correct" if result.correct else "wrong"),
+                ts=ts,
+            )
 
     # Build the per-pack dict for build_results_payload.
     # We look up the original question prompt from the pack questions by question_id.
     chosen_by_id = {q.question_id: q for q in chosen}
     question_dicts = []
-    for result in batch.results:
-        original = chosen_by_id.get(result.question_id)
-        question_dicts.append(
-            {
-                "question_id": result.question_id,
-                "prompt": original.prompt if original is not None else "",
-                "expected": result.expected_answer,
-                "predicted": result.predicted_answer,
-                "outcome": result.outcome
-                if result.outcome is not None
-                else ("correct" if result.correct else "wrong"),
-            }
-        )
+    for repeat_index, batch in enumerate(batches, start=1):
+        for result in batch.results:
+            original = chosen_by_id.get(result.question_id)
+            question_dicts.append(
+                {
+                    "question_id": result.question_id,
+                    "repeat": repeat_index,
+                    "prompt": original.prompt if original is not None else "",
+                    "expected": result.expected_answer,
+                    "predicted": result.predicted_answer,
+                    "outcome": result.outcome
+                    if result.outcome is not None
+                    else ("correct" if result.correct else "wrong"),
+                }
+            )
 
-    incomplete = sum(1 for r in batch.results if getattr(r, "outcome", None) == "incomplete")
+    all_results = [result for batch in batches for result in batch.results]
+    asked = sum(batch.total for batch in batches)
+    correct = sum(batch.correct for batch in batches)
+    incomplete = sum(1 for r in all_results if getattr(r, "outcome", None) == "incomplete")
     wrong = sum(
-        1 for r in batch.results if not r.correct and getattr(r, "outcome", None) != "incomplete"
+        1 for r in all_results if not r.correct and getattr(r, "outcome", None) != "incomplete"
     )
+    accuracy = correct / asked if asked else 0.0
+    median_tps_values = [batch.median_tps for batch in batches if batch.median_tps is not None]
+    median_ttft_values = [
+        batch.median_ttft_ms for batch in batches if batch.median_ttft_ms is not None
+    ]
 
     return {
         "pack_id": pack_id,
         "tier": pack.tier,
-        "asked": len(chosen),
-        "correct": batch.correct,
+        "repeats": repeats,
+        "asked": asked,
+        "correct": correct,
         "wrong": wrong,
         "incomplete": incomplete,
-        "accuracy": batch.accuracy,
-        "median_tps": batch.median_tps,
-        "median_ttft_ms": batch.median_ttft_ms,
+        "completion_rate": (asked - incomplete) / asked if asked else 0.0,
+        "accuracy": accuracy,
+        "median_tps": _median(median_tps_values),
+        "median_ttft_ms": _median(median_ttft_values),
         "questions": question_dicts,
     }
+
+
+def _median(values: list[float]) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[middle]
+    return (ordered[middle - 1] + ordered[middle]) / 2
 
 
 def _empty_pack_dict(pack_id: str) -> dict:

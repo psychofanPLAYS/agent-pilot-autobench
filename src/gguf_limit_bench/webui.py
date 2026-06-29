@@ -3,14 +3,12 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler
 import json
 import mimetypes
 from pathlib import Path, PurePosixPath
-import socket
 import threading
 from typing import Callable
-from urllib.parse import quote, unquote, urlparse
+from urllib.parse import quote, unquote
 import webbrowser
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -25,6 +23,7 @@ from gguf_limit_bench.gpu_profiles import (
     recommended_always_on,
     recommended_parallel,
 )
+from gguf_limit_bench.hf_recommended_settings import recommended_sampler_presets
 from gguf_limit_bench.librarian.registry import LIBRARIAN_PACK_IDS
 from gguf_limit_bench.modes import RUN_MODES
 from gguf_limit_bench.programs import MIN_SERIOUS_CONTEXT_SIZE
@@ -62,6 +61,7 @@ OPTIONAL_FORCED_FLAGS = (
     ("--no-warmup", "Skip llama.cpp warmup when measuring cold-start behavior."),
 )
 WS_PROTOCOL_VERSION = 1
+DEFAULT_WEBUI_PORT = 36939
 
 
 @dataclass(frozen=True)
@@ -72,6 +72,9 @@ class WebRunOptions:
     show_thinking: bool = False
     stream_prompts: bool = True
     benchmark_suite_plan: Path | None = None
+    sample_size: int = 15
+    repeats: int = 3
+    sampler_policy: str = "hf_recommended"
 
 
 @dataclass
@@ -179,6 +182,7 @@ class WebUiState:
                     "Forced llama-server args: "
                     + (" ".join(options.forced_server_args) or "(none)"),
                 ),
+                _event("preflight", f"Sampler policy: {options.sampler_policy}"),
             ]
             self.run = WebRunState(
                 phase="running",
@@ -281,6 +285,13 @@ def build_run_options(
     benchmark_suite_plan = resolve_benchmark_suite_plan(
         project_root or Path.cwd(), payload.get("benchmark_suite_plan")
     )
+    sample_size = int(payload.get("sample_size") or 15)
+    if not 1 <= sample_size <= 200:
+        raise ValueError("Sample size must be between 1 and 200 questions per pack.")
+    repeats = int(payload.get("repeats") or 3)
+    if not 1 <= repeats <= 20:
+        raise ValueError("Repeats must be between 1 and 20.")
+    sampler_policy = str(payload.get("sampler_policy") or "hf_recommended")
     return WebRunOptions(
         mode_id=mode_id,
         budget_minutes=budget_minutes,
@@ -288,6 +299,9 @@ def build_run_options(
         show_thinking=bool(payload.get("show_thinking", False)),
         stream_prompts=bool(payload.get("stream_prompts", True)),
         benchmark_suite_plan=benchmark_suite_plan,
+        sample_size=sample_size,
+        repeats=repeats,
+        sampler_policy=sampler_policy,
     )
 
 
@@ -443,103 +457,18 @@ def serve_webui(
     runs_root: Path,
     run_model: WebRunModelCallback | None,
     host: str = "127.0.0.1",
-    port: int = 0,
+    port: int = DEFAULT_WEBUI_PORT,
     open_browser: bool = True,
 ) -> str:
-    resolved_port = port if port != 0 else _free_local_port(host)
     state = WebUiState(root=root, runs_root=runs_root, run_model=run_model)
     app = create_web_app(state)
-    config = uvicorn.Config(app, host=host, port=resolved_port, log_level="warning")
+    config = uvicorn.Config(app, host=host, port=port, log_level="warning")
     server = uvicorn.Server(config)
-    url = f"http://{host}:{resolved_port}/"
+    url = f"http://{host}:{port}/"
     if open_browser:
         webbrowser.open(url)
     server.run()
     return url
-
-
-def _free_local_port(host: str) -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind((host, 0))
-        return int(sock.getsockname()[1])
-
-
-def _handler_for(state: WebUiState):
-    class PilotBenchHandler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
-            path = urlparse(self.path).path
-            if path == "/":
-                self._send_text(INDEX_HTML, content_type="text/html; charset=utf-8")
-                return
-            if path == "/api/state":
-                self._send_json(state.state_payload())
-                return
-            if path.startswith("/runs/"):
-                artifact = resolve_run_artifact(state.runs_root, path.removeprefix("/runs/"))
-                if artifact is None:
-                    self.send_error(HTTPStatus.NOT_FOUND)
-                    return
-                self._send_file(artifact)
-                return
-            self.send_error(HTTPStatus.NOT_FOUND)
-
-        def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
-            path = urlparse(self.path).path
-            if path != "/api/start":
-                self.send_error(HTTPStatus.NOT_FOUND)
-                return
-            try:
-                payload = self._read_json()
-            except ValueError as exc:
-                self._send_json({"ok": False, "message": str(exc)}, status=400)
-                return
-            ok, message = start_run_from_payload(state, payload)
-            self._send_json({"ok": ok, "message": message}, status=200 if ok else 400)
-
-        def log_message(self, format: str, *args) -> None:  # noqa: A002
-            return
-
-        def _read_json(self) -> dict:
-            length = int(self.headers.get("Content-Length", "0"))
-            if length <= 0:
-                return {}
-            raw = self.rfile.read(length)
-            try:
-                payload = json.loads(raw.decode("utf-8"))
-            except json.JSONDecodeError as exc:
-                raise ValueError("Request body must be valid JSON.") from exc
-            if not isinstance(payload, dict):
-                raise ValueError("Request body must be a JSON object.")
-            return payload
-
-        def _send_json(self, payload: dict, status: int = 200) -> None:
-            data = json.dumps(payload).encode("utf-8")
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-
-        def _send_text(self, text: str, *, content_type: str) -> None:
-            data = text.encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-
-        def _send_file(self, path: Path) -> None:
-            data = path.read_bytes()
-            content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-            if path.suffix.lower() in {".md", ".txt", ".tsv"}:
-                content_type = "text/plain; charset=utf-8"
-            self.send_response(200)
-            self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-
-    return PilotBenchHandler
 
 
 def global_report_payloads(runs_root: Path) -> list[dict]:
@@ -710,6 +639,7 @@ def resolve_run_artifact(runs_root: Path, encoded_relative_path: str) -> Path | 
 
 
 def _model_payload(model: ModelInfo) -> dict:
+    presets = recommended_sampler_presets(model.path)
     return {
         "path": str(model.path),
         "name": model.name,
@@ -720,6 +650,14 @@ def _model_payload(model: ModelInfo) -> dict:
         "is_moe": model.is_moe,
         "has_mtp": model.has_mtp,
         "has_vision": model.has_vision,
+        "sampler_presets": [
+            {
+                "id": f"hf:{preset['name']}",
+                "label": f"HF {preset['name']}",
+                "values": preset["values"],
+            }
+            for preset in presets
+        ],
     }
 
 
@@ -893,6 +831,18 @@ INDEX_HTML = r"""<!doctype html>
       width: 100%; border-radius: 6px; border: 1px solid var(--line);
       background: var(--panel-2); color: var(--text); padding: 10px 12px; font: inherit;
     }
+    .run-summary {
+      margin-top: 12px; border: 1px solid var(--line); border-radius: 6px;
+      background: var(--panel-2); padding: 10px;
+    }
+    .run-summary strong { display: block; font-size: 13px; margin-bottom: 8px; }
+    .summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .summary-grid span {
+      display: block; border: 1px solid rgba(255,255,255,.06); border-radius: 6px;
+      padding: 8px; min-width: 0;
+    }
+    .summary-grid b { display: block; color: var(--text); font-size: 15px; overflow-wrap: anywhere; }
+    .summary-grid small { display: block; color: var(--muted); margin-top: 2px; }
     .checkline {
       display: grid; grid-template-columns: 22px 1fr; gap: 8px; align-items: start;
       padding: 8px 0; color: var(--muted); border-bottom: 1px solid rgba(255,255,255,.05);
@@ -954,7 +904,7 @@ INDEX_HTML = r"""<!doctype html>
       <div class="navitem"><span>Control</span><span>local</span></div>
       <div class="navitem"><span>Models</span><span id="nav-models">0</span></div>
       <div class="navitem"><span>Receipts</span><span>_runs</span></div>
-      <div class="navitem"><span>Server</span><span>127.0.0.1</span></div>
+      <div class="navitem"><span>Server</span><span id="nav-server">127.0.0.1:36939</span></div>
     </aside>
     <main>
       <header>
@@ -987,9 +937,25 @@ INDEX_HTML = r"""<!doctype html>
                   <select id="benchmark-suite-plan"></select>
                 </div>
                 <div class="field">
+                  <label for="sampler-policy">Preflight sampler preset</label>
+                  <select id="sampler-policy">
+                    <option value="hf_recommended">HF recommended starting point</option>
+                    <option value="runtime_defaults">llama.cpp runtime defaults</option>
+                  </select>
+                </div>
+                <div class="field">
                   <label for="budget">Budget minutes per model</label>
                   <input id="budget" type="number" min="1" max="1440" value="30" />
                 </div>
+                <div class="field">
+                  <label for="sample-size">Questions per pack</label>
+                  <input id="sample-size" type="number" min="1" max="200" value="15" />
+                </div>
+                <div class="field">
+                  <label for="repeats">Benchmark repeats</label>
+                  <input id="repeats" type="number" min="1" max="20" value="3" />
+                </div>
+                <div id="run-summary" class="run-summary"></div>
               <div class="field">
                 <label>Standard forced flags</label>
                 <div id="standard-flags"></div>
@@ -1000,7 +966,7 @@ INDEX_HTML = r"""<!doctype html>
               </div>
               <label class="checkline">
                 <input id="stream-prompts" type="checkbox" checked />
-                <span><strong>Show live prompt/test activity</strong><small>Lightweight event feed while the backend runs.</small></span>
+                <span><strong>Show WebSocket prompt/test activity</strong><small>Uses HTTP refresh only if the live socket drops.</small></span>
               </label>
               <label class="checkline">
                 <input id="show-thinking" type="checkbox" />
@@ -1068,6 +1034,7 @@ INDEX_HTML = r"""<!doctype html>
     function render(state) {
       appState = state;
       document.querySelector("#nav-models").textContent = state.models.length;
+      document.querySelector("#nav-server").textContent = window.location.host || "127.0.0.1:36939";
       const tbody = document.querySelector("#models");
       tbody.innerHTML = "";
       for (const model of sortedModels(state.models)) {
@@ -1087,6 +1054,7 @@ INDEX_HTML = r"""<!doctype html>
         input.addEventListener("change", event => {
           if (event.target.checked) selected.add(event.target.dataset.path);
           else selected.delete(event.target.dataset.path);
+          renderSamplerPolicies(appState.models || []);
           updateGuard();
         });
       });
@@ -1107,6 +1075,7 @@ INDEX_HTML = r"""<!doctype html>
         mode.dataset.defaultedFor = mode.value;
       }
       renderBenchmarkSuitePlans(state.benchmark_suite_plans || []);
+      renderSamplerPolicies(state.models || []);
       renderConfiguration(state.run_configuration);
       document.querySelector("#packs").innerHTML = state.librarian_packs
         .map((pack, index) => `<div class="pack"><span>${escapeHtml(pack)}<small>${packDescription(pack)}</small></span><span>${index + 1}</span></div>`)
@@ -1145,6 +1114,27 @@ INDEX_HTML = r"""<!doctype html>
         })
         .join("");
       if ([...select.options].some(option => option.value === current)) select.value = current;
+    }
+
+    function renderSamplerPolicies(models) {
+      const select = document.querySelector("#sampler-policy");
+      const current = select.value || "hf_recommended";
+      const selectedModels = models.filter(model => selected.has(model.path));
+      const presetMap = new Map();
+      for (const model of selectedModels) {
+        for (const preset of model.sampler_presets || []) {
+          const label = `${preset.label} (${model.name})`;
+          presetMap.set(preset.id, label);
+        }
+      }
+      select.innerHTML = `
+        <option value="hf_recommended">HF recommended starting point</option>
+        <option value="runtime_defaults">llama.cpp runtime defaults</option>
+        ${Array.from(presetMap.entries()).map(([id, label]) => `<option value="${escapeHtml(id)}">${escapeHtml(label)}</option>`).join("")}
+      `;
+      select.value = [...select.options].some(option => option.value === current)
+        ? current
+        : "hf_recommended";
     }
 
     function flagChoice(item, checked) {
@@ -1215,17 +1205,46 @@ INDEX_HTML = r"""<!doctype html>
       if (!appState) return;
       const mode = document.querySelector("#mode").value;
       const plan = document.querySelector("#benchmark-suite-plan").value;
+      const sampler = document.querySelector("#sampler-policy").value;
       const models = appState.models.filter(model => selected.has(model.path));
       const guard = document.querySelector("#guard");
+      updateRunSummary(models);
       if (models.length === 0) {
         guard.textContent = "Select one or more models to benchmark.";
       } else {
         const planText = plan ? ` Benchmark suite plan: ${plan.split(/[\\\\/]/).pop()}.` : "";
+        const samplerText = sampler === "runtime_defaults"
+          ? " Sampler: llama.cpp runtime defaults."
+          : " Sampler: HF recommended starting point.";
         const compareHint = (mode === "librarian_bench" && models.length === 1)
           ? " Add a second model to compare them head-to-head."
           : "";
-        guard.textContent = `${models.length} model(s) ready.${planText}${compareHint}`;
+        guard.textContent = `${models.length} model(s) ready.${planText}${samplerText}${compareHint}`;
       }
+    }
+
+    function updateRunSummary(models) {
+      const summary = document.querySelector("#run-summary");
+      if (!summary || !appState) return;
+      const modeId = document.querySelector("#mode").value;
+      const mode = appState.modes.find(item => item.id === modeId);
+      const budget = Number(document.querySelector("#budget").value || mode?.budget_minutes || 0);
+      const sampleSize = Number(document.querySelector("#sample-size").value || 0);
+      const repeats = Number(document.querySelector("#repeats").value || 0);
+      const packCount = modeId === "librarian_bench" ? appState.librarian_packs.length : 1;
+      const scoredAttempts = modeId === "quick" ? 0 : models.length * packCount * sampleSize * repeats;
+      const totalMinutes = models.length * budget;
+      const evidence = modeId === "quick"
+        ? "load receipt"
+        : "weighted score + bias checks";
+      summary.innerHTML = `
+        <strong>Run summary</strong>
+        <div class="summary-grid">
+          <span><b>${models.length || "-"}</b><small>model(s)</small></span>
+          <span><b>${totalMinutes || "-"}</b><small>max minutes</small></span>
+          <span><b>${scoredAttempts || "-"}</b><small>scored attempts</small></span>
+        </div>
+        <div class="sub">${escapeHtml(evidence)}; receipts saved under _runs.</div>`;
     }
 
     function connectSocket() {
@@ -1323,6 +1342,9 @@ INDEX_HTML = r"""<!doctype html>
         mode_id: document.querySelector("#mode").value,
         options: {
           budget_minutes: Number(document.querySelector("#budget").value),
+          sample_size: Number(document.querySelector("#sample-size").value),
+          repeats: Number(document.querySelector("#repeats").value),
+          sampler_policy: document.querySelector("#sampler-policy").value,
           benchmark_suite_plan: document.querySelector("#benchmark-suite-plan").value,
           forced_server_args: selectedForcedArgs(),
           stream_prompts: document.querySelector("#stream-prompts").checked,
@@ -1331,6 +1353,10 @@ INDEX_HTML = r"""<!doctype html>
       });
     });
     document.querySelector("#benchmark-suite-plan").addEventListener("change", updateGuard);
+    document.querySelector("#sampler-policy").addEventListener("change", updateGuard);
+    document.querySelector("#budget").addEventListener("input", updateGuard);
+    document.querySelector("#sample-size").addEventListener("input", updateGuard);
+    document.querySelector("#repeats").addEventListener("input", updateGuard);
     document.querySelector("#stop-after-current").addEventListener("click", () => {
       sendSocket({type: "stop_after_current"});
     });

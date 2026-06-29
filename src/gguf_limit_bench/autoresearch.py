@@ -299,6 +299,7 @@ class AutoresearchLoop:
         llama_server: Path | None = None,
         champion_pack_ids: tuple[str, ...] | None = None,
         champion_sample_size: int = 5,
+        champion_repeats: int = 3,
         champion_selection: str = "sequential",
         champion_seed: int | None = None,
         champion_state_db_path: Path | None = None,
@@ -326,6 +327,7 @@ class AutoresearchLoop:
         self.llama_server = llama_server
         self.champion_pack_ids = champion_pack_ids
         self.champion_sample_size = champion_sample_size
+        self.champion_repeats = champion_repeats
         self.champion_selection = champion_selection
         self.champion_seed = champion_seed
         self.champion_state_db_path = champion_state_db_path
@@ -562,6 +564,7 @@ class AutoresearchLoop:
                 run_dir=receipt.path,
                 pack_ids=pack_ids,
                 sample_size=self.champion_sample_size,
+                repeats=self.champion_repeats,
                 selection=self.champion_selection,
                 seed=self.champion_seed,
                 state_db_path=self.champion_state_db_path,

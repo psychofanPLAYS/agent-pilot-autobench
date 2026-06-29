@@ -11,6 +11,7 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from gguf_limit_bench.autoresearch import AttemptResult, AutoresearchSettings
+from gguf_limit_bench.hf_recommended_settings import sampling_payload_from_server_args
 from gguf_limit_bench.server_probe import (
     _free_port,
     _stop_process,
@@ -117,7 +118,13 @@ class LlamaServerSimpleBenchAttemptRunner:
         stdout = ""
         try:
             ready_at = _wait_until_ready(base_url, process, timeout_seconds=self.timeout_seconds)
-            _warmup_server(base_url, self.system_prompt, timeout_seconds=self.timeout_seconds)
+            sampling = sampling_payload_from_server_args(settings.extra_server_args)
+            _warmup_server(
+                base_url,
+                self.system_prompt,
+                timeout_seconds=self.timeout_seconds,
+                sampling=sampling,
+            )
             for index, question in enumerate(self.questions, start=1):
                 measurement = measure_simple_bench_completion(
                     base_url=base_url,
@@ -125,6 +132,7 @@ class LlamaServerSimpleBenchAttemptRunner:
                     system_prompt=self.system_prompt,
                     max_tokens=self.max_tokens,
                     timeout_seconds=_remaining_timeout_seconds(deadline),
+                    sampling=sampling,
                 )
                 predicted = extract_final_answer(measurement.response)
                 question_result = SimpleBenchQuestionResult(
@@ -313,7 +321,12 @@ class LlamaServerSimpleBenchAttemptRunner:
         )
 
 
-def _warmup_server(base_url: str, system_prompt: str, timeout_seconds: int) -> None:
+def _warmup_server(
+    base_url: str,
+    system_prompt: str,
+    timeout_seconds: int,
+    sampling: dict[str, object] | None = None,
+) -> None:
     """Best-effort warmup so the first scored question is not penalized by cold
     CUDA kernels and allocator warmup. Any failure is ignored on purpose."""
     payload = json.dumps(
@@ -324,7 +337,7 @@ def _warmup_server(base_url: str, system_prompt: str, timeout_seconds: int) -> N
             ],
             "stream": False,
             "max_tokens": 8,
-            "temperature": 0,
+            **(sampling or {"temperature": 1.0}),
         }
     ).encode("utf-8")
     request = Request(
@@ -347,6 +360,7 @@ def measure_simple_bench_completion(
     system_prompt: str,
     max_tokens: int,
     timeout_seconds: int,
+    sampling: dict[str, object] | None = None,
 ) -> CompletionMeasurement:
     body: dict[str, object] = {
         "messages": [
@@ -354,7 +368,7 @@ def measure_simple_bench_completion(
             {"role": "user", "content": question.prompt},
         ],
         "stream": True,
-        "temperature": 0,
+        **(sampling or {"temperature": 1.0}),
     }
     if max_tokens > 0:
         body["max_tokens"] = max_tokens

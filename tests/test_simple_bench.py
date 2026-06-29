@@ -135,6 +135,7 @@ def test_simple_bench_completion_uses_openai_chat_messages(monkeypatch):
         system_prompt="Use Final Answer: X",
         max_tokens=32,
         timeout_seconds=10,
+        sampling={"temperature": 0.6, "top_p": 0.95, "top_k": 20},
     )
 
     assert captured["url"].endswith("/v1/chat/completions")
@@ -142,6 +143,9 @@ def test_simple_bench_completion_uses_openai_chat_messages(monkeypatch):
         {"role": "system", "content": "Use Final Answer: X"},
         {"role": "user", "content": "Pick one"},
     ]
+    assert captured["payload"]["temperature"] == 0.6
+    assert captured["payload"]["top_p"] == 0.95
+    assert captured["payload"]["top_k"] == 20
     assert result.response == "Brief thought. Final Answer: B"
     assert result.generated_tokens == 3
     assert result.tokens_per_second == 42.5

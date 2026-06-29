@@ -192,8 +192,9 @@ def _load_agent_quality(receipt_dir: Path) -> tuple[float | None, dict[str, floa
     """Aggregate librarian/agent per-pack accuracy from a receipt directory.
 
     Reads ``results.json`` (champion_eval output) if present, otherwise falls back
-    to ``librarian-suite-summary.json``. Returns the mean accuracy over packs whose
-    ``status == "scored"``, a ``{pack_id: accuracy}`` map, and the scored-pack count.
+    to ``librarian-suite-summary.json``. The headline score uses the same contract
+    as ``librarian_suite``: scored-attempt accuracy multiplied by completion rate.
+    Per-pack scores remain pack accuracies for the matrix view.
     """
     payload: dict | None = None
     for name in ("results.json", "librarian-suite-summary.json"):
@@ -212,6 +213,9 @@ def _load_agent_quality(receipt_dir: Path) -> tuple[float | None, dict[str, floa
         return None, {}, 0
 
     pack_scores: dict[str, float] = {}
+    asked_total = 0
+    correct_total = 0
+    incomplete_total = 0
     for pack in payload.get("packs", []) or []:
         if not isinstance(pack, dict):
             continue
@@ -223,12 +227,24 @@ def _load_agent_quality(receipt_dir: Path) -> tuple[float | None, dict[str, floa
             continue
         try:
             pack_scores[str(pack_id)] = float(accuracy)
+            asked = int(pack.get("asked") or 0)
+            asked_total += asked
+            correct_total += int(pack.get("correct") or 0)
+            incomplete_total += int(pack.get("incomplete") or 0)
         except (TypeError, ValueError):
             continue
 
     if not pack_scores:
         return None, {}, 0
-    librarian_score = sum(pack_scores.values()) / len(pack_scores)
+    top_level_score = _float_or_none(payload.get("librarian_bench_score"))
+    if top_level_score is not None:
+        librarian_score = top_level_score
+    elif asked_total > 0:
+        accuracy = correct_total / asked_total
+        completion_rate = (asked_total - incomplete_total) / asked_total
+        librarian_score = accuracy * completion_rate
+    else:
+        librarian_score = sum(pack_scores.values()) / len(pack_scores)
     return librarian_score, pack_scores, len(pack_scores)
 
 

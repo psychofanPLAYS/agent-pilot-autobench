@@ -681,7 +681,9 @@ def test_start_command_webui_callback_runs_librarian_pack_models(tmp_path, monke
     assert runs[0]["benchmark_suite_plan"] == web_plan_path
     assert runs[1]["benchmark_suite_plan"] == plan_path
     assert runs[0]["budget_seconds"] == 7 * 60
-    assert runs[0]["forced_server_args"] == ("--jinja",)
+    assert runs[0]["forced_server_args"][0] == "--jinja"
+    assert "--temp" in runs[0]["forced_server_args"]
+    assert "--top-p" in runs[0]["forced_server_args"]
     assert "librarian-gate" in runs[0]["champion_pack_ids"]
 
 
@@ -1514,7 +1516,7 @@ def test_run_one_autoresearch_benchmark_mode_uses_simplebench_runner(monkeypatch
 
     monkeypatch.setattr(cli, "AutoresearchLoop", FakeLoop)
     cli._run_one_autoresearch(
-        model=tmp_path / "m.gguf",
+        model=Path("G:/AI/models/Qwen3.6-35B-A3B-MTP-Q4_K_M.gguf"),
         llama_bench=tmp_path / "llama-bench",
         llama_cli=tmp_path / "llama-cli",
         llama_server=tmp_path / "llama-server",
@@ -1530,6 +1532,44 @@ def test_run_one_autoresearch_benchmark_mode_uses_simplebench_runner(monkeypatch
     # Benchmark mode must route through the flag-ladder question engine, which
     # supplies a candidate_sequence (the synthetic speed scout supplies none).
     assert captured["candidate_sequence"] is not None
+    assert "--temp" in captured["candidate_sequence"][0].extra_server_args
+    assert "--top-p" in captured["candidate_sequence"][0].extra_server_args
+
+
+def test_run_one_autoresearch_can_opt_out_of_hf_sampler_defaults(monkeypatch, tmp_path):
+    import gguf_limit_bench.cli as cli
+    from gguf_limit_bench.evaluation_mode import EvaluationMode
+
+    captured = {}
+
+    class FakeLoop:
+        def __init__(self, **kwargs):
+            captured["candidate_sequence"] = kwargs.get("candidate_sequence")
+
+        def run(self):
+            class R:
+                path = tmp_path
+
+            return R()
+
+    monkeypatch.setattr(cli, "AutoresearchLoop", FakeLoop)
+    cli._run_one_autoresearch(
+        model=Path("G:/AI/models/Qwen3.6-35B-A3B-MTP-Q4_K_M.gguf"),
+        llama_bench=tmp_path / "llama-bench",
+        llama_cli=tmp_path / "llama-cli",
+        llama_server=tmp_path / "llama-server",
+        runs_root=tmp_path,
+        budget_seconds=60,
+        parallel_max=1,
+        max_attempts=1,
+        learning=False,
+        workflow_eval=False,
+        ttft_probe=False,
+        evaluation=EvaluationMode.BENCHMARK,
+        sampler_policy="runtime_defaults",
+    )
+
+    assert "--temp" not in captured["candidate_sequence"][0].extra_server_args
 
 
 def test_run_one_autoresearch_speed_scout_uses_no_candidate_sequence(monkeypatch, tmp_path):

@@ -102,6 +102,57 @@ def test_pack_runner_mc_direct_correct(monkeypatch):
     assert batch.completion_rate == 1.0
 
 
+def test_pack_runner_sends_model_sampling_options(monkeypatch):
+    """Sampling is explicit so Qwen-style plans are not forced into greedy decode."""
+    seen_payloads = []
+
+    def fake_urlopen(request, timeout):
+        import json
+
+        seen_payloads.append(json.loads(request.data.decode("utf-8")))
+        return FakeResponse(_sse("Final Answer: B"))
+
+    monkeypatch.setattr("gguf_limit_bench.pack_runner.urlopen", fake_urlopen)
+
+    pack = _make_pack(answer="B", answer_type=AnswerType.MULTIPLE_CHOICE)
+    run_pack_questions(
+        pack=pack,
+        questions=list(pack.questions),
+        answer_max_tokens=256,
+        base_url="http://127.0.0.1:8080",
+        timeout_seconds=10,
+        sampling={"temperature": 0.6, "top_p": 0.95, "top_k": 20, "ignored": "nope"},
+    )
+
+    assert seen_payloads[0]["temperature"] == 0.6
+    assert seen_payloads[0]["top_p"] == 0.95
+    assert seen_payloads[0]["top_k"] == 20
+    assert "ignored" not in seen_payloads[0]
+
+
+def test_pack_runner_default_sampling_is_not_greedy(monkeypatch):
+    seen_payloads = []
+
+    def fake_urlopen(request, timeout):
+        import json
+
+        seen_payloads.append(json.loads(request.data.decode("utf-8")))
+        return FakeResponse(_sse("Final Answer: B"))
+
+    monkeypatch.setattr("gguf_limit_bench.pack_runner.urlopen", fake_urlopen)
+
+    pack = _make_pack(answer="B", answer_type=AnswerType.MULTIPLE_CHOICE)
+    run_pack_questions(
+        pack=pack,
+        questions=list(pack.questions),
+        answer_max_tokens=256,
+        base_url="http://127.0.0.1:8080",
+        timeout_seconds=10,
+    )
+
+    assert seen_payloads[0]["temperature"] == 1.0
+
+
 # ---------------------------------------------------------------------------
 # Test 2: No "Final Answer:" in first response; follow-up returns it → correct,
 #         and exactly one follow-up call was made.

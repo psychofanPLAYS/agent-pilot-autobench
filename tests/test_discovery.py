@@ -33,6 +33,31 @@ def test_parse_model_name_detects_gemma_family():
     assert info.quant == "Q4_K_M"
 
 
+def test_parse_model_name_classifies_qwopus_as_qwen_derivative():
+    info = parse_model_name(Path("Qwopus3.5-4B-v3-heretic.Q8_0.gguf"))
+
+    assert info.family == "qwen"
+    assert info.parameters == "4B"
+    assert info.quant == "Q8_0"
+
+
+def test_parse_model_name_detects_qat_q4_zero_quant():
+    info = parse_model_name(Path("gemma-4-31B-it-QAT-Q4_0.gguf"))
+
+    assert info.family == "gemma"
+    assert info.parameters == "31B"
+    assert info.quant == "Q4_0"
+
+
+def test_parse_model_name_uses_apex_release_tier_when_quant_suffix_is_absent():
+    info = parse_model_name(Path("Qwen3.6-35B-A3B-APEX-MTP-I-Quality.gguf"))
+
+    assert info.family == "qwen"
+    assert info.parameters == "35B-A3B"
+    assert info.quant == "APEX-I-QUALITY"
+    assert info.has_mtp is True
+
+
 def test_discover_models_pairs_mmproj_with_weight(tmp_path):
     model_dir = tmp_path / "lmstudio-community" / "Qwen3.6-35B-A3B-GGUF"
     model_dir.mkdir(parents=True)

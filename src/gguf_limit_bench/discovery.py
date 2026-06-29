@@ -7,7 +7,10 @@ import re
 from gguf_limit_bench.model_identity import ModelIdentity, resolve_path_identity
 
 
-QUANT_RE = re.compile(r"(IQ\d_[A-Z]+|Q\d_[A-Z](?:_[A-Z]+)?|Q8_0|MXFP4_MOE|TQ\d_\dS)", re.I)
+QUANT_RE = re.compile(
+    r"(IQ\d_[A-Z0-9]+|Q\d_[A-Z0-9]+(?:_[A-Z0-9]+)?|MXFP4_MOE|TQ\d_\dS)",
+    re.I,
+)
 PARAM_RE = re.compile(r"(\d+(?:\.\d+)?B(?:-A\d+B?)?)", re.I)
 
 # Markers for GGUF files that are NOT chat/generative LLMs and must never enter the
@@ -68,7 +71,7 @@ class ModelInfo:
 def parse_model_name(path: Path) -> ModelInfo:
     name = path.name
     lowered = name.lower()
-    if "qwen" in lowered:
+    if "qwen" in lowered or "qwopus" in lowered:
         family = "qwen"
     elif "gemma" in lowered:
         family = "gemma"
@@ -76,7 +79,7 @@ def parse_model_name(path: Path) -> ModelInfo:
         family = "llama"
     else:
         family = "unknown"
-    quant_match = QUANT_RE.search(name)
+    quant = _quant_label(name)
     param_match = PARAM_RE.search(name)
     parameters = param_match.group(1).upper().replace("A3B", "A3B") if param_match else "unknown"
     is_moe = "moe" in lowered or bool(re.search(r"-a\d+b", lowered))
@@ -86,7 +89,7 @@ def parse_model_name(path: Path) -> ModelInfo:
         name=name,
         family=family,
         parameters=parameters,
-        quant=quant_match.group(1).upper() if quant_match else "unknown",
+        quant=quant,
         is_moe=is_moe,
         has_mtp=has_mtp,
     )
@@ -127,3 +130,20 @@ def discover_models(roots: list[Path]) -> list[ModelInfo]:
 def _find_mmproj(folder: Path) -> Path | None:
     mmprojs = sorted(path for path in folder.glob("*.gguf") if "mmproj" in path.name.lower())
     return mmprojs[0] if mmprojs else None
+
+
+def _quant_label(name: str) -> str:
+    quant_match = QUANT_RE.search(name)
+    if quant_match:
+        return quant_match.group(1).upper()
+    apex_tier_match = re.search(r"\bAPEX(?:[-_. ]+MTP)?[-_. ]+I[-_. ]+([A-Z]+)", name, re.I)
+    if apex_tier_match:
+        return f"APEX-I-{apex_tier_match.group(1).upper()}"
+    apex_tier_match = re.search(r"\bAPEX(?:[-_. ]+MTP)?[-_. ]+([A-Z]+)", name, re.I)
+    if apex_tier_match and apex_tier_match.group(1).casefold() not in {"mtp", "gguf"}:
+        return f"APEX-{apex_tier_match.group(1).upper()}"
+    if re.search(r"\bAPEX\b", name, re.I):
+        return "APEX"
+    if re.search(r"\bQAT\b", name, re.I):
+        return "QAT"
+    return "unknown"

@@ -52,7 +52,8 @@ that goes straight to the app. Power-user subcommands still exist — run
 
 ## Cockpit Modes
 
-Plain `apb` (or double-clicking `START.bat`) opens the local browser cockpit.
+Plain `apb` (or double-clicking `START.bat`) opens the local browser cockpit on
+`127.0.0.1:36939`.
 The browser is the primary workflow for model selection, benchmark-suite plan
 selection, live WebSocket run progress, telemetry, and receipt links. Pick
 model(s) with checkboxes, choose a mode from the menu, review the

@@ -19,6 +19,8 @@ class HubGateway(Protocol):
 
     def model_card(self, repo_id: str, revision: str) -> str: ...
 
+    def search_models(self, query: str, limit: int) -> list[Any]: ...
+
 
 class HuggingFaceGateway:
     def __init__(self, cache_dir: Path | None = None) -> None:
@@ -29,6 +31,9 @@ class HuggingFaceGateway:
 
     def model_info(self, repo_id: str) -> Any:
         return self._api.model_info(repo_id, files_metadata=True)
+
+    def search_models(self, query: str, limit: int = 10) -> list[Any]:
+        return list(self._api.list_models(search=query, limit=limit, full=True))
 
     def model_card(self, repo_id: str, revision: str) -> str:
         return self.optional_file_text(repo_id, revision, "README.md")
@@ -98,6 +103,14 @@ class HubCatalog:
                 return self.load(repo_id)
             except FileNotFoundError:
                 raise error
+
+    def search_models(self, query: str, limit: int = 10) -> list[Any]:
+        if self.offline or self.gateway is None:
+            return []
+        search_models = getattr(self.gateway, "search_models", None)
+        if not callable(search_models):
+            return []
+        return list(search_models(query, limit))
 
     def _fetch_online(self, repo_id: str, filename: str) -> HubRecord:
         assert self.gateway is not None

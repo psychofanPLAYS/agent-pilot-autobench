@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import http.client
-from http.server import ThreadingHTTPServer
 from pathlib import Path
-import threading
 import time
 
 from fastapi.testclient import TestClient
@@ -11,9 +8,10 @@ from fastapi.testclient import TestClient
 from gguf_limit_bench.discovery import ModelInfo
 from gguf_limit_bench.librarian.registry import LIBRARIAN_PACK_IDS
 from gguf_limit_bench.webui import (
+    DEFAULT_WEBUI_PORT,
+    INDEX_HTML,
     WebRunOptions,
     WebUiState,
-    _handler_for,
     build_run_options,
     create_web_app,
     recent_receipts,
@@ -39,6 +37,17 @@ def test_webui_state_lists_models_modes_and_librarian_packs(tmp_path):
     assert any(mode["id"] == "librarian_bench" for mode in payload["modes"])
     assert payload["run_configuration"]["standard_forced_args"]
     assert "receipts" in payload
+    qwen = next(model for model in payload["models"] if model["family"] == "qwen")
+    assert any(preset["id"] == "hf:thinking_general" for preset in qwen["sampler_presets"])
+
+
+def test_webui_shell_explains_run_cost_and_evidence():
+    assert 'id="run-summary"' in INDEX_HTML
+    assert "127.0.0.1:36939" in INDEX_HTML
+    assert "window.location.host" in INDEX_HTML
+    assert "function updateRunSummary" in INDEX_HTML
+    assert "scored attempts" in INDEX_HTML
+    assert "weighted score + bias checks" in INDEX_HTML
 
 
 def test_librarian_web_selection_accepts_any_models():
@@ -85,6 +94,8 @@ def test_webui_start_run_calls_backend_for_selected_models(tmp_path):
         "librarian_bench",
         {
             "budget_minutes": 7,
+            "sample_size": 15,
+            "repeats": 3,
             "benchmark_suite_plan": str(plan_path),
             "forced_server_args": ["--flash-attn", "on", "--jinja"],
             "stream_prompts": True,
@@ -100,6 +111,9 @@ def test_webui_start_run_calls_backend_for_selected_models(tmp_path):
         ("Qwen3.6-35B-A3B-Q4_K_M.gguf", "librarian_bench", 7),
     ]
     assert calls[0][1].forced_server_args == ("--flash-attn", "on", "--jinja")
+    assert calls[0][1].sample_size == 15
+    assert calls[0][1].repeats == 3
+    assert calls[0][1].sampler_policy == "hf_recommended"
     assert {options.benchmark_suite_plan for _name, options in calls} == {plan_path.resolve()}
     assert state.run.phase == "complete"
     assert any(event.kind == "receipt" for event in state.run.events)
@@ -167,26 +181,16 @@ def test_recent_receipts_and_run_artifact_links_stay_under_runs_root(tmp_path):
 
 def test_webui_start_endpoint_rejects_malformed_json(tmp_path):
     state = WebUiState(root=tmp_path / "models", runs_root=tmp_path / "_runs")
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _handler_for(state))
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=2)
-        connection.request(
-            "POST",
-            "/api/start",
-            body="{not-json",
-            headers={"Content-Type": "application/json"},
-        )
-        response = connection.getresponse()
-        payload = response.read().decode("utf-8")
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
+    client = TestClient(create_web_app(state))
 
-    assert response.status == 400
-    assert "valid JSON" in payload
+    response = client.post(
+        "/api/start",
+        content="{not-json",
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 400
+    assert "valid JSON" in response.text
 
 
 def test_webui_websocket_sends_hello_and_state(tmp_path):
@@ -243,6 +247,9 @@ def test_webui_websocket_start_run_dispatches_backend(tmp_path):
                 "mode_id": "librarian_bench",
                 "options": {
                     "budget_minutes": 3,
+                    "sample_size": 17,
+                    "repeats": 4,
+                    "sampler_policy": "runtime_defaults",
                     "benchmark_suite_plan": str(plan_path),
                     "forced_server_args": ["--jinja"],
                 },
@@ -256,6 +263,12 @@ def test_webui_websocket_start_run_dispatches_backend(tmp_path):
     while time.time() < deadline and len(calls) < 2:
         time.sleep(0.02)
     assert [call[1].budget_minutes for call in calls] == [3, 3]
+    assert [call[1].sample_size for call in calls] == [17, 17]
+    assert [call[1].repeats for call in calls] == [4, 4]
+    assert [call[1].sampler_policy for call in calls] == [
+        "runtime_defaults",
+        "runtime_defaults",
+    ]
     assert [call[1].benchmark_suite_plan for call in calls] == [
         plan_path.resolve(),
         plan_path.resolve(),
@@ -446,12 +459,12 @@ def test_serve_webui_builds_fastapi_app_without_starting_benchmark(tmp_path, mon
         runs_root=tmp_path / "_runs",
         run_model=None,
         host="127.0.0.1",
-        port=8765,
         open_browser=True,
     )
 
-    assert url == "http://127.0.0.1:8765/"
-    assert captured["url"] == "http://127.0.0.1:8765/"
+    assert DEFAULT_WEBUI_PORT == 36939
+    assert url == "http://127.0.0.1:36939/"
+    assert captured["url"] == "http://127.0.0.1:36939/"
     assert captured["ran"] is True
     assert captured["config"].host == "127.0.0.1"
-    assert captured["config"].port == 8765
+    assert captured["config"].port == 36939

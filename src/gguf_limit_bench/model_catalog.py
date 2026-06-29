@@ -8,6 +8,7 @@ from typing import Protocol
 
 from gguf_limit_bench.discovery import ModelInfo
 from gguf_limit_bench.hf_catalog import HubRecord
+from gguf_limit_bench.hf_model_match import MatchDecision, resolve_hf_model_match
 from gguf_limit_bench.model_recommendations import (
     Recommendation,
     RecommendationSource,
@@ -20,6 +21,8 @@ from gguf_limit_bench.runtime_capabilities import LlamaCapabilities
 
 class HubFetcher(Protocol):
     def fetch(self, repo_id: str, filename: str) -> HubRecord: ...
+
+    def search_models(self, query: str, limit: int) -> list[object]: ...
 
 
 @dataclass(frozen=True)
@@ -43,6 +46,9 @@ class CatalogEntry:
     datasets: tuple[str, ...]
     recommendations: tuple[Recommendation, ...]
     errors: tuple[str, ...] = ()
+    source_repo_id: str | None = None
+    match_confidence: str = "unresolved"
+    match_candidates: tuple[dict[str, object], ...] = ()
 
     def to_dict(self) -> dict:
         payload = asdict(self)
@@ -73,6 +79,7 @@ class CatalogPaths:
     json: Path
     markdown: Path
     recommendations: Path
+    matches: Path
 
 
 class ModelCatalog:
@@ -112,13 +119,22 @@ class ModelCatalog:
         datasets: tuple[str, ...] = ()
         recommendations: tuple[Recommendation, ...] = ()
         errors: list[str] = []
+        match_decision: MatchDecision | None = None
 
-        if enrich and repo_id and self.hub is not None:
+        if enrich and self.hub is not None:
             try:
-                record = self.hub.fetch(repo_id, hub_filename)
+                match_decision, record = resolve_hf_model_match(
+                    hub=self.hub,
+                    model_path=model.path,
+                    filename=hub_filename,
+                    source_repo_id=repo_id,
+                )
+                if record is None:
+                    raise FileNotFoundError(f"No Hugging Face match found for {hub_filename}")
             except Exception as error:
                 errors.append(f"{type(error).__name__}: {error}")
             else:
+                repo_id = record.repo_id
                 identity_confidence = record.identity_confidence
                 document_confidence = record.document_confidence
                 revision = record.revision
@@ -141,6 +157,8 @@ class ModelCatalog:
                         recommendations,
                         self.capabilities,
                     )
+            if match_decision is not None:
+                errors.extend(match_decision.errors)
 
         return CatalogEntry(
             local_path=str(model.path),
@@ -162,6 +180,11 @@ class ModelCatalog:
             datasets=datasets,
             recommendations=recommendations,
             errors=tuple(errors),
+            source_repo_id=identity.repo_id if identity else None,
+            match_confidence=match_decision.confidence if match_decision else identity_confidence,
+            match_candidates=tuple(candidate.to_dict() for candidate in match_decision.candidates)
+            if match_decision
+            else (),
         )
 
 
@@ -170,6 +193,7 @@ def write_catalog(snapshot: CatalogSnapshot, output_dir: Path) -> CatalogPaths:
     json_path = output_dir / "catalog.json"
     markdown_path = output_dir / "catalog.md"
     recommendations_path = output_dir / "recommendations.json"
+    matches_path = output_dir / "hf-match-decisions.json"
     _atomic_write(
         json_path,
         json.dumps(snapshot.to_dict(), indent=2, sort_keys=True) + "\n",
@@ -179,8 +203,15 @@ def write_catalog(snapshot: CatalogSnapshot, output_dir: Path) -> CatalogPaths:
         recommendations_path,
         json.dumps(_recommendation_database(snapshot), indent=2, sort_keys=True) + "\n",
     )
+    _atomic_write(
+        matches_path,
+        json.dumps(_match_database(snapshot), indent=2, sort_keys=True) + "\n",
+    )
     return CatalogPaths(
-        json=json_path, markdown=markdown_path, recommendations=recommendations_path
+        json=json_path,
+        markdown=markdown_path,
+        recommendations=recommendations_path,
+        matches=matches_path,
     )
 
 
@@ -213,6 +244,9 @@ def load_catalog(cache_root: Path) -> CatalogSnapshot:
                 datasets=tuple(row.get("datasets", [])),
                 recommendations=recommendations,
                 errors=tuple(row.get("errors", [])),
+                source_repo_id=row.get("source_repo_id"),
+                match_confidence=str(row.get("match_confidence", row["identity_confidence"])),
+                match_candidates=tuple(row.get("match_candidates", [])),
             )
         )
     return CatalogSnapshot(
@@ -299,6 +333,9 @@ def _recommendation_database(snapshot: CatalogSnapshot) -> dict:
                 "datasets": list(entry.datasets),
                 "values": values,
                 "recommendations": [asdict(item) for item in entry.recommendations],
+                "source_repo_id": entry.source_repo_id,
+                "match_confidence": entry.match_confidence,
+                "match_candidates": list(entry.match_candidates),
                 "errors": list(entry.errors),
             }
         )
@@ -308,6 +345,27 @@ def _recommendation_database(snapshot: CatalogSnapshot) -> dict:
         "network_used": snapshot.network_used,
         "source_catalog_schema_version": snapshot.schema_version,
         "entries": entries,
+    }
+
+
+def _match_database(snapshot: CatalogSnapshot) -> dict:
+    return {
+        "schema_version": 1,
+        "generated_at": snapshot.generated_at,
+        "network_used": snapshot.network_used,
+        "entries": [
+            {
+                "name": entry.name,
+                "local_path": entry.local_path,
+                "source_repo_id": entry.source_repo_id,
+                "selected_repo_id": entry.repo_id,
+                "match_confidence": entry.match_confidence,
+                "hub_filename": entry.hub_filename,
+                "candidates": list(entry.match_candidates),
+                "errors": list(entry.errors),
+            }
+            for entry in snapshot.entries
+        ],
     }
 
 

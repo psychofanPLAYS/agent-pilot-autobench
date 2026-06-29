@@ -406,7 +406,7 @@ def test_results_json_yields_agent_quality_and_pack_scores(tmp_path):
     leaderboard = build_leaderboard(tmp_path)
     entry = next(e for e in leaderboard.entries if e.run_id == "librarian-model")
 
-    # Mean over scored packs only (0.75 + 0.25) / 2 == 0.5; preflight_fail skipped.
+    # Canonical score is weighted over scored attempts, matching librarian_suite.
     assert entry.librarian_score == 0.5
     assert entry.scored_pack_count == 2
     assert entry.pack_scores == {"librarian-gate": 0.75, "librarian-dedupe": 0.25}
@@ -465,6 +465,40 @@ def test_librarian_suite_summary_is_used_when_results_json_missing(tmp_path):
     entry = next(e for e in build_leaderboard(tmp_path).entries if e.run_id == "suite-model")
     assert entry.librarian_score == 0.6
     assert entry.pack_scores == {"librarian-triage": 0.6}
+
+
+def test_agent_quality_uses_librarian_suite_weighted_score_not_pack_mean(tmp_path):
+    run = _write_run(tmp_path, "uneven-packs", 50.0, 40.0, context=32768)
+    (run / "results.json").write_text(
+        json.dumps(
+            {
+                "packs": [
+                    {
+                        "pack_id": "large-pack",
+                        "status": "scored",
+                        "asked": 9,
+                        "correct": 9,
+                        "incomplete": 0,
+                        "accuracy": 1.0,
+                    },
+                    {
+                        "pack_id": "tiny-pack",
+                        "status": "scored",
+                        "asked": 1,
+                        "correct": 0,
+                        "incomplete": 0,
+                        "accuracy": 0.0,
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    entry = next(e for e in build_leaderboard(tmp_path).entries if e.run_id == "uneven-packs")
+
+    assert entry.librarian_score == 0.9
+    assert entry.agent_bench_score == 0.9
 
 
 def test_leaderboard_excludes_non_generative_models(tmp_path):

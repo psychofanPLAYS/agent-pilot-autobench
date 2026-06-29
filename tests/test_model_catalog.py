@@ -51,6 +51,11 @@ class FakeHub:
         )
 
 
+class SearchableFakeHub(FakeHub):
+    def search_models(self, query: str, limit: int):
+        return [{"id": "bytkim/Qwen3.6-27B-MTP-GGUF"}]
+
+
 def model_info(name: str = "Qwen3.6-27B-MTP-Q5_K_M.gguf") -> ModelInfo:
     return ModelInfo(
         path=Path("G:/models/bytkim/Qwen3.6-27B-MTP-GGUF") / name,
@@ -122,6 +127,9 @@ def test_catalog_exports_stable_json_and_markdown(tmp_path):
     assert entry["model"]["repo_id"] == "bytkim/Qwen3.6-27B-MTP-GGUF"
     assert entry["values"]["spec_type"] == "draft-mtp"
     assert entry["recommendations"]
+    matches = json.loads(paths.matches.read_text(encoding="utf-8"))
+    assert matches["entries"][0]["selected_repo_id"] == "bytkim/Qwen3.6-27B-MTP-GGUF"
+    assert matches["entries"][0]["candidates"]
 
 
 def test_local_only_catalog_never_calls_hub(tmp_path):
@@ -132,6 +140,35 @@ def test_local_only_catalog_never_calls_hub(tmp_path):
     assert hub.calls == []
     assert snapshot.network_used is False
     assert snapshot.entries[0].document_confidence == "unavailable"
+
+
+def test_catalog_enrich_searches_even_when_filename_has_no_repo_identity(tmp_path):
+    model = ModelInfo(
+        path=Path("G:/models/Qwen3.6-27B-MTP-Q5_K_M.gguf"),
+        name="Qwen3.6-27B-MTP-Q5_K_M.gguf",
+        family="qwen",
+        parameters="27B",
+        quant="Q5_K_M",
+        size_bytes=20_000_000_000,
+        has_mtp=True,
+        identity=ModelIdentity(
+            repo_id=None,
+            filename="Qwen3.6-27B-MTP-Q5_K_M.gguf",
+            confidence=IdentityConfidence.UNRESOLVED,
+            source="filename",
+        ),
+    )
+
+    snapshot = ModelCatalog(cache_root=tmp_path, hub=SearchableFakeHub()).build(
+        [model],
+        enrich=True,
+    )
+    entry = snapshot.entries[0]
+
+    assert entry.repo_id == "bytkim/Qwen3.6-27B-MTP-GGUF"
+    assert entry.source_repo_id is None
+    assert entry.match_confidence in {"strong", "verified"}
+    assert entry.match_candidates
 
 
 def test_catalog_promotes_only_locally_supported_recommendations(tmp_path):

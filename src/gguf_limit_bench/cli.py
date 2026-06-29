@@ -81,6 +81,11 @@ from gguf_limit_bench.installer import (
     sync_project_environment,
 )
 from gguf_limit_bench.hf_catalog import HubCatalog, HuggingFaceGateway
+from gguf_limit_bench.hf_recommended_settings import (
+    recommended_sampler_flags,
+    recommended_sampler_presets,
+    sampler_flags_from_values,
+)
 from gguf_limit_bench.learning import OptunaSettingsLearner
 from gguf_limit_bench.librarian.registry import LIBRARIAN_PACK_IDS
 from gguf_limit_bench.template_recommend import merge_flags, recommended_model_flags
@@ -158,6 +163,7 @@ def models_scan(
     console.print(f"JSON: {paths.json}")
     console.print(f"Markdown: {paths.markdown}")
     console.print(f"Recommendations DB: {paths.recommendations}")
+    console.print(f"HF match decisions: {paths.matches}")
 
 
 @models_app.command("enrich")
@@ -190,6 +196,7 @@ def models_enrich(
     console.print(f"JSON: {paths.json}")
     console.print(f"Markdown: {paths.markdown}")
     console.print(f"Recommendations DB: {paths.recommendations}")
+    console.print(f"HF match decisions: {paths.matches}")
 
 
 @models_app.command("list")
@@ -258,6 +265,7 @@ def models_export(
     console.print(f"JSON: {paths.json}")
     console.print(f"Markdown: {paths.markdown}")
     console.print(f"Recommendations DB: {paths.recommendations}")
+    console.print(f"HF match decisions: {paths.matches}")
 
 
 def _effective_forced_server_args(custom_args: tuple[str, ...] = ()) -> tuple[str, ...]:
@@ -464,12 +472,18 @@ def _start_app(
                 enable_mtp=model.has_mtp,
                 evaluation=mode_by_id(options.mode_id).evaluation,
                 forced_server_args=merge_flags(
-                    options.forced_server_args,
+                    merge_flags(
+                        options.forced_server_args,
+                        _sampler_flags_for_policy(model.path, options.sampler_policy),
+                    ),
                     recommended_model_flags(model.path, search_roots=(root,)),
                 ),
                 champion_pack_ids=tuple(LIBRARIAN_PACK_IDS)
                 if options.mode_id == "librarian_bench"
                 else None,
+                champion_sample_size=options.sample_size,
+                champion_repeats=options.repeats,
+                sampler_policy=options.sampler_policy,
             ).path
         ),
     )
@@ -1846,6 +1860,18 @@ def _build_learner(
     return learner
 
 
+def _sampler_flags_for_policy(model: Path, sampler_policy: str) -> tuple[str, ...]:
+    if sampler_policy == "runtime_defaults":
+        return ()
+    if sampler_policy.startswith("hf:"):
+        preset_name = sampler_policy.split(":", 1)[1]
+        for preset in recommended_sampler_presets(model):
+            if preset["name"] == preset_name:
+                return sampler_flags_from_values(preset["values"])
+        return ()
+    return recommended_sampler_flags(model)
+
+
 def _previous_successful_settings(model: Path, runs_root: Path):
     from gguf_limit_bench.autoresearch import AutoresearchSettings
 
@@ -1916,11 +1942,16 @@ def _run_one_autoresearch(
     champion_pack_ids: tuple[str, ...] | None = None,
     champion_state_db_path: Path | None = None,
     champion_gpu_name: str = "",
+    champion_repeats: int = 3,
+    sampler_policy: str = "hf_recommended",
 ):
     # Benchmark mode asks the real questions via the flag-ladder SimpleBench engine.
     # The legacy --flag-ladder flag forces the same path.
     flag_ladder = flag_ladder or asks_questions(evaluation)
     # Forced flags are applied on top of every profile's flags.
+    sampler_args = _sampler_flags_for_policy(model, sampler_policy)
+    if sampler_args:
+        forced_server_args = merge_flags(tuple(forced_server_args), sampler_args)
     if forced_server_args:
         llama_server_extra_args = validate_extra_server_args(
             tuple(forced_server_args) + tuple(llama_server_extra_args)
@@ -2054,6 +2085,7 @@ def _run_one_autoresearch(
         llama_server=llama_server,
         champion_pack_ids=champion_pack_ids,
         champion_sample_size=champion_sample_size,
+        champion_repeats=champion_repeats,
         champion_selection=champion_selection,
         champion_state_db_path=resolved_state_db_path,
         champion_gpu_name=resolved_gpu_name,
