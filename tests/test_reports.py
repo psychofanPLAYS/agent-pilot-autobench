@@ -484,6 +484,29 @@ def test_results_html_includes_interactive_charts(tmp_path):
     assert "Agent Index" in html
 
 
+def test_results_html_renders_index_trend_across_runs(tmp_path):
+    for i, (name, acc) in enumerate(
+        [("20260621-a", 0.6), ("20260622-b", 0.9)], start=1
+    ):
+        run = _write_run(tmp_path, name, 50.0 + i, 40.0 + i, context=8192)
+        (run / "results.json").write_text(
+            json.dumps(
+                {
+                    "packs": [
+                        {"pack_id": "librarian-gate", "status": "scored", "accuracy": 1.0},
+                        {"pack_id": "librarian-triage", "status": "scored", "accuracy": acc},
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    write_leaderboard(tmp_path)
+    html = (tmp_path / "results.html").read_text(encoding="utf-8")
+    assert 'id="c-trend"' in html
+    assert "Agent Index over time" in html
+
+
 def test_librarian_suite_summary_is_used_when_results_json_missing(tmp_path):
     run = _write_run(tmp_path, "suite-model", 50.0, 40.0, context=32768)
     (run / "librarian-suite-summary.json").write_text(

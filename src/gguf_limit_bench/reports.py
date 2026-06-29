@@ -643,6 +643,30 @@ def _dashboard_models(leaderboard: Leaderboard, comparison: ModelComparison) -> 
     return models
 
 
+def _index_history(leaderboard: Leaderboard) -> list[dict]:
+    """Best-so-far Agent Index across runs over time (a progress trend).
+
+    Runs are ordered by their timestamped ``run_id``; the series is the running
+    maximum Agent Index, so the line shows how benchmarking more models improves
+    the best known agent-quality result.
+    """
+    points: list[dict] = []
+    best = 0.0
+    seen = False
+    for entry in sorted(leaderboard.entries, key=lambda e: e.run_id):
+        idx = _agent_index_for(
+            entry.pack_scores,
+            entry.benchmark_suite_general_score,
+            entry.benchmark_suite_agentic_score,
+        )
+        if idx is None:
+            continue
+        seen = True
+        best = max(best, idx)
+        points.append({"label": entry.run_id, "index": best})
+    return points if seen else []
+
+
 def _chart_card(title: str, description: str, chart_html: str, *, wide: bool = False) -> str:
     cls = "chart-card wide" if wide else "chart-card"
     return (
@@ -679,7 +703,7 @@ def _kpi_strip(models: list[dict], leaderboard: Leaderboard) -> str:
     return f'<section class="kpis">{items}</section>'
 
 
-def _charts_section(models: list[dict], pack_ids: list[str]) -> str:
+def _charts_section(models: list[dict], pack_ids: list[str], history: list[dict]) -> str:
     blocks: list[str] = []
     frontier = charts.quality_vs_speed_config(models)
     if frontier["data"]["datasets"][0]["data"]:
@@ -728,6 +752,16 @@ def _charts_section(models: list[dict], pack_ids: list[str]) -> str:
                 charts.render_chart("c-eff", efficiency, height=height),
             )
         )
+    trend = charts.index_trend_config(history)
+    if trend is not None:
+        blocks.append(
+            _chart_card(
+                "Agent Index over time",
+                "Best agent-quality result so far, across runs as they accumulate.",
+                charts.render_chart("c-trend", trend, height=300),
+                wide=True,
+            )
+        )
     if not blocks:
         return ""
     return (
@@ -742,7 +776,9 @@ def _leaderboard_html(leaderboard: Leaderboard) -> str:
     pack_ids = _ordered_pack_ids(model_comparison)
     dashboard_models = _dashboard_models(leaderboard, model_comparison)
     kpi_strip = _kpi_strip(dashboard_models, leaderboard)
-    charts_section = _charts_section(dashboard_models, pack_ids)
+    charts_section = _charts_section(
+        dashboard_models, pack_ids, _index_history(leaderboard)
+    )
     chart_runtime = charts.chartjs_runtime() if charts_section else ""
     rows = "\n".join(
         _html_row(rank, entry) for rank, entry in enumerate(leaderboard.entries, start=1)
