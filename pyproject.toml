@@ -62,6 +62,8 @@ pythonpath = ["src"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gguf_limit_bench"]
+# Vendored Chart.js (MIT) is inlined into the generated results pages; ship it.
+artifacts = ["src/gguf_limit_bench/assets/*.js"]
 
 [tool.ruff]
 line-length = 100

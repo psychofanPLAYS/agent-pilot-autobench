@@ -445,6 +445,45 @@ def test_results_html_renders_agent_quality_matrix(tmp_path):
     assert "90%" in markdown
 
 
+def test_results_html_includes_interactive_charts(tmp_path):
+    run = _write_run(
+        tmp_path,
+        "librarian-model",
+        50.0,
+        40.0,
+        context=32768,
+        benchmark_suite_general_score=0.8,
+        benchmark_suite_agentic_score=0.7,
+    )
+    (run / "results.json").write_text(
+        json.dumps(
+            {
+                "packs": [
+                    {"pack_id": "librarian-gate", "status": "scored", "accuracy": 1.0},
+                    {"pack_id": "librarian-triage", "status": "scored", "accuracy": 0.8},
+                    {"pack_id": "librarian-rerank", "status": "scored", "accuracy": 0.6},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run / "metrics.json").write_text(
+        json.dumps({"efficiency": {"peak_vram_gb": 6.0}}), encoding="utf-8"
+    )
+
+    write_leaderboard(tmp_path)
+    html = (tmp_path / "results.html").read_text(encoding="utf-8")
+
+    # Inlined Chart.js runtime + the helper that draws each canvas.
+    assert "Chart.js v4" in html
+    assert "renderChart(" in html
+    # The signature frontier scatter, ranking, radar, and efficiency canvases.
+    for canvas_id in ("c-frontier", "c-index", "c-radar", "c-eff"):
+        assert f'id="{canvas_id}"' in html
+    # KPI strip with the standardized Agent Index headline.
+    assert "Agent Index" in html
+
+
 def test_librarian_suite_summary_is_used_when_results_json_missing(tmp_path):
     run = _write_run(tmp_path, "suite-model", 50.0, 40.0, context=32768)
     (run / "librarian-suite-summary.json").write_text(
