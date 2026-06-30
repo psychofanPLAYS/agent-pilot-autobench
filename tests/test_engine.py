@@ -72,6 +72,44 @@ def test_engine_emits_model_lifecycle_events(tmp_path):
     assert "model_finished" in live
 
 
+def test_engine_appends_running_score_as_questions_land(tmp_path):
+    import json
+
+    _spec(tmp_path, ["a"])
+
+    def fake_run(model, options, emit):
+        emit("question_scored", {"q_id": "q1", "correct": True})
+        emit("question_scored", {"q_id": "q2", "correct": False})
+        return tmp_path
+
+    engine.run_engine(tmp_path, fake_run)
+
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / run_dir.LIVE_FILE).read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    running = [r for r in rows if r["type"] == "running_score"]
+    assert running[-1]["data"] == {"answered": 2, "correct": 1, "quality_0_100": 50.0}
+
+
+def test_engine_installs_event_sink_for_pure_emit(tmp_path):
+    from gguf_limit_bench import events
+
+    _spec(tmp_path, ["a"])
+
+    def fake_run(model, options, emit):
+        # pure evaluation code (e.g. pack_runner) emits via the contextvar sink,
+        # NOT the emit param; the engine must route it to live.jsonl
+        events.emit("question_started", {"q_id": "q9"})
+        return tmp_path
+
+    engine.run_engine(tmp_path, fake_run)
+
+    live = (tmp_path / run_dir.LIVE_FILE).read_text(encoding="utf-8")
+    assert "question_started" in live and "q9" in live
+
+
 def test_engine_releases_lock(tmp_path):
     _spec(tmp_path, ["a"])
     engine.run_engine(tmp_path, lambda m, o, e: tmp_path)

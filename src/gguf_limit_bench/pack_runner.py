@@ -23,6 +23,7 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from gguf_limit_bench.answer_scoring import extract_answer, score_answer
+from gguf_limit_bench.events import emit
 from gguf_limit_bench.packs import PackQuestion, QuestionPack
 from gguf_limit_bench.server_probe import iter_llama_completion_stream_events
 from gguf_limit_bench.simple_bench import (
@@ -32,6 +33,10 @@ from gguf_limit_bench.simple_bench import (
 
 _FORCED_FINAL_INSTRUCTION = "Reply with ONLY your final answer in the form 'Final Answer: X'."
 _FORCED_FINAL_MAX_TOKENS = 64
+
+# Live question_progress snapshots are throttled so live.jsonl never gets a write
+# per streamed token; the polling cockpit only needs a fresh snapshot every so often.
+_PROGRESS_THROTTLE_SECONDS = 0.4
 
 # 0 (or any value <= 0) means "do not cap the answer" — let a reasoning model
 # think for as long as it needs and stop on its own. The per-request timeout is
@@ -73,16 +78,43 @@ def run_pack_questions(
         Per-request HTTP timeout.
     """
     results: list[SimpleBenchQuestionResult] = []
+    total = len(questions)
 
-    for question in questions:
+    for index, question in enumerate(questions, start=1):
+        emit(
+            "question_started",
+            {
+                "q_id": question.question_id,
+                "index": index,
+                "total": total,
+                "pack": pack.pack_id,
+                "prompt": question.prompt,
+            },
+        )
         result = _run_one_question(
             pack=pack,
             question=question,
             answer_max_tokens=answer_max_tokens,
             base_url=base_url,
             timeout_seconds=timeout_seconds,
+            q_id=question.question_id,
         )
         results.append(result)
+        emit(
+            "question_scored",
+            {
+                "q_id": question.question_id,
+                "index": index,
+                "total": total,
+                "expected": result.expected_answer,
+                "predicted": result.predicted_answer,
+                "correct": result.correct,
+                "outcome": result.outcome,
+                "score": 1.0 if result.correct else 0.0,
+                "ttft_ms": result.ttft_ms,
+                "tok_s": result.tokens_per_second,
+            },
+        )
 
     return _aggregate(results)
 
@@ -99,6 +131,7 @@ def _run_one_question(
     answer_max_tokens: int,
     base_url: str,
     timeout_seconds: int,
+    q_id: str | None = None,
 ) -> SimpleBenchQuestionResult:
     """Run a single question with at most one forced-final follow-up."""
     system_prompt = pack.system_prompt
@@ -111,6 +144,7 @@ def _run_one_question(
         user_content=question.prompt,
         max_tokens=answer_max_tokens,
         timeout_seconds=timeout_seconds,
+        q_id=q_id,
     )
 
     extracted = extract_answer(primary_text, answer_type)
@@ -167,6 +201,7 @@ def _chat(
     user_content: str,
     max_tokens: int,
     timeout_seconds: int,
+    q_id: str | None = None,
 ) -> tuple[str, float | None, float, float, int]:
     """Send a single chat completion request and return
     ``(response_text, ttft_ms, tps, prompt_tps, generated_tokens)``.
@@ -197,11 +232,22 @@ def _chat(
     started = time.perf_counter()
     first_token_at: float | None = None
     content_parts: list[str] = []
+    thinking_parts: list[str] = []
+    answer_parts: list[str] = []
+    last_progress_at = 0.0
     generated_tokens = 0
     fallback_chunks = 0
     server_tps: float | None = None
     server_prompt_tps: float | None = None
     usage_tokens: int | None = None
+
+    def _emit_progress() -> None:
+        if q_id is None:
+            return
+        emit(
+            "question_progress",
+            {"q_id": q_id, "thinking": "".join(thinking_parts), "answer": "".join(answer_parts)},
+        )
 
     try:
         with urlopen(request, timeout=timeout_seconds) as response:
@@ -220,8 +266,12 @@ def _chat(
                     delta = choice.get("delta", {})
                     for field in ("reasoning_content", "content"):
                         value = delta.get(field, "")
-                        if isinstance(value, str):
+                        if isinstance(value, str) and value:
                             parts_this_event.append(value)
+                            if field == "reasoning_content":
+                                thinking_parts.append(value)
+                            else:
+                                answer_parts.append(value)
                 chunk = "".join(parts_this_event)
                 # Count tokens via the tokens list if available, else 0
                 token_count = _event_token_count(event)
@@ -233,10 +283,14 @@ def _chat(
                 generated_tokens += token_count
                 fallback_chunks += 1
                 content_parts.append(chunk)
+                if q_id is not None and (now - last_progress_at) >= _PROGRESS_THROTTLE_SECONDS:
+                    _emit_progress()
+                    last_progress_at = now
     except (OSError, URLError):
         return "", None, 0.0, 0.0, 0
 
     finished = time.perf_counter()
+    _emit_progress()  # final snapshot with the complete thinking + answer
     response_text = "".join(content_parts)
 
     if first_token_at is None:

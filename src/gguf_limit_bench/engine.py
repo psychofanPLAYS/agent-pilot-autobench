@@ -18,7 +18,7 @@ import os
 from pathlib import Path
 from typing import Callable, Protocol
 
-from gguf_limit_bench import run_dir
+from gguf_limit_bench import events, run_dir
 
 
 class EventSink(Protocol):
@@ -46,8 +46,21 @@ def run_engine(run_dir_path: Path, run_model: RunModel) -> None:
     options = dict(spec.get("options", {}))
     pid = os.getpid()
 
+    tally = {"answered": 0, "correct": 0}
+
     def emit(event_type: str, data: dict) -> None:
         run_dir.append_event(run_dir_path, event_type, data)
+        if event_type == "question_scored":
+            tally["answered"] += 1
+            if data.get("correct"):
+                tally["correct"] += 1
+            answered = tally["answered"]
+            quality = round(100.0 * tally["correct"] / answered, 1) if answered else 0.0
+            run_dir.append_event(
+                run_dir_path,
+                "running_score",
+                {"answered": answered, "correct": tally["correct"], "quality_0_100": quality},
+            )
 
     run_dir.acquire_lock(run_dir_path, pid)
     run_dir.write_status(
@@ -55,6 +68,7 @@ def run_engine(run_dir_path: Path, run_model: RunModel) -> None:
     )
     stopped = False
     try:
+      with events.set_event_sink(emit):
         for index, model in enumerate(models, start=1):
             label = _model_label(model)
             if run_dir.read_control(run_dir_path)["action"] in _STOP_ACTIONS:
