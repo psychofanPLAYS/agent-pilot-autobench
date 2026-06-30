@@ -17,6 +17,7 @@ from gguf_limit_bench.server_probe import (
     _wait_until_ready,
     build_llama_server_command,
     iter_llama_completion_stream_events,
+    process_group_kwargs,
 )
 from gguf_limit_bench.simple_bench import (
     DEFAULT_SIMPLE_BENCH_PATH,
@@ -97,6 +98,7 @@ class LlamaServerSimpleBenchAttemptRunner:
                 stdout=stdout_log,
                 stderr=stderr_log,
                 text=True,
+                **process_group_kwargs(),
             )
         except OSError as exc:
             stdout_log.close()

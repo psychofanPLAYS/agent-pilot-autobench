@@ -3,7 +3,9 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field, replace
 import json
+import os
 from pathlib import Path
+import signal
 import socket
 import subprocess
 import time
@@ -161,6 +163,7 @@ def probe_llama_server_ttft(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            **process_group_kwargs(),
         )
     except OSError as exc:
         return ServingProbeResult(
@@ -473,15 +476,53 @@ def _free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-def _stop_process(process: subprocess.Popen) -> None:
+def process_group_kwargs() -> dict:
+    """Popen kwargs that place the child in its own process group / session.
+
+    A llama-server launched this way can be killed as a tree without taking down
+    the parent, and never lingers as an orphan after a hard kill of the engine.
+    """
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def kill_process_tree(process: subprocess.Popen) -> None:
+    """Terminate *process* and every child it spawned. Best-effort, cross-platform.
+
+    On Windows this uses ``taskkill /T /F`` so GPU-holding grandchildren are
+    reaped; on POSIX it signals the whole process group. Safe to call on a
+    process that has already exited (no-op).
+    """
     if process.poll() is not None:
         return
-    process.terminate()
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+        return
     try:
+        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
         process.wait(timeout=10)
+    except (ProcessLookupError, PermissionError):
+        pass
     except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait(timeout=10)
+        try:
+            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            process.wait(timeout=10)
+        except (ProcessLookupError, subprocess.TimeoutExpired):
+            pass
+
+
+def _stop_process(process: subprocess.Popen) -> None:
+    kill_process_tree(process)
 
 
 def _failed_probe(failure: str, detail: str, process: subprocess.Popen) -> ServingProbeResult:

@@ -25,6 +25,7 @@ from gguf_limit_bench.server_probe import (
     _stop_process,
     _wait_until_ready,
     build_llama_server_command,
+    process_group_kwargs,
 )
 
 
@@ -94,6 +95,7 @@ def llama_server_session(
         stdout=stdout_file,
         stderr=stderr_file,
         text=log_dir is not None,
+        **process_group_kwargs(),
     )
     base_url = f"http://{host}:{actual_port}"
     try:
