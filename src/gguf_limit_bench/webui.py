@@ -8,6 +8,8 @@ import json
 import mimetypes
 from pathlib import Path, PurePosixPath
 import socket
+import subprocess
+import sys
 import threading
 from typing import Callable
 from urllib.parse import quote, unquote, urlparse
@@ -29,10 +31,15 @@ from gguf_limit_bench.librarian.registry import LIBRARIAN_PACK_IDS
 from gguf_limit_bench.modes import RUN_MODES
 from gguf_limit_bench.programs import MIN_SERIOUS_CONTEXT_SIZE
 from gguf_limit_bench.reports import write_leaderboard
+from gguf_limit_bench import run_dir as run_dir_io
+from gguf_limit_bench.server_probe import kill_process_tree, process_group_kwargs
 from gguf_limit_bench.telemetry import sample_telemetry
 from gguf_limit_bench.tui import active_run_status
 
-WebRunModelCallback = Callable[[ModelInfo, "WebRunOptions"], Path]
+# Spawns the detached engine for a run directory and returns the process handle.
+SpawnEngine = Callable[[Path], "subprocess.Popen"]
+# A finished phase means a previous run dir is free to be replaced.
+_DONE_PHASES = ("complete", "stopped", "failed", "aborted")
 
 RECENT_RECEIPT_LIMIT = 8
 GLOBAL_REPORTS = (
@@ -99,13 +106,15 @@ class WebUiState:
         *,
         root: Path,
         runs_root: Path,
-        run_model: WebRunModelCallback | None = None,
+        spawn_engine: SpawnEngine | None = None,
         project_root: Path | None = None,
     ) -> None:
         self.root = root
         self.runs_root = runs_root
-        self.run_model = run_model
+        self.spawn_engine = spawn_engine or _default_spawn_engine
         self.project_root = project_root or Path.cwd()
+        self.active_run_dir: Path | None = None
+        self.engine_process: subprocess.Popen | None = None
         self.run = WebRunState()
         self.run_configuration = run_configuration_payload()
         self._lock = threading.Lock()
@@ -123,12 +132,16 @@ class WebUiState:
                 "model": leaderboard.champion.model_name,
                 "score": leaderboard.champion.score,
             }
+        self.reattach()
         with self._lock:
             run_payload = asdict(self.run)
-        if run_payload.get("phase") == "running" and (run_payload.get("options") or {}).get(
-            "stream_prompts", True
-        ):
-            run_payload["events"] = run_payload["events"] + receipt_event_payloads(self.runs_root)
+            active = self.active_run_dir
+        if active is not None:
+            status = run_dir_io.read_status(active)
+            if status:
+                run_payload["phase"] = status.get("phase") or run_payload["phase"]
+                run_payload["message"] = _status_message(status)
+            run_payload["events"] = run_payload["events"] + _tail_live_events(active)
         return {
             "models": [_model_payload(model) for model in models],
             "modes": [_mode_payload(mode) for mode in RUN_MODES],
@@ -162,93 +175,143 @@ class WebUiState:
         except ValueError as exc:
             return False, str(exc)
         with self._lock:
-            if self.run.phase == "running":
+            if self._active_run_is_alive():
                 return False, "A benchmark is already running."
-            plan_label = (
-                f"; suite plan: {options.benchmark_suite_plan.name}"
-                if options.benchmark_suite_plan is not None
-                else ""
-            )
-            events = [
-                _event(
-                    "configure",
-                    f"Mode: {mode_id}; budget: {options.budget_minutes} min/model{plan_label}",
-                ),
-                _event(
-                    "flags",
-                    "Forced llama-server args: "
-                    + (" ".join(options.forced_server_args) or "(none)"),
-                ),
-            ]
+            run_directory = self._new_run_dir()
+            spec = _spec_payload(selected, mode_id, options)
+            run_dir_io.write_spec(run_directory, spec)
+            try:
+                process = self.spawn_engine(run_directory)
+            except Exception as exc:  # noqa: BLE001 - surface launch failure to UI
+                return False, f"Could not start the engine: {exc}"
+            self.active_run_dir = run_directory
+            self.engine_process = process
             self.run = WebRunState(
                 phase="running",
-                message=f"Queued {len(selected)} model(s).",
+                message=f"Engine launched for {len(selected)} model(s).",
                 selected_models=[model.name for model in selected],
                 options=asdict(options),
-                events=events,
+                events=[
+                    _event("configure", f"Mode: {mode_id}; budget: {options.budget_minutes} min/model"),
+                    _event("engine", f"Detached engine started; run dir: {run_directory.name}"),
+                ],
             )
-        thread = threading.Thread(
-            target=self._run_models,
-            args=(selected, options),
-            name="AgentPilot-WebUI-runner",
-            daemon=True,
-        )
-        thread.start()
         return True, "Benchmark started."
 
     def request_stop_after_current(self) -> tuple[bool, str]:
         with self._lock:
-            if self.run.phase != "running":
+            if self.active_run_dir is None:
                 return False, "No active benchmark run can be stopped."
+            run_dir_io.write_control(self.active_run_dir, "stop")
             self.run.stop_requested = True
             self.run.events.append(
                 _event("stop", "Stop requested. The current benchmark item will finish first.")
             )
             return True, "Stop requested after current item."
 
-    def _run_models(self, selected: list[ModelInfo], options: WebRunOptions) -> None:
-        receipts: list[str] = []
-        try:
-            for index, model in enumerate(selected, start=1):
-                with self._lock:
-                    self.run.message = f"Running {index}/{len(selected)}: {model.name}"
-                    self.run.events.append(
-                        _event(
-                            "model",
-                            f"Starting {model.name}; prompt streaming is "
-                            f"{'on' if options.stream_prompts else 'off'}.",
-                        )
-                    )
-                if self.run_model is None:
-                    receipt = self.runs_root / "webui-preview"
-                    receipt.mkdir(parents=True, exist_ok=True)
-                else:
-                    receipt = self.run_model(model, options)
-                receipts.append(str(receipt))
-                with self._lock:
-                    self.run.receipts = receipts[:]
-                    self.run.events.append(
-                        _event("receipt", f"Finished {model.name}; receipt: {receipt}")
-                    )
-                    stop_requested = self.run.stop_requested
-                if stop_requested:
-                    with self._lock:
-                        self.run.phase = "stopping"
-                        self.run.message = "Stopped after the current benchmark item."
-                        self.run.events.append(_event("stop", "Run queue stopped by request."))
-                    break
-            with self._lock:
-                if self.run.phase != "stopping":
-                    self.run.phase = "complete"
-                    self.run.message = "Benchmark complete."
-                    self.run.events.append(_event("complete", "Benchmark queue finished."))
-                self.run.receipts = receipts
-        except Exception as exc:  # noqa: BLE001 - surface background failures to UI
-            with self._lock:
-                self.run.phase = "failed"
-                self.run.error = str(exc)
-                self.run.message = "Benchmark failed."
-                self.run.events.append(_event("error", str(exc)))
+    def request_abort(self) -> tuple[bool, str]:
+        with self._lock:
+            if self.active_run_dir is None:
+                return False, "No active benchmark run can be aborted."
+            run_dir_io.write_control(self.active_run_dir, "abort")
+            if self.engine_process is not None:
+                kill_process_tree(self.engine_process)
+            self.run.stop_requested = True
+            self.run.events.append(_event("abort", "Abort requested. Killing the engine now."))
+            return True, "Run aborted."
+
+    def reattach(self) -> None:
+        """Adopt a live engine run dir if we have none (survives browser refresh)."""
+        with self._lock:
+            if self.active_run_dir is not None:
+                return
+            found = _find_live_run_dir(self.runs_root)
+            if found is not None:
+                self.active_run_dir = found
+                self.run = WebRunState(
+                    phase="running",
+                    message="Reattached to a running engine.",
+                    events=[_event("engine", f"Reattached to run dir: {found.name}")],
+                )
+
+    def _active_run_is_alive(self) -> bool:
+        if self.active_run_dir is None:
+            return False
+        status = run_dir_io.read_status(self.active_run_dir)
+        if not status:
+            return True  # just launched; the engine has not written a heartbeat yet
+        if status.get("phase") in _DONE_PHASES:
+            return False
+        return run_dir_io.engine_is_alive(status, now=datetime.now())
+
+    def _new_run_dir(self) -> Path:
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        run_directory = self.runs_root / f"{stamp}-cockpit"
+        run_directory.mkdir(parents=True, exist_ok=True)
+        return run_directory
+
+
+def _default_spawn_engine(run_directory: Path) -> subprocess.Popen:
+    """Launch the engine as a detached subprocess in its own process group."""
+    return subprocess.Popen(
+        [sys.executable, "-m", "gguf_limit_bench", "engine", "--run-dir", str(run_directory)],
+        **process_group_kwargs(),
+    )
+
+
+def _spec_payload(selected: list[ModelInfo], mode_id: str, options: "WebRunOptions") -> dict:
+    plan = options.benchmark_suite_plan
+    return {
+        "models": [
+            {"path": str(model.path), "has_mtp": bool(model.has_mtp)} for model in selected
+        ],
+        "mode": mode_id,
+        "options": {
+            "budget_minutes": options.budget_minutes,
+            "forced_server_args": list(options.forced_server_args),
+            "benchmark_suite_plan": str(plan) if plan is not None else None,
+            "show_thinking": options.show_thinking,
+            "stream_prompts": options.stream_prompts,
+        },
+    }
+
+
+def _tail_live_events(run_directory: Path, *, limit: int = 80) -> list[dict]:
+    path = run_directory / run_dir_io.LIVE_FILE
+    if not path.is_file():
+        return []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()[-limit:]
+    except OSError:
+        return []
+    return [_receipt_event_payload(line) for line in lines if line.strip()]
+
+
+def _status_message(status: dict) -> str:
+    phase = status.get("phase", "running")
+    model = status.get("model")
+    index = status.get("model_index")
+    total = status.get("model_total")
+    if model and index and total:
+        return f"{phase}: {index}/{total} {model}"
+    return str(phase)
+
+
+def _find_live_run_dir(runs_root: Path) -> Path | None:
+    if not runs_root.exists():
+        return None
+    candidates = [
+        path
+        for path in runs_root.iterdir()
+        if path.is_dir() and (path / run_dir_io.STATUS_FILE).is_file()
+    ]
+    for candidate in sorted(candidates, key=_safe_mtime, reverse=True):
+        status = run_dir_io.read_status(candidate)
+        if status.get("phase") in _DONE_PHASES:
+            continue
+        if run_dir_io.engine_is_alive(status, now=datetime.now()):
+            return candidate
+    return None
 
 
 def validate_web_selection(selected: list[ModelInfo], mode_id: str) -> str | None:
@@ -375,6 +438,11 @@ def create_web_app(state: WebUiState) -> FastAPI:
         ok, message = state.request_stop_after_current()
         return JSONResponse({"ok": ok, "message": message}, 200 if ok else 400)
 
+    @app.post("/api/abort")
+    async def api_abort() -> JSONResponse:
+        ok, message = state.request_abort()
+        return JSONResponse({"ok": ok, "message": message}, 200 if ok else 400)
+
     @app.get("/runs/{encoded_relative_path:path}")
     async def run_artifact(encoded_relative_path: str) -> Response:
         artifact = resolve_run_artifact(state.runs_root, encoded_relative_path)
@@ -434,6 +502,9 @@ async def handle_websocket_command(state: WebUiState, message: object) -> dict |
     if message_type == "stop_after_current":
         ok, response_message = state.request_stop_after_current()
         return {"type": "stop_after_current", "ok": ok, "message": response_message}
+    if message_type == "abort":
+        ok, response_message = state.request_abort()
+        return {"type": "abort", "ok": ok, "message": response_message}
     return websocket_error(f"Unknown WebSocket message type: {message_type}")
 
 
@@ -441,13 +512,12 @@ def serve_webui(
     *,
     root: Path,
     runs_root: Path,
-    run_model: WebRunModelCallback | None,
     host: str = "127.0.0.1",
     port: int = 0,
     open_browser: bool = True,
 ) -> str:
     resolved_port = port if port != 0 else _free_local_port(host)
-    state = WebUiState(root=root, runs_root=runs_root, run_model=run_model)
+    state = WebUiState(root=root, runs_root=runs_root)
     app = create_web_app(state)
     config = uvicorn.Config(app, host=host, port=resolved_port, log_level="warning")
     server = uvicorn.Server(config)

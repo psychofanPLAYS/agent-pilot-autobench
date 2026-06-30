@@ -438,42 +438,10 @@ def _start_app(
         console.print("Remove --check-only to open the picker.")
         return
     console.print("Opening the browser cockpit.")
-    run_config = _run_config_from_inputs(
-        preset=preset, budget_minutes=budget_minutes, max_attempts=max_attempts
-    )
-    serve_webui(
-        root=root,
-        runs_root=runs_root,
-        run_model=lambda model, options: (
-            _run_one_autoresearch(
-                model=model.path,
-                llama_bench=llama_bench,
-                llama_cli=llama_cli,
-                llama_server=llama_server,
-                llama_perplexity=llama_perplexity,
-                runs_root=runs_root,
-                budget_seconds=options.budget_minutes * 60,
-                parallel_max=parallel_max,
-                max_attempts=run_config.max_attempts,
-                learning=learning,
-                workflow_eval=workflow_eval,
-                ttft_probe=ttft_probe,
-                context_ladder=_context_ladder_or_none(context_ladder)
-                or _context_ladder_or_none(mode_by_id(options.mode_id).context_ladder)
-                or _context_ladder_or_none(run_config.context_ladder),
-                benchmark_suite_plan=options.benchmark_suite_plan or benchmark_suite_plan,
-                enable_mtp=model.has_mtp,
-                evaluation=mode_by_id(options.mode_id).evaluation,
-                forced_server_args=merge_flags(
-                    options.forced_server_args,
-                    recommended_model_flags(model.path, search_roots=(root,)),
-                ),
-                champion_pack_ids=tuple(LIBRARIAN_PACK_IDS)
-                if options.mode_id == "librarian_bench"
-                else None,
-            ).path
-        ),
-    )
+    # The web server is a thin client: it only passes instructions to a detached
+    # engine process (spawned per run) and renders the run directory. All
+    # evaluation logic lives in the `engine` command's run_model.
+    serve_webui(root=root, runs_root=runs_root)
 
 
 @app.command()
@@ -1689,12 +1657,25 @@ def engine(
         except (ValueError, OSError):
             pass
 
-    def run_model(model_str: str, options: dict, emit) -> object:
+    model_root = paths.model_roots[0] if paths.model_roots else Path.cwd()
+    mode = mode_by_id(mode_id)
+
+    def run_model(model_item: object, options: dict, emit) -> object:
+        if isinstance(model_item, dict):
+            model_path = Path(str(model_item["path"]))
+            has_mtp = bool(model_item.get("has_mtp"))
+        else:
+            model_path = Path(str(model_item))
+            has_mtp = False
         budget_minutes = int(options.get("budget_minutes") or 5)
-        forced = tuple(str(arg) for arg in options.get("forced_server_args", ()))
         plan = options.get("benchmark_suite_plan") or None
+        try:
+            model_flags = recommended_model_flags(model_path, search_roots=(model_root,))
+        except Exception:  # noqa: BLE001 - missing/unreadable model: fall back to none
+            model_flags = ()
+        forced = merge_flags(tuple(options.get("forced_server_args", ())), model_flags)
         receipt = _run_one_autoresearch(
-            model=Path(model_str),
+            model=model_path,
             llama_bench=paths.llama_bench,
             llama_cli=paths.llama_cli,
             llama_server=paths.llama_server,
@@ -1706,13 +1687,16 @@ def engine(
             learning=bench.learning,
             workflow_eval=bench.workflow_eval,
             ttft_probe=bench.ttft_probe,
+            context_ladder=_context_ladder_or_none(mode.context_ladder),
             benchmark_suite_plan=Path(plan) if plan else None,
+            enable_mtp=has_mtp,
+            evaluation=mode.evaluation,
             forced_server_args=forced,
             champion_pack_ids=(
                 tuple(LIBRARIAN_PACK_IDS) if mode_id == "librarian_bench" else None
             ),
         )
-        emit("receipt_ready", {"model": model_str, "path": str(receipt.path)})
+        emit("receipt_ready", {"model": str(model_path), "path": str(receipt.path)})
         return receipt
 
     engine_runner.run_engine(rd, run_model)

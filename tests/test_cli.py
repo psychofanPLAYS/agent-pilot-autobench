@@ -16,7 +16,6 @@ from gguf_limit_bench.config import (
 from gguf_limit_bench.discovery import ModelInfo
 from gguf_limit_bench.doctor import DoctorCheck, DoctorReport
 from gguf_limit_bench.programs import MIN_SERIOUS_CONTEXT_SIZE
-from gguf_limit_bench.webui import WebRunOptions
 
 
 runner = CliRunner()
@@ -590,42 +589,28 @@ def test_start_command_opens_webui_after_ready_check(tmp_path, monkeypatch):
     assert "Opening the browser cockpit" in result.output
 
 
-def test_start_command_webui_callback_runs_librarian_pack_models(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        "gguf_limit_bench.cli.build_doctor_report",
-        lambda **kwargs: DoctorReport(
-            checks=[
-                DoctorCheck(
-                    name="model root",
-                    status="ok",
-                    path=str(tmp_path),
-                    detail="directory exists",
-                )
-            ]
-        ),
-    )
-    selected = ModelInfo(
-        path=tmp_path / "Qwen3.6-35B-A3B-MTP-Q4_K_M.gguf",
-        name="Qwen3.6-35B-A3B-MTP-Q4_K_M.gguf",
-        family="qwen",
-        parameters="35B-A3B",
-        has_mtp=True,
-    )
+def test_engine_command_wires_librarian_packs_mtp_budget_and_plan(tmp_path, monkeypatch):
+    # The per-model evaluation logic that used to live in the web run_model
+    # callback now lives in the detached `engine` command. The web side is thin.
+    from gguf_limit_bench import run_dir
+
+    rd = tmp_path / "run"
+    rd.mkdir()
+    model_path = tmp_path / "Qwen3.6-35B-A3B-MTP-Q4_K_M.gguf"
     plan_path = tmp_path / "suite.plan.json"
-    web_plan_path = tmp_path / "web-selected.plan.json"
-    plan_path.write_text(
-        json.dumps(
-            {
-                "model": "local-model",
-                "tasks": [
-                    {"id": "general", "phase": "general", "command": [sys.executable, "-V"]},
-                    {"id": "agentic", "phase": "agentic", "command": [sys.executable, "-V"]},
-                ],
-            }
-        ),
-        encoding="utf-8",
+    plan_path.write_text("{}", encoding="utf-8")
+    run_dir.write_spec(
+        rd,
+        {
+            "models": [{"path": str(model_path), "has_mtp": True}],
+            "mode": "librarian_bench",
+            "options": {
+                "budget_minutes": 7,
+                "forced_server_args": ["--jinja"],
+                "benchmark_suite_plan": str(plan_path),
+            },
+        },
     )
-    web_plan_path.write_text(plan_path.read_text(encoding="utf-8"), encoding="utf-8")
     runs: list[dict] = []
 
     def fake_run_one_autoresearch(**kwargs):
@@ -634,94 +619,17 @@ def test_start_command_webui_callback_runs_librarian_pack_models(tmp_path, monke
         receipt.mkdir(parents=True, exist_ok=True)
         return type("Receipt", (), {"path": receipt})()
 
-    def fake_serve_webui(**kwargs) -> str:
-        receipt = kwargs["run_model"](
-            selected,
-            WebRunOptions(
-                mode_id="librarian_bench",
-                budget_minutes=7,
-                forced_server_args=("--jinja",),
-                benchmark_suite_plan=web_plan_path,
-            ),
-        )
-        assert receipt == tmp_path / "runs" / "fake"
-        kwargs["run_model"](
-            selected,
-            WebRunOptions(
-                mode_id="librarian_bench",
-                budget_minutes=7,
-                forced_server_args=("--jinja",),
-            ),
-        )
-        return "http://127.0.0.1:9999/"
-
-    monkeypatch.setattr("gguf_limit_bench.cli.serve_webui", fake_serve_webui)
     monkeypatch.setattr("gguf_limit_bench.cli._run_one_autoresearch", fake_run_one_autoresearch)
 
-    result = runner.invoke(
-        app,
-        [
-            "start",
-            "--root",
-            str(tmp_path),
-            "--runs-root",
-            str(tmp_path / "runs"),
-            "--budget-minutes",
-            "1",
-            "--max-attempts",
-            "1",
-            "--benchmark-suite-plan",
-            str(plan_path),
-        ],
-    )
+    result = runner.invoke(app, ["engine", "--run-dir", str(rd)])
 
-    assert result.exit_code == 0
-    assert runs[0]["model"] == selected.path
+    assert result.exit_code == 0, result.output
+    assert runs[0]["model"] == model_path
     assert runs[0]["enable_mtp"] is True
-    assert runs[0]["benchmark_suite_plan"] == web_plan_path
-    assert runs[1]["benchmark_suite_plan"] == plan_path
     assert runs[0]["budget_seconds"] == 7 * 60
-    assert runs[0]["forced_server_args"] == ("--jinja",)
+    assert "--jinja" in runs[0]["forced_server_args"]
+    assert runs[0]["benchmark_suite_plan"] == plan_path
     assert "librarian-gate" in runs[0]["champion_pack_ids"]
-
-
-def test_start_command_uses_preset_budget_when_budget_not_overridden(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        "gguf_limit_bench.cli.build_doctor_report",
-        lambda **kwargs: DoctorReport(
-            checks=[
-                DoctorCheck(
-                    name="model root",
-                    status="ok",
-                    path=str(tmp_path),
-                    detail="directory exists",
-                )
-            ]
-        ),
-    )
-    selected = ModelInfo(path=tmp_path / "Qwen3.gguf", name="Qwen3.gguf", family="qwen")
-    runs: list[dict] = []
-
-    def fake_run_one_autoresearch(**kwargs):
-        runs.append(kwargs)
-        receipt = tmp_path / "runs" / "fake"
-        receipt.mkdir(parents=True)
-        return type("Receipt", (), {"path": receipt})()
-
-    def fake_serve_webui(**kwargs) -> str:
-        kwargs["run_model"](
-            selected,
-            WebRunOptions(mode_id="deep", budget_minutes=60, forced_server_args=()),
-        )
-        return "http://127.0.0.1:9999/"
-
-    monkeypatch.setattr("gguf_limit_bench.cli.serve_webui", fake_serve_webui)
-    monkeypatch.setattr("gguf_limit_bench.cli._run_one_autoresearch", fake_run_one_autoresearch)
-
-    result = runner.invoke(app, ["start", "--root", str(tmp_path), "--preset", "deep"])
-
-    assert result.exit_code == 0
-    assert runs[0]["budget_seconds"] == 60 * 60
 
 
 def test_start_command_exits_when_required_check_is_missing(tmp_path, monkeypatch):

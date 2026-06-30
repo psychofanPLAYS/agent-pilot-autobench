@@ -4,14 +4,14 @@ import http.client
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 import threading
-import time
 
 from fastapi.testclient import TestClient
 
+from gguf_limit_bench import run_dir
 from gguf_limit_bench.discovery import ModelInfo
 from gguf_limit_bench.librarian.registry import LIBRARIAN_PACK_IDS
+from gguf_limit_bench import webui
 from gguf_limit_bench.webui import (
-    WebRunOptions,
     WebUiState,
     _handler_for,
     build_run_options,
@@ -22,6 +22,24 @@ from gguf_limit_bench.webui import (
     serve_webui,
     validate_web_selection,
 )
+
+
+class _FakeProc:
+    """Stand-in for a detached engine subprocess in tests (never really runs)."""
+
+    pid = 4242
+
+    def poll(self):
+        return None
+
+
+def _fake_spawn_factory(recorder=None):
+    def _spawn(run_dir_path):
+        if recorder is not None:
+            recorder.append(run_dir_path)
+        return _FakeProc()
+
+    return _spawn
 
 
 def test_webui_state_lists_models_modes_and_librarian_packs(tmp_path):
@@ -54,7 +72,7 @@ def test_librarian_web_selection_accepts_any_models():
     assert validate_web_selection([], "librarian_bench") is not None
 
 
-def test_webui_start_run_calls_backend_for_selected_models(tmp_path):
+def test_webui_start_run_writes_spec_and_spawns_engine(tmp_path):
     plans_root = tmp_path / "benchmarks" / "plans"
     plans_root.mkdir(parents=True)
     plan_path = plans_root / "wiki-librarian-gemma3-27b-direct.plan.json"
@@ -65,18 +83,12 @@ def test_webui_start_run_calls_backend_for_selected_models(tmp_path):
     qwen_path = model_root / "Qwen3.6-35B-A3B-Q4_K_M.gguf"
     gemma_path.write_bytes(b"1" * 20)
     qwen_path.write_bytes(b"1" * 30)
-    calls: list[tuple[str, WebRunOptions]] = []
 
-    def fake_run_model(model: ModelInfo, options: WebRunOptions):
-        calls.append((model.name, options))
-        receipt = tmp_path / "_runs" / model.name
-        receipt.mkdir(parents=True)
-        return receipt
-
+    spawned: list = []
     state = WebUiState(
         root=model_root,
         runs_root=tmp_path / "_runs",
-        run_model=fake_run_model,
+        spawn_engine=_fake_spawn_factory(spawned),
         project_root=tmp_path,
     )
 
@@ -92,17 +104,117 @@ def test_webui_start_run_calls_backend_for_selected_models(tmp_path):
     )
 
     assert ok is True, message
-    deadline = time.time() + 2
-    while time.time() < deadline and len(calls) < 2:
-        time.sleep(0.02)
-    assert sorted((name, options.mode_id, options.budget_minutes) for name, options in calls) == [
-        ("Gemma-3-27B-Q4_K_M.gguf", "librarian_bench", 7),
-        ("Qwen3.6-35B-A3B-Q4_K_M.gguf", "librarian_bench", 7),
-    ]
-    assert calls[0][1].forced_server_args == ("--flash-attn", "on", "--jinja")
-    assert {options.benchmark_suite_plan for _name, options in calls} == {plan_path.resolve()}
-    assert state.run.phase == "complete"
-    assert any(event.kind == "receipt" for event in state.run.events)
+    # the engine is launched exactly once and owns the sequential queue itself
+    assert len(spawned) == 1
+    assert state.active_run_dir == spawned[0]
+    spec = run_dir.read_spec(spawned[0])
+    assert spec["mode"] == "librarian_bench"
+    assert spec["options"]["budget_minutes"] == 7
+    assert spec["options"]["forced_server_args"] == ["--flash-attn", "on", "--jinja"]
+    assert spec["options"]["benchmark_suite_plan"] == str(plan_path.resolve())
+    assert [m["path"] for m in spec["models"]] == [str(gemma_path), str(qwen_path)]
+    assert state.run.phase == "running"
+
+
+def test_webui_start_run_rejects_when_engine_already_running(tmp_path):
+    model_root = tmp_path / "models"
+    model_root.mkdir()
+    model_path = model_root / "Qwen3.6-35B-A3B-Q4_K_M.gguf"
+    model_path.write_bytes(b"1" * 30)
+    state = WebUiState(
+        root=model_root,
+        runs_root=tmp_path / "_runs",
+        spawn_engine=_fake_spawn_factory(),
+        project_root=tmp_path,
+    )
+
+    ok, _ = state.start_run([str(model_path)], "librarian_bench", {"budget_minutes": 1})
+    assert ok is True
+
+    ok2, message = state.start_run([str(model_path)], "librarian_bench", {"budget_minutes": 1})
+    assert ok2 is False
+    assert "already running" in message
+
+
+def test_webui_start_run_allows_new_run_after_previous_completed(tmp_path):
+    model_root = tmp_path / "models"
+    model_root.mkdir()
+    model_path = model_root / "Qwen3.6-35B-A3B-Q4_K_M.gguf"
+    model_path.write_bytes(b"1" * 30)
+    state = WebUiState(
+        root=model_root,
+        runs_root=tmp_path / "_runs",
+        spawn_engine=_fake_spawn_factory(),
+        project_root=tmp_path,
+    )
+    state.start_run([str(model_path)], "librarian_bench", {"budget_minutes": 1})
+    run_dir.write_status(state.active_run_dir, phase="complete")
+
+    ok, message = state.start_run([str(model_path)], "librarian_bench", {"budget_minutes": 1})
+    assert ok is True, message
+
+
+def test_webui_state_payload_reflects_engine_status_and_live_events(tmp_path):
+    model_root = tmp_path / "models"
+    model_root.mkdir()
+    model_path = model_root / "Qwen3.6-35B-A3B-Q4_K_M.gguf"
+    model_path.write_bytes(b"1" * 30)
+    state = WebUiState(
+        root=model_root,
+        runs_root=tmp_path / "_runs",
+        spawn_engine=_fake_spawn_factory(),
+        project_root=tmp_path,
+    )
+    state.start_run([str(model_path)], "librarian_bench", {"budget_minutes": 1})
+    rd = state.active_run_dir
+    run_dir.write_status(rd, phase="running", model="Qwen", model_index=1, model_total=1, pid=7)
+    run_dir.append_event(rd, "question_scored", {"q_id": "q1", "score": 1.0})
+
+    payload = state.state_payload()
+
+    assert payload["run"]["phase"] == "running"
+    assert "question_scored" in [event["kind"] for event in payload["run"]["events"]]
+
+
+def test_webui_reattaches_to_live_engine_run(tmp_path):
+    runs_root = tmp_path / "_runs"
+    rd = runs_root / "20260630-010101-cockpit"
+    rd.mkdir(parents=True)
+    run_dir.write_status(rd, phase="running", pid=7)
+    model_root = tmp_path / "models"
+    model_root.mkdir()
+    state = WebUiState(
+        root=model_root,
+        runs_root=runs_root,
+        spawn_engine=_fake_spawn_factory(),
+        project_root=tmp_path,
+    )
+
+    state.reattach()
+
+    assert state.active_run_dir == rd
+
+
+def test_webui_abort_writes_control_and_kills_engine(tmp_path, monkeypatch):
+    model_root = tmp_path / "models"
+    model_root.mkdir()
+    model_path = model_root / "Qwen3.6-35B-A3B-Q4_K_M.gguf"
+    model_path.write_bytes(b"1" * 30)
+    killed: list = []
+    monkeypatch.setattr(webui, "kill_process_tree", lambda proc: killed.append(proc))
+    state = WebUiState(
+        root=model_root,
+        runs_root=tmp_path / "_runs",
+        spawn_engine=_fake_spawn_factory(),
+        project_root=tmp_path,
+    )
+    state.start_run([str(model_path)], "librarian_bench", {"budget_minutes": 1})
+
+    ok, _ = state.request_abort()
+
+    assert ok is True
+    assert run_dir.read_control(state.active_run_dir)["action"] == "abort"
+    assert len(killed) == 1
 
 
 def test_webui_rejects_unknown_model_path(tmp_path):
@@ -206,7 +318,7 @@ def test_webui_websocket_sends_hello_and_state(tmp_path):
     assert state_message["payload"]["models"][0]["name"] == "Gemma-3-27B-Q4_K_M.gguf"
 
 
-def test_webui_websocket_start_run_dispatches_backend(tmp_path):
+def test_webui_websocket_start_run_spawns_engine(tmp_path):
     plans_root = tmp_path / "benchmarks" / "plans"
     plans_root.mkdir(parents=True)
     plan_path = plans_root / "wiki-librarian-qwen3-moe-thinking.plan.json"
@@ -217,18 +329,12 @@ def test_webui_websocket_start_run_dispatches_backend(tmp_path):
     qwen_path = model_root / "Qwen3.6-35B-A3B-Q4_K_M.gguf"
     gemma_path.write_bytes(b"1" * 20)
     qwen_path.write_bytes(b"1" * 30)
-    calls: list[tuple[str, WebRunOptions]] = []
-
-    def fake_run_model(model: ModelInfo, options: WebRunOptions):
-        calls.append((model.name, options))
-        receipt = tmp_path / "_runs" / model.name
-        receipt.mkdir(parents=True)
-        return receipt
+    spawned: list = []
 
     state = WebUiState(
         root=model_root,
         runs_root=tmp_path / "_runs",
-        run_model=fake_run_model,
+        spawn_engine=_fake_spawn_factory(spawned),
         project_root=tmp_path,
     )
     client = TestClient(create_web_app(state))
@@ -252,19 +358,29 @@ def test_webui_websocket_start_run_dispatches_backend(tmp_path):
 
     assert reply["type"] == "run_started"
     assert reply["ok"] is True
-    deadline = time.time() + 2
-    while time.time() < deadline and len(calls) < 2:
-        time.sleep(0.02)
-    assert [call[1].budget_minutes for call in calls] == [3, 3]
-    assert [call[1].benchmark_suite_plan for call in calls] == [
-        plan_path.resolve(),
-        plan_path.resolve(),
-    ]
+    assert len(spawned) == 1
+    spec = run_dir.read_spec(spawned[0])
+    assert spec["options"]["budget_minutes"] == 3
+    assert [m["path"] for m in spec["models"]] == [str(gemma_path), str(qwen_path)]
 
 
-def test_webui_websocket_stop_after_current_marks_run_state(tmp_path):
-    state = WebUiState(root=tmp_path / "models", runs_root=tmp_path / "_runs")
-    state.run.phase = "running"
+def _running_state(tmp_path):
+    model_root = tmp_path / "models"
+    model_root.mkdir()
+    model_path = model_root / "Qwen3.6-35B-A3B-Q4_K_M.gguf"
+    model_path.write_bytes(b"1" * 30)
+    state = WebUiState(
+        root=model_root,
+        runs_root=tmp_path / "_runs",
+        spawn_engine=_fake_spawn_factory(),
+        project_root=tmp_path,
+    )
+    state.start_run([str(model_path)], "librarian_bench", {"budget_minutes": 1})
+    return state
+
+
+def test_webui_websocket_stop_after_current_writes_control(tmp_path):
+    state = _running_state(tmp_path)
     client = TestClient(create_web_app(state))
 
     with client.websocket_connect("/ws") as websocket:
@@ -275,21 +391,18 @@ def test_webui_websocket_stop_after_current_marks_run_state(tmp_path):
 
     assert reply["type"] == "stop_after_current"
     assert reply["ok"] is True
-    assert state.run.stop_requested is True
-    assert any(event.kind == "stop" for event in state.run.events)
+    assert run_dir.read_control(state.active_run_dir)["action"] == "stop"
 
 
-def test_webui_http_stop_after_current_marks_run_state(tmp_path):
-    state = WebUiState(root=tmp_path / "models", runs_root=tmp_path / "_runs")
-    state.run.phase = "running"
+def test_webui_http_stop_after_current_writes_control(tmp_path):
+    state = _running_state(tmp_path)
     client = TestClient(create_web_app(state))
 
     response = client.post("/api/stop-after-current")
 
     assert response.status_code == 200
     assert response.json()["ok"] is True
-    assert state.run.stop_requested is True
-    assert any(event.kind == "stop" for event in state.run.events)
+    assert run_dir.read_control(state.active_run_dir)["action"] == "stop"
 
 
 def test_webui_websocket_stop_after_current_rejects_idle_run(tmp_path):
@@ -381,27 +494,6 @@ def test_webui_state_lists_benchmark_suite_plans(tmp_path):
     ]
 
 
-def test_webui_state_tails_receipt_events_while_running(tmp_path):
-    runs_root = tmp_path / "_runs"
-    latest = runs_root / "20260102-new"
-    latest.mkdir(parents=True)
-    (latest / "events.jsonl").write_text(
-        '{"time":"2026-01-02T00:00:00","type":"attempt","data":{"context":8192,"score":1.23}}\n',
-        encoding="utf-8",
-    )
-    state = WebUiState(root=tmp_path / "models", runs_root=runs_root)
-    state.run.phase = "running"
-    state.run.options = {"stream_prompts": True}
-
-    payload = state.state_payload()
-
-    assert payload["run"]["events"][-1] == {
-        "at": "00:00:00",
-        "kind": "attempt",
-        "message": '{"context": 8192, "score": 1.23}',
-    }
-
-
 def test_receipt_event_payloads_tails_latest_receipt(tmp_path):
     runs_root = tmp_path / "_runs"
     older = runs_root / "20260101-old"
@@ -444,7 +536,6 @@ def test_serve_webui_builds_fastapi_app_without_starting_benchmark(tmp_path, mon
     url = serve_webui(
         root=tmp_path / "models",
         runs_root=tmp_path / "_runs",
-        run_model=None,
         host="127.0.0.1",
         port=8765,
         open_browser=True,

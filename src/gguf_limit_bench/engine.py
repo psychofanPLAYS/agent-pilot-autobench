@@ -31,6 +31,13 @@ RunModel = Callable[[str, dict, EventSink], object]
 _STOP_ACTIONS = ("stop", "abort")
 
 
+def _model_label(model: object) -> str:
+    """Human-friendly name for status/events, for str or {path,...} model items."""
+    if isinstance(model, dict):
+        return Path(str(model.get("path", ""))).name or str(model)
+    return str(model)
+
+
 def run_engine(run_dir_path: Path, run_model: RunModel) -> None:
     """Run every model in the spec sequentially, honouring stop/abort control."""
     run_dir_path = Path(run_dir_path)
@@ -49,33 +56,34 @@ def run_engine(run_dir_path: Path, run_model: RunModel) -> None:
     stopped = False
     try:
         for index, model in enumerate(models, start=1):
+            label = _model_label(model)
             if run_dir.read_control(run_dir_path)["action"] in _STOP_ACTIONS:
-                emit("run_stopped", {"reason": "control", "before_model": model})
+                emit("run_stopped", {"reason": "control", "before_model": label})
                 stopped = True
                 break
             run_dir.write_status(
                 run_dir_path,
                 phase="running",
-                model=model,
+                model=label,
                 model_index=index,
                 model_total=len(models),
                 pid=pid,
             )
-            emit("model_started", {"model": model, "index": index, "total": len(models)})
+            emit("model_started", {"model": label, "index": index, "total": len(models)})
             try:
                 run_model(model, options, emit)
             except BaseException as exc:  # noqa: BLE001 - record then re-raise
-                emit("model_failed", {"model": model, "error": str(exc)})
+                emit("model_failed", {"model": label, "error": str(exc)})
                 run_dir.write_status(
                     run_dir_path,
                     phase="failed",
-                    model=model,
+                    model=label,
                     model_index=index,
                     model_total=len(models),
                     pid=pid,
                 )
                 raise
-            emit("model_finished", {"model": model, "index": index})
+            emit("model_finished", {"model": label, "index": index})
 
         final_phase = "stopped" if stopped else "complete"
         run_dir.write_status(
