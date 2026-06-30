@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import json
 import os
+import signal
 import sqlite3
 import time
 from typing import Annotated, Callable, cast
@@ -1639,6 +1640,82 @@ def autoresearch(
         champion_selection=resolved_selection,
     )
     _print_receipt_outputs(receipt.path)
+
+
+@app.command()
+def engine(
+    run_dir: Annotated[
+        Path, typer.Option("--run-dir", help="Run directory holding run-spec.json.")
+    ],
+    llama_bench: Path | None = None,
+    llama_cli: Path | None = None,
+    llama_server: Path | None = None,
+    llama_perplexity: Path | None = None,
+    runs_root: Path | None = None,
+    parallel_max: int | None = None,
+) -> None:
+    """Detached engine: run the models in <run-dir>/run-spec.json sequentially.
+
+    This is the process the web UI launches. It owns the run, writes the live
+    stream + status heartbeat, and obeys control.json (stop/abort). The web UI
+    never evaluates in-process; it only reads this run directory.
+    """
+    from gguf_limit_bench import engine as engine_runner
+    from gguf_limit_bench import run_dir as run_dir_io
+
+    config = with_cli_overrides(
+        load_config(),
+        llama_bench=llama_bench,
+        llama_cli=llama_cli,
+        llama_server=llama_server,
+        llama_perplexity=llama_perplexity,
+        runs_root=runs_root,
+        parallel_max=parallel_max,
+    )
+    paths = config.paths
+    bench = config.benchmark
+    rd = Path(run_dir)
+    spec = run_dir_io.read_spec(rd)
+    mode_id = str(spec.get("mode", "librarian_bench"))
+
+    def _on_signal(signum, frame):  # noqa: ANN001 - stdlib signal handler API
+        run_dir_io.write_status(rd, phase="aborted", pid=os.getpid())
+        run_dir_io.release_lock(rd)
+        raise SystemExit(0)
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(sig, _on_signal)
+        except (ValueError, OSError):
+            pass
+
+    def run_model(model_str: str, options: dict, emit) -> object:
+        budget_minutes = int(options.get("budget_minutes") or 5)
+        forced = tuple(str(arg) for arg in options.get("forced_server_args", ()))
+        plan = options.get("benchmark_suite_plan") or None
+        receipt = _run_one_autoresearch(
+            model=Path(model_str),
+            llama_bench=paths.llama_bench,
+            llama_cli=paths.llama_cli,
+            llama_server=paths.llama_server,
+            llama_perplexity=paths.llama_perplexity,
+            runs_root=paths.runs_root,
+            budget_seconds=budget_minutes * 60,
+            parallel_max=bench.parallel_max,
+            max_attempts=options.get("max_attempts"),
+            learning=bench.learning,
+            workflow_eval=bench.workflow_eval,
+            ttft_probe=bench.ttft_probe,
+            benchmark_suite_plan=Path(plan) if plan else None,
+            forced_server_args=forced,
+            champion_pack_ids=(
+                tuple(LIBRARIAN_PACK_IDS) if mode_id == "librarian_bench" else None
+            ),
+        )
+        emit("receipt_ready", {"model": model_str, "path": str(receipt.path)})
+        return receipt
+
+    engine_runner.run_engine(rd, run_model)
 
 
 @app.command("autoresearch-all")
