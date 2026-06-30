@@ -441,7 +441,14 @@ def _start_app(
     # The web server is a thin client: it only passes instructions to a detached
     # engine process (spawned per run) and renders the run directory. All
     # evaluation logic lives in the `engine` command's run_model.
-    serve_webui(root=root, runs_root=runs_root)
+    serve_webui(
+        root=root,
+        runs_root=runs_root,
+        llama_server=llama_server,
+        llama_bench=llama_bench,
+        llama_cli=llama_cli,
+        llama_perplexity=llama_perplexity,
+    )
 
 
 @app.command()
@@ -1631,19 +1638,27 @@ def engine(
     from gguf_limit_bench import engine as engine_runner
     from gguf_limit_bench import run_dir as run_dir_io
 
+    rd = Path(run_dir)
+    spec = run_dir_io.read_spec(rd)
+    # The web UI carries the resolved llama.cpp paths through run-spec.json so the
+    # detached engine can find the real binaries. Explicit --llama-* flags on this
+    # command still win; otherwise a non-null spec path overrides the config default.
+    spec_paths = spec.get("paths") or {}
+
+    def _spec_path(value: object) -> Path | None:
+        return Path(str(value)) if value else None
+
     config = with_cli_overrides(
         load_config(),
-        llama_bench=llama_bench,
-        llama_cli=llama_cli,
-        llama_server=llama_server,
-        llama_perplexity=llama_perplexity,
-        runs_root=runs_root,
+        llama_bench=llama_bench or _spec_path(spec_paths.get("llama_bench")),
+        llama_cli=llama_cli or _spec_path(spec_paths.get("llama_cli")),
+        llama_server=llama_server or _spec_path(spec_paths.get("llama_server")),
+        llama_perplexity=llama_perplexity or _spec_path(spec_paths.get("llama_perplexity")),
+        runs_root=runs_root or _spec_path(spec_paths.get("runs_root")),
         parallel_max=parallel_max,
     )
     paths = config.paths
     bench = config.benchmark
-    rd = Path(run_dir)
-    spec = run_dir_io.read_spec(rd)
     mode_id = str(spec.get("mode", "librarian_bench"))
 
     def _on_signal(signum, frame):  # noqa: ANN001 - stdlib signal handler API

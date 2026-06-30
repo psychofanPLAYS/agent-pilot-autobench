@@ -108,11 +108,25 @@ class WebUiState:
         runs_root: Path,
         spawn_engine: SpawnEngine | None = None,
         project_root: Path | None = None,
+        llama_server: Path | None = None,
+        llama_bench: Path | None = None,
+        llama_cli: Path | None = None,
+        llama_perplexity: Path | None = None,
     ) -> None:
         self.root = root
         self.runs_root = runs_root
         self.spawn_engine = spawn_engine or _default_spawn_engine
         self.project_root = project_root or Path.cwd()
+        # Resolved llama.cpp paths the engine should prefer over its own config.
+        # Carried through run-spec.json so the detached engine can find the real
+        # binaries (a cockpit launch knows them; the engine's config may not).
+        self.llama_paths = {
+            "llama_server": str(llama_server) if llama_server else None,
+            "llama_bench": str(llama_bench) if llama_bench else None,
+            "llama_cli": str(llama_cli) if llama_cli else None,
+            "llama_perplexity": str(llama_perplexity) if llama_perplexity else None,
+            "runs_root": str(self.runs_root),
+        }
         self.active_run_dir: Path | None = None
         self.engine_process: subprocess.Popen | None = None
         self.run = WebRunState()
@@ -178,7 +192,7 @@ class WebUiState:
             if self._active_run_is_alive():
                 return False, "A benchmark is already running."
             run_directory = self._new_run_dir()
-            spec = _spec_payload(selected, mode_id, options)
+            spec = _spec_payload(selected, mode_id, options, self.llama_paths)
             run_dir_io.write_spec(run_directory, spec)
             try:
                 process = self.spawn_engine(run_directory)
@@ -259,7 +273,12 @@ def _default_spawn_engine(run_directory: Path) -> subprocess.Popen:
     )
 
 
-def _spec_payload(selected: list[ModelInfo], mode_id: str, options: "WebRunOptions") -> dict:
+def _spec_payload(
+    selected: list[ModelInfo],
+    mode_id: str,
+    options: "WebRunOptions",
+    llama_paths: dict[str, str | None] | None = None,
+) -> dict:
     plan = options.benchmark_suite_plan
     return {
         "models": [
@@ -273,6 +292,19 @@ def _spec_payload(selected: list[ModelInfo], mode_id: str, options: "WebRunOptio
             "show_thinking": options.show_thinking,
             "stream_prompts": options.stream_prompts,
         },
+        "paths": _paths_block(llama_paths),
+    }
+
+
+def _paths_block(llama_paths: dict[str, str | None] | None) -> dict[str, str | None]:
+    """Normalize the resolved llama path block written into run-spec.json.
+
+    Every key is always present with a string path or null, so the engine can
+    read it uniformly. A None mapping (no paths provided) yields all-null."""
+    source = llama_paths or {}
+    return {
+        key: source.get(key)
+        for key in ("llama_server", "llama_bench", "llama_cli", "llama_perplexity", "runs_root")
     }
 
 
@@ -515,9 +547,20 @@ def serve_webui(
     host: str = "127.0.0.1",
     port: int = 0,
     open_browser: bool = True,
+    llama_server: Path | None = None,
+    llama_bench: Path | None = None,
+    llama_cli: Path | None = None,
+    llama_perplexity: Path | None = None,
 ) -> str:
     resolved_port = port if port != 0 else _free_local_port(host)
-    state = WebUiState(root=root, runs_root=runs_root)
+    state = WebUiState(
+        root=root,
+        runs_root=runs_root,
+        llama_server=llama_server,
+        llama_bench=llama_bench,
+        llama_cli=llama_cli,
+        llama_perplexity=llama_perplexity,
+    )
     app = create_web_app(state)
     config = uvicorn.Config(app, host=host, port=resolved_port, log_level="warning")
     server = uvicorn.Server(config)

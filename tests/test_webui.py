@@ -116,6 +116,65 @@ def test_webui_start_run_writes_spec_and_spawns_engine(tmp_path):
     assert state.run.phase == "running"
 
 
+def test_webui_start_run_writes_resolved_llama_paths(tmp_path):
+    model_root = tmp_path / "models"
+    model_root.mkdir()
+    model_path = model_root / "Qwen3.6-35B-A3B-Q4_K_M.gguf"
+    model_path.write_bytes(b"1" * 30)
+    runs_root = tmp_path / "_runs"
+    server = tmp_path / "llama" / "llama-server.exe"
+    bench = tmp_path / "llama" / "llama-bench.exe"
+
+    spawned: list = []
+    state = WebUiState(
+        root=model_root,
+        runs_root=runs_root,
+        spawn_engine=_fake_spawn_factory(spawned),
+        project_root=tmp_path,
+        llama_server=server,
+        llama_bench=bench,
+    )
+
+    ok, message = state.start_run([str(model_path)], "librarian_bench", {"budget_minutes": 1})
+    assert ok is True, message
+
+    spec = run_dir.read_spec(spawned[0])
+    assert spec["paths"]["llama_server"] == str(server)
+    assert spec["paths"]["llama_bench"] == str(bench)
+    # Paths not provided are null; runs_root always reflects the configured root.
+    assert spec["paths"]["llama_cli"] is None
+    assert spec["paths"]["llama_perplexity"] is None
+    assert spec["paths"]["runs_root"] == str(runs_root)
+
+
+def test_webui_start_run_writes_null_llama_paths_when_unset(tmp_path):
+    model_root = tmp_path / "models"
+    model_root.mkdir()
+    model_path = model_root / "Qwen3.6-35B-A3B-Q4_K_M.gguf"
+    model_path.write_bytes(b"1" * 30)
+    runs_root = tmp_path / "_runs"
+
+    spawned: list = []
+    state = WebUiState(
+        root=model_root,
+        runs_root=runs_root,
+        spawn_engine=_fake_spawn_factory(spawned),
+        project_root=tmp_path,
+    )
+
+    ok, message = state.start_run([str(model_path)], "librarian_bench", {"budget_minutes": 1})
+    assert ok is True, message
+
+    spec = run_dir.read_spec(spawned[0])
+    assert spec["paths"] == {
+        "llama_server": None,
+        "llama_bench": None,
+        "llama_cli": None,
+        "llama_perplexity": None,
+        "runs_root": str(runs_root),
+    }
+
+
 def test_webui_start_run_rejects_when_engine_already_running(tmp_path):
     model_root = tmp_path / "models"
     model_root.mkdir()
