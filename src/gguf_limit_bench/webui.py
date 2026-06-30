@@ -156,6 +156,10 @@ class WebUiState:
                 run_payload["phase"] = status.get("phase") or run_payload["phase"]
                 run_payload["message"] = _status_message(status)
             run_payload["events"] = run_payload["events"] + _tail_live_events(active)
+            # Structured records the cockpit renders from (preserves type + data,
+            # unlike the flattened `events` feed). Pure pass-through; no business logic.
+            run_payload["live_events"] = _tail_live_records(active)
+            run_payload["status"] = status or {}
         return {
             "models": [_model_payload(model) for model in models],
             "modes": [_mode_payload(mode) for mode in RUN_MODES],
@@ -317,6 +321,39 @@ def _tail_live_events(run_directory: Path, *, limit: int = 80) -> list[dict]:
     except OSError:
         return []
     return [_receipt_event_payload(line) for line in lines if line.strip()]
+
+
+def _tail_live_records(run_directory: Path, *, limit: int = 600) -> list[dict]:
+    """Structured ``{at, type, data}`` records the cockpit renders from.
+
+    Unlike ``_tail_live_events`` (which flattens to ``{at, kind, message}`` for the
+    legacy feed), this preserves the event ``type`` and full ``data`` so the client
+    can fold per-question thinking/answer/score, running score, and the model queue.
+    Tails the last ``limit`` lines; malformed lines are skipped."""
+    path = run_directory / run_dir_io.LIVE_FILE
+    if not path.is_file():
+        return []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()[-limit:]
+    except OSError:
+        return []
+    records: list[dict] = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except (ValueError, TypeError):
+            continue
+        records.append(
+            {
+                "at": row.get("time"),
+                "type": row.get("type", ""),
+                "data": row.get("data", {}),
+            }
+        )
+    return records
 
 
 def _status_message(status: dict) -> str:
@@ -1058,6 +1095,91 @@ INDEX_HTML = r"""<!doctype html>
       .grid > .panel:first-child { position: static; }
       .telemetry { grid-template-columns: repeat(2, 1fr); }
     }
+
+    /* ===== in-flight cockpit (mission-control) ===== */
+    :root{
+      --panel-3:#0a0e14; --line-soft:rgba(255,255,255,.06); --faint:#5b6675;
+      --teal-dim:#2c6c63; --amber-dim:#7a5a2c; --violet:#9aa5ff;
+      --glow-teal:0 0 18px rgba(84,210,189,.28); --glow-amber:0 0 16px rgba(244,184,96,.18);
+    }
+    .mono{font-family:"JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace;}
+    .cmdbar{display:flex; align-items:center; gap:18px; min-height:60px; padding:10px 4px 16px; border-bottom:1px solid var(--line); margin-bottom:16px; flex-wrap:wrap;}
+    .cmdbar .ck-model{font-weight:700; font-size:15px; max-width:380px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+    .cmdbar .ck-sub{color:var(--muted); font-size:11.5px;}
+    .live-pill{display:inline-flex; align-items:center; gap:7px; padding:4px 10px; border-radius:999px; border:1px solid var(--teal-dim); color:var(--teal); font-weight:700; font-size:11px; letter-spacing:.12em; background:rgba(84,210,189,.06);}
+    .live-pill .beat,.dotbeat{width:7px;height:7px;border-radius:50%;background:var(--teal);box-shadow:var(--glow-teal);animation:beat 1.4s ease-in-out infinite;}
+    @keyframes beat{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.65)}}
+    .phasepill{display:inline-flex; gap:7px; align-items:center; padding:5px 12px; border-radius:8px; border:1px solid var(--line); background:var(--panel-2); font-weight:700; font-size:12px;}
+    .phasepill .ph{color:var(--faint);} .phasepill .ph.active{color:var(--teal); text-shadow:var(--glow-teal);} .phasepill .ph.done{color:var(--muted);}
+    .ck-spacer{flex:1;}
+    .progress-read{text-align:right; font-variant-numeric:tabular-nums;} .progress-read b{font-size:15px;} .progress-read small{display:block; color:var(--muted); font-size:11px;}
+    .ck-btns{display:flex; gap:8px;}
+    #cockpit button{width:auto; margin:0; font:inherit; cursor:pointer; border-radius:8px; border:1px solid var(--line); background:var(--panel-2); color:var(--text); padding:8px 13px; font-weight:700;}
+    #cockpit button.stop{border-color:var(--amber-dim); color:var(--amber);}
+    #cockpit button.abort{border-color:#5a2630; color:var(--bad);}
+    #cockpit button:disabled{opacity:.4; cursor:not-allowed;}
+    .stage{display:grid; grid-template-columns:minmax(0,1.62fr) minmax(330px,1fr); gap:16px; align-items:start;}
+    .col{display:grid; gap:16px;}
+    .card{background:linear-gradient(180deg, var(--panel), var(--panel-2)); border:1px solid var(--line); border-radius:12px; overflow:hidden;}
+    .card > h3{margin:0; padding:11px 15px; font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); border-bottom:1px solid var(--line-soft); display:flex; align-items:center; justify-content:space-between; gap:10px;}
+    .card .pad{padding:14px 15px;}
+    .qhead{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px;}
+    .badge{font-size:11px; font-weight:800; letter-spacing:.06em; padding:3px 9px; border-radius:6px; border:1px solid var(--line); color:var(--muted); background:var(--panel-3);}
+    .badge.pack{color:var(--violet); border-color:#33397a;}
+    .qnum{color:var(--muted); font-variant-numeric:tabular-nums;}
+    .prompt{color:var(--text); background:var(--panel-3); border:1px solid var(--line-soft); border-left:3px solid var(--teal-dim); border-radius:8px; padding:11px 13px; margin-bottom:14px; white-space:pre-wrap;}
+    .streamlabel{display:flex; align-items:center; gap:8px; font-size:11px; letter-spacing:.16em; text-transform:uppercase; margin:0 0 6px;}
+    .streamlabel.think{color:var(--amber);} .streamlabel.ans{color:var(--teal);}
+    .streamlabel .tick{width:6px;height:6px;border-radius:50%;}
+    .think .tick{background:var(--amber); box-shadow:var(--glow-amber);} .ans .tick{background:var(--teal); box-shadow:var(--glow-teal);}
+    .stream{font-family:"JetBrains Mono", ui-monospace, Consolas, monospace; font-size:12.5px; line-height:1.65; white-space:pre-wrap; word-break:break-word; border-radius:9px; padding:12px 14px; min-height:34px;}
+    .stream.think{color:#d9c39c; background:repeating-linear-gradient(0deg, rgba(244,184,96,.025) 0 2px, transparent 2px 4px), var(--panel-3); border:1px solid var(--amber-dim); box-shadow:inset 0 0 24px rgba(244,184,96,.05); margin-bottom:14px; max-height:280px; overflow:auto;}
+    .stream.ans{color:#cdeee7; background:var(--panel-3); border:1px solid var(--teal-dim); box-shadow:inset 0 0 24px rgba(84,210,189,.06);}
+    .cursor{display:inline-block; width:8px; height:15px; vertical-align:-2px; background:var(--teal); margin-left:2px; animation:blink 1s steps(2,end) infinite; box-shadow:var(--glow-teal);}
+    .cursor.amber{background:var(--amber); box-shadow:var(--glow-amber);}
+    @keyframes blink{50%{opacity:0}}
+    .scorebar{display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:14px; padding-top:13px; border-top:1px solid var(--line-soft);}
+    .scorechip{font-weight:800; padding:6px 14px; border-radius:8px; font-size:14px;}
+    .scorechip.grading{color:var(--amber); border:1px dashed var(--amber-dim); background:rgba(244,184,96,.05);}
+    .scorechip.pass{color:#07140f; background:var(--good); box-shadow:0 0 16px rgba(121,209,138,.3);}
+    .scorechip.fail{color:#1a0a0a; background:var(--bad); box-shadow:0 0 16px rgba(255,115,115,.25);}
+    .scoremeta{color:var(--muted); font-variant-numeric:tabular-nums; font-size:12px; display:flex; gap:16px; flex-wrap:wrap;} .scoremeta b{color:var(--text);}
+    .hist{display:grid; gap:0;}
+    .hrow{display:grid; grid-template-columns:16px 1fr auto auto auto; gap:12px; align-items:center; padding:9px 4px; border-bottom:1px solid var(--line-soft); font-size:12.5px;} .hrow:last-child{border-bottom:0;}
+    .hrow .pf{width:9px;height:9px;border-radius:50%;} .pf.ok{background:var(--good);} .pf.no{background:var(--bad);}
+    .hrow .hid{color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+    .hrow .hsc{font-weight:800; font-variant-numeric:tabular-nums;} .hrow .hmeta{color:var(--faint); font-variant-numeric:tabular-nums; font-size:11.5px;}
+    .score-hero{display:flex; align-items:baseline; gap:12px; flex-wrap:wrap;}
+    .score-hero .big{font-size:44px; font-weight:800; line-height:1; font-variant-numeric:tabular-nums; color:var(--teal); text-shadow:var(--glow-teal);}
+    .score-hero .of{color:var(--faint); font-size:18px; font-weight:700;}
+    .partial{display:inline-flex; gap:6px; align-items:center; font-size:10.5px; letter-spacing:.13em; text-transform:uppercase; color:var(--amber); border:1px solid var(--amber-dim); border-radius:999px; padding:2px 8px; margin-left:auto;}
+    .partial .beat{background:var(--amber); box-shadow:var(--glow-amber);}
+    .scorebar2{height:8px; border-radius:999px; background:var(--panel-3); border:1px solid var(--line-soft); overflow:hidden; margin-top:12px;}
+    .scorebar2 > i{display:block; height:100%; background:linear-gradient(90deg, var(--teal-dim), var(--teal)); box-shadow:var(--glow-teal);}
+    .score-sub{display:flex; gap:18px; margin-top:10px; color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums;} .score-sub b{color:var(--text);}
+    .gauges{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+    .gauge{background:var(--panel-3); border:1px solid var(--line-soft); border-radius:10px; padding:10px 12px; position:relative; overflow:hidden;}
+    .gauge .glab{color:var(--muted); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase;}
+    .gauge .gval{font-size:20px; font-weight:800; font-variant-numeric:tabular-nums; margin-top:3px;} .gauge .gunit{color:var(--faint); font-size:12px; font-weight:600;}
+    .gauge svg{position:absolute; right:8px; bottom:6px; opacity:.85;} .gauge.full{grid-column:1/3;}
+    .vrambar{height:6px; border-radius:999px; background:#10151d; overflow:hidden; margin-top:8px; border:1px solid var(--line-soft);}
+    .vrambar > i{display:block;height:100%; background:linear-gradient(90deg,#3f7d72,var(--teal));} .vrambar > i.warn{background:linear-gradient(90deg,#9a7a3a,var(--amber));}
+    .pipe{display:flex; flex-direction:column; gap:2px;}
+    .pstep{display:flex; align-items:center; gap:11px; padding:6px 2px; color:var(--muted);}
+    .pstep .node{width:13px;height:13px;border-radius:50%; border:2px solid var(--line); flex:none;}
+    .pstep.done .node{background:var(--teal-dim); border-color:var(--teal-dim);}
+    .pstep.active .node{border-color:var(--teal); background:var(--teal); box-shadow:var(--glow-teal); animation:beat 1.6s infinite;}
+    .pstep.active{color:var(--text); font-weight:700;} .pstep .pconn{width:2px; height:9px; background:var(--line); margin-left:5px;}
+    .queue{display:grid; gap:8px;}
+    .qitem{display:flex; align-items:center; gap:11px; padding:9px 11px; border:1px solid var(--line-soft); border-radius:9px; background:var(--panel-3);}
+    .qitem .qdot{width:9px;height:9px;border-radius:50%; flex:none; background:var(--faint);}
+    .qitem.run .qdot{background:var(--teal); box-shadow:var(--glow-teal); animation:beat 1.5s infinite;} .qitem.done .qdot{background:var(--good);}
+    .qitem .qn{flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12.5px;} .qitem.run{border-color:var(--teal-dim);}
+    .qitem .qsc{font-weight:800; font-variant-numeric:tabular-nums; color:var(--good);} .qitem .qstate{color:var(--muted); font-size:11px; letter-spacing:.08em; text-transform:uppercase;}
+    .bts{max-height:150px; overflow:auto; display:grid; gap:5px; font-size:11.5px;}
+    .btsrow{display:grid; grid-template-columns:60px 130px 1fr; gap:10px; color:var(--muted);} .btsrow .bt{color:var(--faint); font-variant-numeric:tabular-nums;} .btsrow .bk{color:var(--violet); font-weight:700;}
+    .ck-empty{color:var(--muted); padding:22px; text-align:center;}
+    @media (max-width: 980px){ .stage{grid-template-columns:1fr;} }
   </style>
 </head>
 <body>
@@ -1072,11 +1194,13 @@ INDEX_HTML = r"""<!doctype html>
     <main>
       <header>
         <div>
-          <h1>Agent Pilot benchmark cockpit</h1>
-          <div class="sub">Pick any local GGUF models, choose an agent-workload test, and launch repeatable local receipts from the browser.</div>
+          <h1 id="app-title">Agent Pilot benchmark cockpit</h1>
+          <div class="sub" id="preflight-sub">Pick any local GGUF models, choose an agent-workload test, and launch repeatable local receipts from the browser.</div>
         </div>
         <button id="theme" class="ghost-button" type="button">Sepia dark</button>
       </header>
+      <div id="cockpit" hidden></div>
+      <div id="preflight">
       <section class="grid">
         <div class="panel">
           <h2>Model selection</h2>
@@ -1147,6 +1271,7 @@ INDEX_HTML = r"""<!doctype html>
         <div id="global-reports" class="links"></div>
         <div id="receipts" class="receipt-list"></div>
       </section>
+      </div><!-- /preflight -->
     </main>
   </div>
   <script>
@@ -1237,6 +1362,133 @@ INDEX_HTML = r"""<!doctype html>
       renderEvents(run.events || []);
       renderReceipts(state);
       updateGuard();
+
+      // pre-flight -> in-flight transform: once the engine is running (or a run dir
+      // with a live stream is attached) the cockpit takes the stage.
+      const liveEvents = run.live_events || [];
+      const inflight = run.phase === "running" || liveEvents.length > 0;
+      document.getElementById("cockpit").hidden = !inflight;
+      document.getElementById("preflight").hidden = inflight;
+      document.getElementById("preflight-sub").style.display = inflight ? "none" : "";
+      document.getElementById("app-title").textContent = inflight ? "In-flight" : "Agent Pilot benchmark cockpit";
+      if (inflight) renderCockpit(state);
+    }
+
+    // ===== in-flight cockpit (renders purely from run.live_events + status + telemetry) =====
+    const CK_PHASES = [["gate","Gate"],["reasoning","Reasoning"],["librarian","Librarian"],["complete","Complete"]];
+    const CK_DONE = ["complete","stopped","failed","aborted"];
+    function ckRound(n,d){const f=10**(d||0);return Math.round((Number(n)||0)*f)/f;}
+    window.ckStop = () => sendSocket({type:"stop_after_current"});
+    window.ckAbort = () => { if (confirm("Abort the run now? This kills the engine and llama-server.")) sendAbort(); };
+
+    function ckBuild(events){
+      const q=new Map(); let curQ=null, running=null, model=null, mi=null, mt=null;
+      const models=[]; const bts=[]; let finished=null; const packTotals=new Map();
+      for(const ev of events){
+        const d=ev.data||{}; const t=ev.type||"";
+        if(t==="model_started"){model=d.model;mi=d.index;mt=d.total; models.push({name:d.model,index:d.index,state:"run"});}
+        else if(t==="model_finished"){const m=models.find(x=>x.index===d.index); if(m)m.state="done";}
+        else if(t==="question_started"){q.set(d.q_id,{q_id:d.q_id,index:d.index,total:d.total,pack:d.pack,prompt:d.prompt,thinking:"",answer:"",scored:null}); curQ=d.q_id; if(d.pack)packTotals.set(d.pack,d.total||packTotals.get(d.pack)||0);}
+        else if(t==="question_progress"){const it=q.get(d.q_id); if(it){if(d.thinking!=null)it.thinking=d.thinking; if(d.answer!=null)it.answer=d.answer;}}
+        else if(t==="question_scored"){const it=q.get(d.q_id); if(it)it.scored=d;}
+        else if(t==="running_score"){running=d;}
+        else if(t==="run_finished"||t==="run_stopped"){finished=d;}
+        else if(t==="receipt_ready"){bts.push({at:ev.at,k:"receipt",m:(d.path||d.model||"")});}
+        else if(t.startsWith("autoresearch")||t.startsWith("command")||t.startsWith("champion")||t.startsWith("benchmark_suite")||t==="model_failed"||t==="task_started"||t==="task_finished"){
+          bts.push({at:ev.at,k:t,m:JSON.stringify(d).slice(0,120)});
+        }
+      }
+      let planned=0; for(const v of packTotals.values()) planned+=v;
+      return {questions:[...q.values()],curQ,running,model,mi,mt,models,bts,finished,planned};
+    }
+    function ckTime(at){return String(at||"").slice(11,19);}
+    function ckSpark(values,w,h){ w=w||70; h=h||22; if(!values.length) return "";
+      const max=Math.max.apply(null,values.concat([1])), min=Math.min.apply(null,values.concat([0])); const span=(max-min)||1;
+      const pts=values.map((v,i)=>{const x=values.length===1?w:(i/(values.length-1))*w; const y=h-2-((v-min)/span)*(h-4); return ckRound(x,1)+","+ckRound(y,1);}).join(" ");
+      return '<svg width="'+w+'" height="'+h+'"><polyline fill="none" stroke="var(--teal)" stroke-width="1.5" points="'+pts+'"/></svg>';
+    }
+    function renderCockpit(state){
+      const run=state.run||{}; const status=run.status||{}; const tel=state.telemetry||{};
+      const m=ckBuild(run.live_events||[]);
+      const phase=run.phase||status.phase||"running"; const done=CK_DONE.includes(phase);
+      const cur=m.questions.find(x=>x.q_id===m.curQ);
+      const answered=m.running?m.running.answered:m.questions.filter(x=>x.scored).length;
+      // run-wide total from status if the engine exposes it, else discovered-plan fallback
+      const total=Number(status.question_total)||m.planned||answered||0;
+      const progFrac=total?Math.min(1,answered/total):0;
+      const modelName=(m.model||status.model||"").replace(/\.gguf$/i,"");
+      const activePhase=done?"complete":(CK_PHASES.some(p=>p[0]===phase)?phase:"librarian");
+      const idx=CK_PHASES.findIndex(z=>z[0]===activePhase);
+
+      // command bar
+      const phaseHtml=CK_PHASES.map((p,i)=>{const cls=i<idx?"done":i===idx?"active":""; return '<span class="ph '+cls+'">'+p[1]+'</span>'+(i<CK_PHASES.length-1?'<span style="color:var(--faint)">›</span>':'');}).join(" ");
+      const remain=Math.max(0,total-answered);
+      const eta=done?"finished":(remain?("ETA ~"+(remain*4)+"s"):"ETA —");
+      const livePill=done?'<span class="phasepill"><span class="ph done">'+escapeHtml(phase)+'</span></span>':'<span class="live-pill"><span class="beat"></span> LIVE</span>';
+      const cmd=
+        '<div><div class="ck-model mono">'+escapeHtml(modelName||"—")+'</div><div class="ck-sub">model '+(m.mi||status.model_index||1)+'/'+(m.mt||status.model_total||1)+'</div></div>'
+        +livePill+'<div class="phasepill">'+phaseHtml+'</div><div class="ck-spacer"></div>'
+        +'<div class="progress-read"><b>'+answered+'/'+(total||"·")+'</b><small>'+eta+'</small></div>'
+        +'<div class="ck-btns"><button class="stop" '+(done?"disabled":"")+' onclick="ckStop()">■ Stop after current</button>'
+        +'<button class="abort" '+(done?"disabled":"")+' onclick="ckAbort()">✕ Abort</button></div>';
+
+      // current question / reasoning terminal
+      let curHtml;
+      if(!cur){ curHtml='<div class="ck-empty">Waiting for the first question…</div>'; }
+      else{
+        const s=cur.scored; const streaming=!s;
+        const chip=!s?'<span class="scorechip grading">grading…</span>':'<span class="scorechip '+(s.correct?'pass':'fail')+'">'+(s.correct?'PASS':'FAIL')+' · '+ckRound(s.score,2).toFixed(2)+'</span>';
+        const meta=s?'<div class="scoremeta"><span>expected <b>'+escapeHtml(s.expected)+'</b></span><span>got <b>'+escapeHtml(String(s.predicted||"").slice(0,30))+'</b></span><span>ttft <b>'+ckRound(s.ttft_ms)+'ms</b></span><span><b>'+ckRound(s.tok_s,1)+'</b> tok/s</span></div>':'<div class="scoremeta"><span>streaming…</span></div>';
+        const thinkCursor=streaming&&!cur.answer?'<span class="cursor amber"></span>':'';
+        const ansCursor=streaming&&cur.answer?'<span class="cursor"></span>':'';
+        curHtml=
+          '<div class="qhead"><span class="badge pack">'+escapeHtml(cur.pack||"pack")+'</span><span class="qnum mono">Q'+cur.index+'/'+cur.total+'</span></div>'
+          +'<div class="prompt mono">'+escapeHtml(cur.prompt)+'</div>'
+          +'<div class="streamlabel think"><span class="tick"></span> Thinking</div>'
+          +'<div class="stream think">'+(escapeHtml(cur.thinking)||'<span style="color:var(--faint)">—</span>')+thinkCursor+'</div>'
+          +'<div class="streamlabel ans"><span class="tick"></span> Answer</div>'
+          +'<div class="stream ans">'+(escapeHtml(cur.answer)||'<span style="color:var(--faint)">—</span>')+ansCursor+'</div>'
+          +'<div class="scorebar">'+chip+meta+'</div>';
+      }
+      // history
+      const hist=m.questions.filter(x=>x.scored&&x.q_id!==m.curQ);
+      const histHtml=hist.length?hist.map(h=>{const s=h.scored; return '<div class="hrow"><span class="pf '+(s.correct?'ok':'no')+'"></span><span class="hid mono">'+escapeHtml(h.q_id)+'</span><span class="hsc" style="color:'+(s.correct?'var(--good)':'var(--bad)')+'">'+ckRound(s.score,2).toFixed(2)+'</span><span class="hmeta">'+ckRound(s.ttft_ms)+'ms</span><span class="hmeta">'+ckRound(s.tok_s,1)+' t/s</span></div>';}).join(""):'<div class="ck-empty" style="padding:14px">No completed questions yet.</div>';
+
+      // mission control: live score
+      const quality=m.running?m.running.quality_0_100:0;
+      // telemetry (real from sampler) + tok/s sparkline from scored questions
+      const tok=m.questions.filter(x=>x.scored).map(x=>ckRound(x.scored.tok_s,1));
+      const lastTok=tok.length?tok[tok.length-1]:0;
+      const lastTtft=(()=>{const sc=m.questions.filter(x=>x.scored); return sc.length?ckRound(sc[sc.length-1].scored.ttft_ms):0;})();
+      const vu=tel.gpu_used_mb, vt=tel.gpu_total_mb; const vpct=(vu!=null&&vt)?ckRound(vu/vt*100):0;
+      const gpu=tel.gpu_util_percent==null?"n/a":tel.gpu_util_percent; const pw=tel.gpu_power_watts==null?"n/a":ckRound(tel.gpu_power_watts);
+      const gaugesHtml=
+        '<div class="gauge"><div class="glab">Throughput</div><div class="gval">'+lastTok+'<span class="gunit"> tok/s</span></div>'+ckSpark(tok)+'</div>'
+        +'<div class="gauge"><div class="glab">TTFT</div><div class="gval">'+lastTtft+'<span class="gunit"> ms</span></div></div>'
+        +'<div class="gauge"><div class="glab">GPU util</div><div class="gval">'+gpu+'<span class="gunit"> %</span></div></div>'
+        +'<div class="gauge"><div class="glab">GPU power</div><div class="gval">'+pw+'<span class="gunit"> W</span></div></div>'
+        +'<div class="gauge full"><div class="glab">VRAM</div><div class="gval">'+(vu==null?"n/a":vu)+' <span class="gunit">/ '+(vt||"—")+' MB</span></div><div class="vrambar"><i class="'+(vpct>90?'warn':'')+'" style="width:'+vpct+'%"></i></div></div>'
+        +'<div class="gauge"><div class="glab">CPU</div><div class="gval">'+ckRound(tel.cpu_used_percent)+'<span class="gunit"> %</span></div></div>'
+        +'<div class="gauge"><div class="glab">RAM</div><div class="gval">'+ckRound(tel.ram_used_percent)+'<span class="gunit"> %</span></div></div>';
+
+      const pipeHtml=CK_PHASES.map((p,i)=>{const cls=i<idx?"done":i===idx?"active":""; return '<div class="pstep '+cls+'"><span class="node"></span><span>'+p[1]+'</span></div>'+(i<CK_PHASES.length-1?'<div class="pconn"></div>':'');}).join("");
+      const queueSrc=m.models.length?m.models:[{name:modelName||"—",index:1,state:done?"done":"run"}];
+      const queueHtml=queueSrc.map(mm=>{const cls=mm.state==="done"?"done":mm.state==="run"?"run":""; const right=mm.state==="done"?'<span class="qsc">✓</span>':mm.state==="run"?'<span class="qstate">running</span>':'<span class="qstate">queued</span>'; return '<div class="qitem '+cls+'"><span class="qdot"></span><span class="qn mono">'+escapeHtml(String(mm.name||"").replace(/\.gguf$/i,""))+'</span>'+right+'</div>';}).join("");
+      const bts=m.bts.slice(-30);
+      const btsHtml=bts.length?bts.map(b=>'<div class="btsrow"><span class="bt">'+ckTime(b.at)+'</span><span class="bk">'+escapeHtml(b.k)+'</span><span>'+escapeHtml(b.m)+'</span></div>').join(""):'<div class="ck-empty" style="padding:10px">Engine attempts, flag ladder, and champion eval appear here.</div>';
+
+      document.getElementById("cockpit").innerHTML=
+        '<div class="cmdbar">'+cmd+'</div>'
+        +'<div class="stage"><div class="col">'
+        +'<div class="card"><h3>Reasoning terminal <span class="mono" style="text-transform:none;letter-spacing:0;color:var(--faint)">'+escapeHtml(cur?cur.q_id:"")+'</span></h3><div class="pad">'+curHtml+'</div></div>'
+        +'<div class="card"><h3>Completed this run <span style="color:var(--faint)">'+(hist.length||"")+'</span></h3><div class="pad"><div class="hist">'+histHtml+'</div></div></div>'
+        +'</div><div class="col">'
+        +'<div class="card"><h3>Live score</h3><div class="pad"><div class="score-hero"><span class="big">'+ckRound(quality)+'</span><span class="of">/ 100</span><span class="partial"><span class="beat"></span> live · partial</span></div><div class="scorebar2"><i style="width:'+ckRound(quality)+'%"></i></div><div class="score-sub"><span>correct <b>'+(m.running?m.running.correct:0)+'</b>/<b>'+answered+'</b></span><span>coverage <b>'+ckRound(progFrac*100)+'%</b></span></div></div></div>'
+        +'<div class="card"><h3>Telemetry</h3><div class="pad gauges">'+gaugesHtml+'</div></div>'
+        +'<div class="card"><h3>Phase pipeline</h3><div class="pad"><div class="pipe">'+pipeHtml+'</div></div></div>'
+        +'<div class="card"><h3>Model queue <span style="color:var(--faint)">sequential</span></h3><div class="pad"><div class="queue">'+queueHtml+'</div></div></div>'
+        +'<div class="card"><h3>Behind the scenes</h3><div class="pad"><div class="bts">'+btsHtml+'</div></div></div>'
+        +'</div></div>';
     }
 
     function renderConfiguration(config) {
@@ -1403,6 +1655,24 @@ INDEX_HTML = r"""<!doctype html>
       socket.send(JSON.stringify(message));
     }
 
+    async function sendAbort() {
+      try {
+        const response = await fetch("/api/abort", {method: "POST", headers: {"content-type": "application/json"}, body: "{}"});
+        const payload = await response.json();
+        document.querySelector("#guard").textContent = payload.message || "Abort requested.";
+      } catch (error) {
+        document.querySelector("#guard").textContent = `Abort failed: ${error.message}`;
+      }
+      await loadStateViaHttp();
+    }
+
+    // Poll faster while a run is in flight so the thinking/answer stream feels live.
+    function ckInflight() {
+      return !!(appState && appState.run && (appState.run.phase === "running"
+        || (appState.run.live_events && appState.run.live_events.length
+            && !["complete","stopped","failed","aborted"].includes(appState.run.phase))));
+    }
+
     document.querySelector("#theme").addEventListener("click", () => {
       document.body.classList.toggle("sepia");
       document.querySelector("#theme").textContent = document.body.classList.contains("sepia") ? "Codex dark" : "Sepia dark";
@@ -1450,13 +1720,16 @@ INDEX_HTML = r"""<!doctype html>
 
     loadStateViaHttp("Loading local state...");
     connectSocket();
-    setInterval(() => {
+    // Adaptive cadence: ~800ms while a run streams, 2.5s when idle.
+    function pollOnce() {
       if (socket && socket.readyState === WebSocket.OPEN) {
         sendSocket({type: "refresh"});
       } else {
         loadStateViaHttp(fallbackNotice);
       }
-    }, 2500);
+      setTimeout(pollOnce, ckInflight() ? 800 : 2500);
+    }
+    setTimeout(pollOnce, 2500);
   </script>
 </body>
 </html>

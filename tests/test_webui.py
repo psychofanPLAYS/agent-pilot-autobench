@@ -14,6 +14,7 @@ from gguf_limit_bench import webui
 from gguf_limit_bench.webui import (
     WebUiState,
     _handler_for,
+    _tail_live_records,
     build_run_options,
     create_web_app,
     recent_receipts,
@@ -40,6 +41,50 @@ def _fake_spawn_factory(recorder=None):
         return _FakeProc()
 
     return _spawn
+
+
+def test_tail_live_records_preserves_type_and_data(tmp_path):
+    run_directory = tmp_path / "run"
+    run_directory.mkdir()
+    run_dir.append_event(run_directory, "question_started", {"q_id": "q1", "prompt": "hi"})
+    run_dir.append_event(run_directory, "question_progress", {"q_id": "q1", "thinking": "...", "answer": ""})
+    # a malformed line must be skipped, not crash the tail
+    with (run_directory / run_dir.LIVE_FILE).open("a", encoding="utf-8") as handle:
+        handle.write("not json\n")
+    run_dir.append_event(run_directory, "question_scored", {"q_id": "q1", "correct": True, "score": 1.0})
+
+    records = _tail_live_records(run_directory)
+
+    assert [r["type"] for r in records] == [
+        "question_started",
+        "question_progress",
+        "question_scored",
+    ]
+    assert records[0]["data"] == {"q_id": "q1", "prompt": "hi"}
+    assert records[2]["data"]["correct"] is True
+    assert all("at" in r and "data" in r for r in records)
+
+
+def test_tail_live_records_empty_when_no_live_file(tmp_path):
+    assert _tail_live_records(tmp_path / "missing") == []
+
+
+def test_state_payload_exposes_structured_live_events(tmp_path):
+    model_root = tmp_path / "models"
+    model_root.mkdir()
+    runs_root = tmp_path / "_runs"
+    runs_root.mkdir()
+    run_directory = runs_root / "active"
+    run_directory.mkdir()
+    run_dir.write_status(run_directory, phase="running", model="m", pid=4242)
+    run_dir.append_event(run_directory, "question_started", {"q_id": "q1", "prompt": "p"})
+
+    state = WebUiState(root=model_root, runs_root=runs_root, project_root=tmp_path)
+    payload = state.state_payload()
+
+    live_events = payload["run"]["live_events"]
+    assert any(event["type"] == "question_started" for event in live_events)
+    assert payload["run"]["status"].get("phase") == "running"
 
 
 def test_webui_state_lists_models_modes_and_librarian_packs(tmp_path):
