@@ -19,7 +19,7 @@ classifiers = [
     "Topic :: System :: Benchmark",
 ]
 dependencies = [
-    "fastapi>=0.115.0",
+    "fastapi>=0.138.2",
     "huggingface_hub>=0.34",
     "nvidia-ml-py>=13.610.43",
     "optuna>=4.8.0",
