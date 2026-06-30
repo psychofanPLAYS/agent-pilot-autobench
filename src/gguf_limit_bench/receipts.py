@@ -5,6 +5,8 @@ from datetime import datetime
 import json
 from pathlib import Path
 
+from gguf_limit_bench.events import emit as _emit_live_event
+
 
 @dataclass(frozen=True)
 class RunReceipt:
@@ -32,6 +34,10 @@ class RunReceipt:
         }
         with (self.path / "events.jsonl").open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
+        # Forward to the live event sink (if the engine installed one) so the
+        # cockpit's live.jsonl shows the full behind-the-scenes, not just the
+        # per-question events. No-op when no sink is installed.
+        _emit_live_event(event_type, data)
 
     def mark_recovery(self, step: str, status: str, detail: str | None = None) -> None:
         payload = {

@@ -1,6 +1,18 @@
 import json
 
+from gguf_limit_bench import events
 from gguf_limit_bench.receipts import RunReceipt
+
+
+def test_run_receipt_event_forwards_to_live_sink(tmp_path):
+    receipt = RunReceipt.create(tmp_path, slug="qwen-test")
+    seen: list = []
+    with events.set_event_sink(lambda t, d: seen.append((t, d))):
+        receipt.event("autoresearch_started", {"model": "m"})
+    # forwarded to the live sink (so the cockpit sees the full behind-the-scenes)
+    assert ("autoresearch_started", {"model": "m"}) in seen
+    # and still persisted to the receipt's own events.jsonl
+    assert (receipt.path / "events.jsonl").read_text(encoding="utf-8").strip()
 
 
 def test_run_receipt_writes_jsonl_events_and_recovery_file(tmp_path):
