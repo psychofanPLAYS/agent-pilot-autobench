@@ -1702,6 +1702,22 @@ def engine(
     engine_runner.run_engine(rd, run_model)
 
 
+@app.command("engine-replay")
+def engine_replay_cmd(
+    run_dir: Annotated[
+        Path, typer.Option("--run-dir", help="Run directory to replay into.")
+    ],
+    source: Annotated[
+        Path, typer.Option("--source", help="Recorded live.jsonl to replay.")
+    ],
+    delay: float = typer.Option(0.1, "--delay", help="Seconds between replayed events."),
+) -> None:
+    """Replay a recorded live.jsonl into a run dir (drives the cockpit, no GPU)."""
+    from gguf_limit_bench import engine_replay
+
+    engine_replay.replay(Path(run_dir), Path(source), delay=delay)
+
+
 @app.command("autoresearch-all")
 def autoresearch_all(
     root: Path | None = None,
