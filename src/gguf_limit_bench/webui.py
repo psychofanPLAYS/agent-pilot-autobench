@@ -390,7 +390,7 @@ def _find_live_run_dir(runs_root: Path) -> Path | None:
 def validate_web_selection(selected: list[ModelInfo], mode_id: str) -> str | None:
     if not selected:
         return "Select at least one model first."
-    # Agent Pilot benchmarks any GGUF model on agent workloads. There is no
+    # pilotBENCHY benchmarks any GGUF model on agent workloads. There is no
     # hardcoded Gemma-vs-Qwen requirement; one model runs, two or more compare.
     return None
 
@@ -487,7 +487,7 @@ def websocket_error(message: str) -> dict:
 
 
 def create_web_app(state: WebUiState) -> FastAPI:
-    app = FastAPI(title="Agent Pilot local cockpit", docs_url=None, redoc_url=None)
+    app = FastAPI(title="pilotBENCHY local cockpit", docs_url=None, redoc_url=None)
 
     @app.get("/")
     async def index() -> HTMLResponse:
@@ -958,7 +958,7 @@ INDEX_HTML = r"""<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Agent Pilot</title>
+  <title>pilotBENCHY</title>
   <style>
     :root {
       color-scheme: dark;
@@ -1189,7 +1189,7 @@ INDEX_HTML = r"""<!doctype html>
 <body>
   <div class="shell">
     <aside>
-      <div class="brand">Agent Pilot</div>
+      <div class="brand">pilotBENCHY</div>
       <div class="navitem"><span>Control</span><span>local</span></div>
       <div class="navitem"><span>Models</span><span id="nav-models">0</span></div>
       <div class="navitem"><span>Receipts</span><span>_runs</span></div>
@@ -1198,7 +1198,7 @@ INDEX_HTML = r"""<!doctype html>
     <main>
       <header>
         <div>
-          <h1 id="app-title">Agent Pilot benchmark cockpit</h1>
+          <h1 id="app-title">pilotBENCHY</h1>
           <div class="sub" id="preflight-sub">Pick any local GGUF models, choose an agent-workload test, and launch repeatable local receipts from the browser.</div>
         </div>
         <button id="theme" class="ghost-button" type="button">Sepia dark</button>
@@ -1374,7 +1374,7 @@ INDEX_HTML = r"""<!doctype html>
       document.getElementById("cockpit").hidden = !inflight;
       document.getElementById("preflight").hidden = inflight;
       document.getElementById("preflight-sub").style.display = inflight ? "none" : "";
-      document.getElementById("app-title").textContent = inflight ? "In-flight" : "Agent Pilot benchmark cockpit";
+      document.getElementById("app-title").textContent = inflight ? "In-flight" : "pilotBENCHY";
       if (inflight) renderCockpit(state);
     }
 
