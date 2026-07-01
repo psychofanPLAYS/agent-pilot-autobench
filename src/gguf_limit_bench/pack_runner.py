@@ -22,9 +22,13 @@ import time
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
-from gguf_limit_bench.answer_scoring import extract_answer, score_answer
+from gguf_limit_bench.answer_scoring import (
+    exact_answer_in_text,
+    extract_answer,
+    score_answer,
+)
 from gguf_limit_bench.events import emit
-from gguf_limit_bench.packs import PackQuestion, QuestionPack
+from gguf_limit_bench.packs import AnswerType, PackQuestion, QuestionPack
 from gguf_limit_bench.server_probe import iter_llama_completion_stream_events
 from gguf_limit_bench.simple_bench import (
     SimpleBenchBatchResult,
@@ -163,8 +167,23 @@ def _run_one_question(
 
     # ---- Classify outcome --------------------------------------------
     if extracted is None:
-        outcome = "incomplete"
-        correct = False
+        # For EXACT questions, a plainly-correct answer (no "Final Answer:" marker)
+        # should still count: score_answer's lenient normalize + whitespace-bounded
+        # substring match can find the expected answer in the raw response. Without
+        # this, correct answers were scored "incomplete" (0) just for skipping the
+        # marker. MC keeps the marker requirement — that matches the official
+        # SimpleBench scorer and MC has its own multi-pattern extraction.
+        if (
+            answer_type is AnswerType.EXACT
+            and exact_answer_in_text(primary_text, question.answer, question.accept)
+        ):
+            outcome = "correct"
+            correct = True
+            lines = [ln.strip() for ln in primary_text.strip().splitlines() if ln.strip()]
+            extracted = lines[-1] if lines else primary_text.strip()
+        else:
+            outcome = "incomplete"
+            correct = False
     elif score_answer(
         f"Final Answer: {extracted}",
         question.answer,

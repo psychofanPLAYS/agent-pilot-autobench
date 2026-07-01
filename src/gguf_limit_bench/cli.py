@@ -1730,7 +1730,12 @@ def engine_replay_cmd(
     """Replay a recorded live.jsonl into a run dir (drives the cockpit, no GPU)."""
     from gguf_limit_bench import engine_replay
 
-    engine_replay.replay(Path(run_dir), Path(source), delay=delay)
+    source_path = Path(source)
+    if not source_path.is_file():
+        console.print(f"Source live.jsonl not found: {source_path}")
+        raise typer.Exit(1)
+
+    engine_replay.replay(Path(run_dir), source_path, delay=delay)
 
 
 @app.command("autoresearch-all")

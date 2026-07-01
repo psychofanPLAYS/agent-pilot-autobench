@@ -102,6 +102,26 @@ def normalize_exact(s: str) -> str:
     return s
 
 
+def exact_answer_in_text(text: str, expected: str, accept: tuple[str, ...] = ()) -> bool:
+    """True if the expected exact answer (or an accepted alternate) is present in ``text``
+    as a whole normalized string or a whitespace-bounded token — WITHOUT requiring a
+    ``Final Answer:`` marker. Used to rescue plainly-correct EXACT answers that skip the
+    marker (they were otherwise scored ``incomplete``)."""
+    if not text:
+        return False
+    norm_text = normalize_exact(text)
+    expected_set = {normalize_exact(expected)} | {normalize_exact(a) for a in accept}
+    for exp_val in expected_set:
+        if not exp_val:
+            continue
+        if exp_val == norm_text:
+            return True
+        pattern = r"(?<!\w)" + re.escape(exp_val) + r"(?!\w)"
+        if re.search(pattern, norm_text):
+            return True
+    return False
+
+
 def score_answer(
     response: str,
     expected: str,
