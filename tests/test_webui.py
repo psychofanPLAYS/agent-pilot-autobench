@@ -33,6 +33,8 @@ def test_webui_state_lists_models_modes_and_librarian_packs(tmp_path):
 
     assert [model["family"] for model in payload["models"]] == ["qwen", "gemma"]
     assert payload["default_mode"] == "librarian_bench"
+    assert payload["default_flight_plan"] == "librarian_benchmark"
+    assert any(plan["id"] == "librarian_benchmark" for plan in payload["flight_plans"])
     assert payload["librarian_packs"] == list(LIBRARIAN_PACK_IDS)
     assert any(mode["id"] == "librarian_bench" for mode in payload["modes"])
     assert payload["run_configuration"]["standard_forced_args"]
@@ -49,12 +51,17 @@ def test_webui_shell_explains_run_cost_and_evidence():
     assert "Previous results" in INDEX_HTML
     assert 'id="quick-reports"' in INDEX_HTML
     assert 'id="quick-receipts"' in INDEX_HTML
+    assert 'id="flight-plan"' in INDEX_HTML
+    assert "Advanced / choose mode directly" in INDEX_HTML
     assert 'id="run-summary"' in INDEX_HTML
     assert "127.0.0.1:36939" in INDEX_HTML
     assert "window.location.host" in INDEX_HTML
     assert "function updateRunSummary" in INDEX_HTML
+    assert "function modelPathsForStart" in INDEX_HTML
     assert "scored attempts" in INDEX_HTML
     assert "weighted score + bias checks" in INDEX_HTML
+    assert "Click Select all, or choose one or more models before starting." in INDEX_HTML
+    assert "One model found. Start will use it automatically." in INDEX_HTML
 
 
 def test_librarian_web_selection_accepts_any_models():
@@ -118,6 +125,7 @@ def test_webui_start_run_calls_backend_for_selected_models(tmp_path):
         ("Qwen3.6-35B-A3B-Q4_K_M.gguf", "librarian_bench", 7),
     ]
     assert calls[0][1].forced_server_args == ("--flash-attn", "on", "--jinja")
+    assert calls[0][1].flight_plan_id is None
     assert calls[0][1].sample_size == 15
     assert calls[0][1].repeats == 3
     assert calls[0][1].sampler_policy == "hf_recommended"
@@ -164,11 +172,83 @@ def test_build_run_options_rejects_outside_benchmark_suite_plan(tmp_path):
         raise AssertionError("expected outside benchmark-suite plan to be rejected")
 
 
+def test_build_run_options_accepts_flight_plan_as_beginner_contract():
+    options = build_run_options(
+        "quick",
+        {
+            "flight_plan_id": "librarian_benchmark",
+            "forced_server_args": ["--jinja"],
+        },
+    )
+
+    assert options.flight_plan_id == "librarian_benchmark"
+    assert options.mode_id == "librarian_bench"
+    assert options.budget_minutes == 30
+
+
+def test_build_run_options_preserves_mode_without_flight_plan():
+    options = build_run_options(
+        "quick",
+        {
+            "flight_plan_id": "",
+            "forced_server_args": ["--jinja"],
+        },
+    )
+
+    assert options.flight_plan_id is None
+    assert options.mode_id == "quick"
+    assert options.budget_minutes == 5
+
+
+def test_build_run_options_rejects_unknown_flight_plan():
+    try:
+        build_run_options("quick", {"flight_plan_id": "typo"})
+    except ValueError as exc:
+        assert "Unknown flight plan" in str(exc)
+    else:  # pragma: no cover - assertion clarity
+        raise AssertionError("expected unknown flight plan to be rejected")
+
+
+def test_build_run_options_rejects_malformed_numeric_payloads():
+    for payload, expected in (
+        ({"budget_minutes": "soon"}, "Budget must be a number"),
+        ({"sample_size": True}, "Sample size must be a number"),
+        ({"repeats": 99}, "Repeats must be between 1 and 20"),
+    ):
+        try:
+            build_run_options("quick", payload)
+        except ValueError as exc:
+            assert expected in str(exc)
+        else:  # pragma: no cover - assertion clarity
+            raise AssertionError(f"expected malformed payload to be rejected: {payload}")
+
+
+def test_build_run_options_rejects_malformed_forced_args_and_sampler_policy():
+    for payload, expected in (
+        ({"forced_server_args": "--jinja"}, "forced_server_args must be a list"),
+        ({"forced_server_args": ["--jinja", 123]}, "forced_server_args entries"),
+        ({"stream_prompts": "false"}, "stream_prompts must be true or false"),
+        ({"show_thinking": 1}, "show_thinking must be true or false"),
+        ({"sampler_policy": 0}, "sampler_policy must be a string"),
+        ({"sampler_policy": 123}, "sampler_policy must be a string"),
+        ({"sampler_policy": "surprise-me"}, "Unsupported sampler policy"),
+    ):
+        try:
+            build_run_options("quick", payload)
+        except ValueError as exc:
+            assert expected in str(exc)
+        else:  # pragma: no cover - assertion clarity
+            raise AssertionError(f"expected malformed payload to be rejected: {payload}")
+
+
 def test_recent_receipts_and_run_artifact_links_stay_under_runs_root(tmp_path):
     runs_root = tmp_path / "_runs"
     receipt = runs_root / "2026-06-24-qwen"
     receipt.mkdir(parents=True)
     (receipt / "report.html").write_text("<h1>ok</h1>", encoding="utf-8")
+    (receipt / "resolved-plan.json").write_text('{"schema_version": 1}', encoding="utf-8")
+    (receipt / "command.txt").write_text("agent-autobench autoresearch\n", encoding="utf-8")
+    (receipt / "status.json").write_text('{"status": "finished"}', encoding="utf-8")
     (receipt / "best-settings.json").write_text(
         '{"model": "G:/models/Qwen.gguf", "status": "complete", "result": {"score": 12.5}}',
         encoding="utf-8",
@@ -181,7 +261,7 @@ def test_recent_receipts_and_run_artifact_links_stay_under_runs_root(tmp_path):
     assert receipts[0]["model"] == "Qwen.gguf"
     assert receipts[0]["artifacts"][0]["url"] == "/runs/2026-06-24-qwen/report.html"
     artifact_labels = {artifact["label"] for artifact in receipts[0]["artifacts"]}
-    assert {"Suite summary", "Librarian report"} <= artifact_labels
+    assert {"Resolved plan", "Command", "Status", "Suite summary", "Librarian report"} <= artifact_labels
     assert resolve_run_artifact(runs_root, "2026-06-24-qwen/report.html") == receipt / "report.html"
     assert resolve_run_artifact(runs_root, "../outside.txt") is None
 
@@ -250,13 +330,14 @@ def test_webui_websocket_start_run_dispatches_backend(tmp_path):
         websocket.send_json(
             {
                 "type": "start_run",
+                "flight_plan_id": "librarian_benchmark",
                 "model_paths": [str(gemma_path), str(qwen_path)],
-                "mode_id": "librarian_bench",
+                "mode_id": "quick",
                 "options": {
-                    "budget_minutes": 3,
                     "sample_size": 17,
                     "repeats": 4,
                     "sampler_policy": "runtime_defaults",
+                    "flight_plan_id": "librarian_benchmark",
                     "benchmark_suite_plan": str(plan_path),
                     "forced_server_args": ["--jinja"],
                 },
@@ -269,7 +350,12 @@ def test_webui_websocket_start_run_dispatches_backend(tmp_path):
     deadline = time.time() + 2
     while time.time() < deadline and len(calls) < 2:
         time.sleep(0.02)
-    assert [call[1].budget_minutes for call in calls] == [3, 3]
+    assert [call[1].flight_plan_id for call in calls] == [
+        "librarian_benchmark",
+        "librarian_benchmark",
+    ]
+    assert [call[1].mode_id for call in calls] == ["librarian_bench", "librarian_bench"]
+    assert [call[1].budget_minutes for call in calls] == [30, 30]
     assert [call[1].sample_size for call in calls] == [17, 17]
     assert [call[1].repeats for call in calls] == [4, 4]
     assert [call[1].sampler_policy for call in calls] == [
@@ -280,6 +366,49 @@ def test_webui_websocket_start_run_dispatches_backend(tmp_path):
         plan_path.resolve(),
         plan_path.resolve(),
     ]
+
+
+def test_webui_websocket_mode_only_start_is_not_overridden_by_flight_plan(tmp_path):
+    model_root = tmp_path / "models"
+    model_root.mkdir()
+    qwen_path = model_root / "Qwen3.6-35B-A3B-Q4_K_M.gguf"
+    qwen_path.write_bytes(b"1" * 30)
+    calls: list[tuple[str, WebRunOptions]] = []
+
+    def fake_run_model(model: ModelInfo, options: WebRunOptions):
+        calls.append((model.name, options))
+        receipt = tmp_path / "_runs" / model.name
+        receipt.mkdir(parents=True)
+        return receipt
+
+    state = WebUiState(root=model_root, runs_root=tmp_path / "_runs", run_model=fake_run_model)
+    client = TestClient(create_web_app(state))
+
+    with client.websocket_connect("/ws") as websocket:
+        websocket.receive_json()
+        websocket.receive_json()
+        websocket.send_json(
+            {
+                "type": "start_run",
+                "flight_plan_id": "",
+                "model_paths": [str(qwen_path)],
+                "mode_id": "quick",
+                "options": {
+                    "flight_plan_id": "",
+                    "forced_server_args": ["--jinja"],
+                },
+            }
+        )
+        reply = websocket.receive_json()
+
+    assert reply["type"] == "run_started"
+    assert reply["ok"] is True
+    deadline = time.time() + 2
+    while time.time() < deadline and not calls:
+        time.sleep(0.02)
+    assert calls[0][1].flight_plan_id is None
+    assert calls[0][1].mode_id == "quick"
+    assert calls[0][1].budget_minutes == 5
 
 
 def test_webui_websocket_stop_after_current_marks_run_state(tmp_path):
@@ -378,6 +507,21 @@ def test_webui_api_start_rejects_non_list_model_paths(tmp_path):
     assert "model_paths must be a list" in payload["message"]
 
 
+def test_webui_api_start_rejects_non_object_options(tmp_path):
+    state = WebUiState(root=tmp_path / "models", runs_root=tmp_path / "_runs")
+    client = TestClient(create_web_app(state))
+
+    response = client.post(
+        "/api/start",
+        json={"model_paths": [], "mode_id": "quick", "options": "not-an-object"},
+    )
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["ok"] is False
+    assert "options must be a JSON object" in payload["message"]
+
+
 def test_webui_state_lists_benchmark_suite_plans(tmp_path):
     root = tmp_path
     plans = root / "benchmarks" / "plans"
@@ -396,6 +540,12 @@ def test_webui_state_lists_benchmark_suite_plans(tmp_path):
             "filename": "local-openai-smoke.plan.json",
             "name": "Local OpenAI smoke",
             "description": "Requires a local endpoint.",
+            "plan_kind": "",
+            "requires": "",
+            "score_contract": "",
+            "task_count": 0,
+            "phases": [],
+            "harnesses": [],
             "warning": "Requires a local endpoint.",
         }
     ]

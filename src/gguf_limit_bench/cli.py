@@ -6,8 +6,10 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from datetime import datetime, timezone
 from pathlib import Path
 import json
+import math
 import os
 import sqlite3
+import subprocess
 import time
 from typing import Annotated, Callable, cast
 import webbrowser
@@ -53,6 +55,7 @@ from gguf_limit_bench.config import (
     with_cli_overrides,
 )
 from gguf_limit_bench.deployment import export_champion_profile
+from gguf_limit_bench.flight_plans import flight_plan_payloads
 from gguf_limit_bench.gpu_profiles import detect_gpu_name, recommended_always_on
 from gguf_limit_bench.discovery import discover_models
 from gguf_limit_bench.doctor import DoctorReport, build_doctor_report
@@ -484,6 +487,8 @@ def _start_app(
                 champion_sample_size=options.sample_size,
                 champion_repeats=options.repeats,
                 sampler_policy=options.sampler_policy,
+                run_mode_id=options.mode_id,
+                flight_plan_id=options.flight_plan_id,
             ).path
         ),
     )
@@ -851,6 +856,51 @@ def results(
         _serve_report_directory(serve_root, port)
 
 
+@app.command("export-plan")
+def export_plan(
+    run: Annotated[
+        Path,
+        typer.Option(
+            "--run",
+            help="Receipt folder, or a direct path to resolved-plan.json.",
+        ),
+    ],
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        help="Optional file to write the resolved plan JSON to.",
+    ),
+    json_out: bool = False,
+) -> None:
+    """Print or copy the resolved plan saved by a benchmark receipt."""
+    plan_path = run if run.name == "resolved-plan.json" else run / "resolved-plan.json"
+    if not plan_path.exists():
+        typer.echo(f"Resolved plan not found: {plan_path}", err=True)
+        raise typer.Exit(2)
+    try:
+        payload = json.loads(plan_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        typer.echo(f"Resolved plan is not valid JSON: {exc}", err=True)
+        raise typer.Exit(2) from exc
+    if output is not None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(
+            json.dumps(payload, ensure_ascii=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        console.print(f"Resolved plan exported: {output}")
+        return
+    if json_out:
+        _print_json(payload)
+        return
+    console.print(f"Resolved plan: {plan_path}")
+    command_path = plan_path.parent / "command.txt"
+    if command_path.exists():
+        first_command = command_path.read_text(encoding="utf-8").splitlines()[0]
+        console.print(f"Command: {first_command}")
+    console.print("Use --json-out to print the full plan JSON.")
+
+
 @app.command()
 def packs(plugin_dir: Path = Path("plugins/benchmarks"), json_out: bool = False) -> None:
     """List built-in and local benchmark packs."""
@@ -1105,6 +1155,30 @@ def benchmark_suite_plans(json_out: bool = False) -> None:
             str(path.relative_to(project_root())),
             str(settings.get("plan_kind", "unknown")),
             str(settings.get("requires", "")),
+        )
+    console.print(table)
+
+
+@app.command("flight-plans")
+def flight_plans(json_out: bool = False) -> None:
+    """List beginner-friendly benchmark Flight Plans."""
+    plans = flight_plan_payloads(project_root())
+    if json_out:
+        _print_json(plans)
+        return
+    table = Table(title="pilotBENCHY Flight Plans")
+    table.add_column("Plan", no_wrap=True)
+    table.add_column("Recommended", no_wrap=True)
+    table.add_column("Mode", no_wrap=True)
+    table.add_column("Budget", no_wrap=True)
+    table.add_column("Evidence")
+    for plan in plans:
+        table.add_row(
+            str(plan["label"]),
+            "yes" if plan["recommended"] else "",
+            str(plan["mode_id"]),
+            f"{plan['budget_minutes']} min/model",
+            str(plan["evidence_goal"]),
         )
     console.print(table)
 
@@ -1479,6 +1553,28 @@ def _write_speed_probe_receipt(
         "settings": settings.to_dict(),
         "result": result.to_dict(),
     }
+    receipt.write_resolved_plan(
+        {
+            "schema_version": 1,
+            "program": ProgramId.SPEED.value,
+            "model": str(model),
+            "requested_context_size": requested_context_size,
+            "settings": settings.to_dict(),
+            "prompt": prompt,
+        },
+        [
+            _command_record(
+                [
+                    "agent-autobench",
+                    "serve-probe",
+                    "--model",
+                    str(model),
+                    "--context-size",
+                    str(requested_context_size),
+                ]
+            )
+        ],
+    )
     receipt.write_json("speed-probe.json", payload)
     receipt.write_summary(
         [
@@ -1497,11 +1593,80 @@ def _write_speed_probe_receipt(
         ]
     )
     receipt.mark_recovery(step="speed-probe", status="finished" if result.ok else "failed")
+    receipt.write_status(
+        "finished" if result.ok else "failed",
+        step="speed-probe",
+        detail=result.failure,
+    )
     return receipt
 
 
 def _safe_receipt_slug(value: str) -> str:
     return "".join(char if char.isalnum() or char in "-_" else "-" for char in value)[:80]
+
+
+def _display_command(parts: list[str]) -> str:
+    return subprocess.list2cmdline([str(part) for part in parts])
+
+
+def _command_record(parts: list[str], *, cwd: Path | None = None) -> dict:
+    argv = [str(part) for part in parts]
+    payload = {
+        "argv": argv,
+        "display_command": subprocess.list2cmdline(argv),
+    }
+    if cwd is not None:
+        payload["cwd"] = str(cwd)
+    return payload
+
+
+def _autoresearch_command_record(
+    *,
+    model: Path,
+    budget_seconds: int,
+    parallel_max: int,
+    max_attempts: int | None,
+    evaluation: EvaluationMode,
+    flag_ladder: bool,
+    dry_run: bool,
+    flag_context_size: int,
+    benchmark_suite_plan: Path | None,
+    context_ladder: tuple[int, ...] | None,
+    perplexity_corpus: Path | None,
+    perplexity_context: tuple[int, ...] | None,
+    llama_server_extra_args: tuple[str, ...],
+) -> dict:
+    command = [
+        "agent-autobench",
+        "autoresearch",
+        "--model",
+        str(model),
+        "--budget-minutes",
+        str(max(1, math.ceil(budget_seconds / 60))),
+        "--parallel-max",
+        str(parallel_max),
+    ]
+    if max_attempts is not None:
+        command.extend(["--max-attempts", str(max_attempts)])
+    if evaluation is EvaluationMode.SPEED_SCOUT:
+        command.append("--speed-scout")
+    if flag_ladder:
+        command.append("--flag-ladder")
+    if dry_run:
+        command.append("--dry-run")
+    if flag_context_size != MIN_SERIOUS_CONTEXT_SIZE:
+        command.extend(["--flag-context-size", str(flag_context_size)])
+    if benchmark_suite_plan is not None:
+        command.extend(["--benchmark-suite-plan", str(benchmark_suite_plan)])
+    for context in context_ladder or ():
+        command.extend(["--context-ladder", str(context)])
+    if perplexity_corpus is not None:
+        command.extend(["--perplexity-corpus", str(perplexity_corpus)])
+    for context in perplexity_context or ():
+        command.extend(["--perplexity-context", str(context)])
+    for arg in llama_server_extra_args:
+        command.append(f"--llama-server-extra-arg={arg}")
+    return _command_record(command, cwd=Path.cwd())
 
 
 @app.command()
@@ -1944,6 +2109,8 @@ def _run_one_autoresearch(
     champion_gpu_name: str = "",
     champion_repeats: int = 3,
     sampler_policy: str = "hf_recommended",
+    run_mode_id: str | None = None,
+    flight_plan_id: str | None = None,
 ):
     # Benchmark mode asks the real questions via the flag-ladder SimpleBench engine.
     # The legacy --flag-ladder flag forces the same path.
@@ -2046,6 +2213,65 @@ def _run_one_autoresearch(
     # persist lifetime stats to the shared experiment DB (not an in-memory one).
     resolved_gpu_name = champion_gpu_name or detect_gpu_name()
     resolved_state_db_path = champion_state_db_path or DEFAULT_DB_PATH
+    resolved_benchmark_suite_plan = (
+        BenchmarkSuitePlan.from_path(benchmark_suite_plan)
+        if benchmark_suite_plan is not None
+        else None
+    )
+    resolved_plan = {
+        "schema_version": 1,
+        "program": "autoresearch",
+        "model": str(model),
+        "mode_id": run_mode_id,
+        "flight_plan_id": flight_plan_id,
+        "evaluation": evaluation.value,
+        "flag_ladder": flag_ladder,
+        "dry_run": dry_run,
+        "budget_seconds": budget_seconds,
+        "parallel_max": parallel_max,
+        "max_attempts": max_attempts,
+        "llama_bench": str(llama_bench),
+        "llama_cli": str(llama_cli),
+        "llama_server": str(llama_server),
+        "llama_perplexity": str(llama_perplexity),
+        "context_ladder": list(context_ladder or ()),
+        "perplexity_corpus": None if perplexity_corpus is None else str(perplexity_corpus),
+        "perplexity_context": list(perplexity_context or ()),
+        "benchmark_suite_plan": None if benchmark_suite_plan is None else str(benchmark_suite_plan),
+        "enable_mtp": enable_mtp,
+        "flag_context_size": flag_context_size,
+        "simple_bench": str(simple_bench),
+        "simple_bench_system_prompt": str(simple_bench_system_prompt),
+        "simple_bench_max_tokens": simple_bench_max_tokens,
+        "llama_server_extra_args": list(llama_server_extra_args),
+        "forced_server_args": list(forced_server_args),
+        "sampler_policy": sampler_policy,
+        "candidate_sequence": [settings.to_dict() for settings in candidate_sequence or ()],
+        "skipped_profiles": list(skipped_profiles),
+        "champion_eval": {
+            "pack_ids": list(champion_pack_ids or ()),
+            "sample_size": champion_sample_size,
+            "repeats": champion_repeats,
+            "selection": champion_selection,
+            "state_db_path": str(resolved_state_db_path),
+            "gpu_name": resolved_gpu_name,
+        },
+    }
+    command = _autoresearch_command_record(
+        model=model,
+        budget_seconds=budget_seconds,
+        parallel_max=parallel_max,
+        max_attempts=max_attempts,
+        evaluation=evaluation,
+        flag_ladder=flag_ladder,
+        dry_run=dry_run,
+        flag_context_size=flag_context_size,
+        benchmark_suite_plan=benchmark_suite_plan,
+        context_ladder=context_ladder,
+        perplexity_corpus=perplexity_corpus,
+        perplexity_context=perplexity_context,
+        llama_server_extra_args=llama_server_extra_args,
+    )
 
     loop = AutoresearchLoop(
         model=model,
@@ -2061,11 +2287,7 @@ def _run_one_autoresearch(
             parallel_max,
             objective="accuracy" if flag_ladder else "throughput",
         ),
-        benchmark_suite_plan=(
-            BenchmarkSuitePlan.from_path(benchmark_suite_plan)
-            if benchmark_suite_plan is not None
-            else None
-        ),
+        benchmark_suite_plan=resolved_benchmark_suite_plan,
         context_ladder=context_ladder,
         perplexity_runner=(
             LlamaPerplexityRunner(
@@ -2090,6 +2312,8 @@ def _run_one_autoresearch(
         champion_state_db_path=resolved_state_db_path,
         champion_gpu_name=resolved_gpu_name,
         is_benchmark_mode=flag_ladder,
+        resolved_plan=resolved_plan,
+        commands=(command,),
     )
     return loop.run()
 
@@ -2117,6 +2341,39 @@ def _write_flag_ladder_dry_run(
         extra_server_args=extra_server_args,
         enable_mtp=enable_mtp,
         runtime_capabilities=runtime_capabilities,
+    )
+    receipt.write_resolved_plan(
+        {
+            "schema_version": 1,
+            "program": "autoresearch",
+            "model": str(model),
+            "evaluation": EvaluationMode.BENCHMARK.value,
+            "flag_ladder": True,
+            "dry_run": True,
+            "llama_server": str(llama_server),
+            "context_size": context_size,
+            "parallel_max": parallel_max,
+            "extra_server_args": list(extra_server_args),
+            "enable_mtp": enable_mtp,
+            "runtime_capabilities": runtime_capabilities.to_dict(),
+            "profiles": plan,
+        },
+        [
+            _command_record(
+                [
+                    "agent-autobench",
+                    "autoresearch",
+                    "--model",
+                    str(model),
+                    "--flag-ladder",
+                    "--dry-run",
+                    "--flag-context-size",
+                    str(context_size),
+                    "--parallel-max",
+                    str(parallel_max),
+                ]
+            )
+        ],
     )
     receipt.write_json(
         "flag-ladder-plan.json",
@@ -2149,6 +2406,7 @@ def _write_flag_ladder_dry_run(
     )
     receipt.event("flag_ladder_dry_run_written", {"profiles": plan})
     receipt.mark_recovery(step="flag-ladder-dry-run", status="finished")
+    receipt.write_status("finished", step="flag-ladder-dry-run")
     return receipt
 
 

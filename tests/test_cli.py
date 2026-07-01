@@ -641,6 +641,7 @@ def test_start_command_webui_callback_runs_librarian_pack_models(tmp_path, monke
                 mode_id="librarian_bench",
                 budget_minutes=7,
                 forced_server_args=("--jinja",),
+                flight_plan_id="librarian_benchmark",
                 benchmark_suite_plan=web_plan_path,
             ),
         )
@@ -680,6 +681,8 @@ def test_start_command_webui_callback_runs_librarian_pack_models(tmp_path, monke
     assert runs[0]["enable_mtp"] is True
     assert runs[0]["benchmark_suite_plan"] == web_plan_path
     assert runs[1]["benchmark_suite_plan"] == plan_path
+    assert runs[0]["run_mode_id"] == "librarian_bench"
+    assert runs[0]["flight_plan_id"] == "librarian_benchmark"
     assert runs[0]["budget_seconds"] == 7 * 60
     assert runs[0]["forced_server_args"][0] == "--jinja"
     assert "--temp" in runs[0]["forced_server_args"]
@@ -1255,6 +1258,41 @@ def test_results_command_can_delegate_to_local_report_server(tmp_path, monkeypat
     assert "http://127.0.0.1:8765/results.html" in result.output
 
 
+def test_export_plan_command_prints_resolved_plan(tmp_path):
+    run = tmp_path / "runs" / "20260629-qwen"
+    run.mkdir(parents=True)
+    (run / "resolved-plan.json").write_text(
+        json.dumps({"schema_version": 1, "program": "autoresearch", "model": "qwen.gguf"}),
+        encoding="utf-8",
+    )
+    (run / "command.txt").write_text(
+        "agent-autobench autoresearch --model qwen.gguf\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["export-plan", "--run", str(run), "--json-out"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["program"] == "autoresearch"
+    assert payload["model"] == "qwen.gguf"
+
+
+def test_export_plan_command_copies_resolved_plan(tmp_path):
+    run = tmp_path / "runs" / "20260629-qwen"
+    run.mkdir(parents=True)
+    (run / "resolved-plan.json").write_text(
+        json.dumps({"schema_version": 1, "program": "speed"}),
+        encoding="utf-8",
+    )
+    output = tmp_path / "exports" / "plan.json"
+
+    result = runner.invoke(app, ["export-plan", "--run", str(run), "--output", str(output)])
+
+    assert result.exit_code == 0
+    assert json.loads(output.read_text(encoding="utf-8"))["program"] == "speed"
+
+
 def test_serve_probe_command_prints_real_serving_metrics(tmp_path, monkeypatch):
     class FakeServingProbeResult:
         ok = True
@@ -1369,12 +1407,25 @@ def test_serve_probe_command_writes_speed_program_receipt(tmp_path, monkeypatch)
     run_dirs = list((tmp_path / "runs").iterdir())
     assert len(run_dirs) == 1
     payload = json.loads((run_dirs[0] / "speed-probe.json").read_text(encoding="utf-8"))
+    resolved = json.loads((run_dirs[0] / "resolved-plan.json").read_text(encoding="utf-8"))
+    status = json.loads((run_dirs[0] / "status.json").read_text(encoding="utf-8"))
     assert payload["program"] == "speed"
     assert payload["model"] == str(model)
     assert payload["settings"]["context_size"] == 16_384
     assert payload["settings"]["cache_type_k"] == "q8_0"
     assert payload["result"]["tokens_per_second"] == 88.5
     assert "500 word poem" in payload["prompt"]
+    assert resolved["program"] == "speed"
+    assert resolved["requested_context_size"] == 16384
+    assert resolved["commands"][0]["argv"][:3] == [
+        "agent-autobench",
+        "serve-probe",
+        "--model",
+    ]
+    assert "agent-autobench serve-probe" in (run_dirs[0] / "command.txt").read_text(
+        encoding="utf-8"
+    )
+    assert status["status"] == "finished"
     assert "Receipt:" in result.output
 
 
@@ -1498,6 +1549,28 @@ def test_benchmark_suite_plans_lists_bundled_plans():
     )
 
 
+def test_flight_plans_command_lists_beginner_contract():
+    result = runner.invoke(app, ["flight-plans", "--json-out"])
+
+    assert result.exit_code == 0
+    plans = json.loads(result.output)
+    librarian = next(plan for plan in plans if plan["id"] == "librarian_benchmark")
+    assert librarian["recommended"] is True
+    assert librarian["mode_id"] == "librarian_bench"
+    assert librarian["budget_minutes"] == 30
+    assert librarian["suggested_benchmark_suite_plans"][0]["filename"].endswith(".plan.json")
+
+
+def test_flight_plans_command_human_output_marks_recommended_plan():
+    result = runner.invoke(app, ["flight-plans"])
+
+    assert result.exit_code == 0
+    assert "pilotBENCHY Flight Plans" in result.output
+    assert "Librarian benchmark" in result.output
+    assert "Recommended" in result.output
+    assert "yes" in result.output
+
+
 def test_run_one_autoresearch_benchmark_mode_uses_simplebench_runner(monkeypatch, tmp_path):
     import gguf_limit_bench.cli as cli
     from gguf_limit_bench.evaluation_mode import EvaluationMode
@@ -1507,6 +1580,7 @@ def test_run_one_autoresearch_benchmark_mode_uses_simplebench_runner(monkeypatch
     class FakeLoop:
         def __init__(self, **kwargs):
             captured["candidate_sequence"] = kwargs.get("candidate_sequence")
+            captured["resolved_plan"] = kwargs.get("resolved_plan")
 
         def run(self):
             class R:
@@ -1528,10 +1602,14 @@ def test_run_one_autoresearch_benchmark_mode_uses_simplebench_runner(monkeypatch
         workflow_eval=False,
         ttft_probe=False,
         evaluation=EvaluationMode.BENCHMARK,
+        run_mode_id="librarian_bench",
+        flight_plan_id="librarian_benchmark",
     )
     # Benchmark mode must route through the flag-ladder question engine, which
     # supplies a candidate_sequence (the synthetic speed scout supplies none).
     assert captured["candidate_sequence"] is not None
+    assert captured["resolved_plan"]["mode_id"] == "librarian_bench"
+    assert captured["resolved_plan"]["flight_plan_id"] == "librarian_benchmark"
     assert "--temp" in captured["candidate_sequence"][0].extra_server_args
     assert "--top-p" in captured["candidate_sequence"][0].extra_server_args
 
@@ -1610,7 +1688,7 @@ def test_forced_server_args_apply_to_every_flag_ladder_profile(tmp_path):
     import gguf_limit_bench.cli as cli
     from gguf_limit_bench.evaluation_mode import EvaluationMode
 
-    model = tmp_path / "m.gguf"
+    model = tmp_path / "model with spaces % & ^.gguf"
     model.write_bytes(b"fake")
     receipt = cli._run_one_autoresearch(
         model=model,
@@ -1630,10 +1708,19 @@ def test_forced_server_args_apply_to_every_flag_ladder_profile(tmp_path):
         forced_server_args=("--no-mmap",),
     )
     plan = json.loads((receipt.path / "flag-ladder-plan.json").read_text(encoding="utf-8"))
+    resolved = json.loads((receipt.path / "resolved-plan.json").read_text(encoding="utf-8"))
+    status = json.loads((receipt.path / "status.json").read_text(encoding="utf-8"))
     commanded = [p for p in plan["profiles"] if p.get("command")]
     assert commanded, "dry-run plan should contain commands"
     for profile in commanded:
         assert "--no-mmap" in profile["command"]
+    assert resolved["dry_run"] is True
+    assert resolved["flag_ladder"] is True
+    assert resolved["commands"][0]["argv"][3] == str(model)
+    assert "agent-autobench autoresearch" in (receipt.path / "command.txt").read_text(
+        encoding="utf-8"
+    )
+    assert status["status"] == "finished"
 
 
 def test_effective_forced_args_keep_standard_flags_and_template_choice(monkeypatch):
