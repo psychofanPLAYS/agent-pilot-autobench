@@ -1397,15 +1397,33 @@ INDEX_HTML = r"""<!doctype html>
         else if(t==="question_scored"){const it=q.get(d.q_id); if(it)it.scored=d;}
         else if(t==="running_score"){running=d;}
         else if(t==="run_finished"||t==="run_stopped"){finished=d;}
-        else if(t==="receipt_ready"){bts.push({at:ev.at,k:"receipt",m:(d.path||d.model||"")});}
+        else if(t==="receipt_ready"){bts.push({at:ev.at,k:"receipt",d:d});}
         else if(t.startsWith("autoresearch")||t.startsWith("command")||t.startsWith("champion")||t.startsWith("benchmark_suite")||t==="model_failed"||t==="task_started"||t==="task_finished"){
-          bts.push({at:ev.at,k:t,m:JSON.stringify(d).slice(0,120)});
+          bts.push({at:ev.at,k:t,d:d});
         }
       }
       let planned=0; for(const v of packTotals.values()) planned+=v;
       return {questions:[...q.values()],curQ,running,model,mi,mt,models,bts,finished,planned};
     }
     function ckTime(at){return String(at||"").slice(11,19);}
+    function ckBase(p){return String(p||"").split(/[\\/]/).pop();}
+    function ckMsg(k,d){
+      d=d||{};
+      const prof=(d.settings||{}).profile_name;
+      if(k==="receipt") return "receipt · "+ckBase(d.path||d.model||"");
+      if(k==="autoresearch_started") return "flag ladder · "+((d.candidate_sequence||[]).length)+" profiles · budget "+(d.budget_seconds!=null?d.budget_seconds+"s":"?");
+      if(k==="autoresearch_attempt_started") return "attempt "+(d.attempt!=null?d.attempt:"?")+(prof?(" · "+prof):"");
+      if(k==="autoresearch_attempt_finished") return "attempt "+(d.attempt!=null?d.attempt:"?")+" done"+(prof?(" · "+prof):"");
+      if(k==="autoresearch_finished") return "best profile · "+(prof||"selected");
+      if(k==="champion_pack_eval_started") return "champion eval · "+((d.pack_ids||[]).length)+" packs";
+      if(k==="champion_pack_eval_finished") return "champion eval complete";
+      if(k==="champion_pack_eval_failed") return "champion eval failed · "+(d.error||"");
+      if(k==="model_failed") return "model failed · "+(d.error||"");
+      if(k.indexOf("command")===0) return String(d.command||d.cmd||d.name||"command").slice(0,80);
+      if(k.indexOf("task")===0) return k.replace("_"," ")+(d.name||d.task?(" · "+(d.name||d.task)):"");
+      const parts=[]; for(const key in d){const v=d[key]; if(v==null||typeof v==="object")continue; parts.push(key+"="+v); if(parts.length>=3)break;}
+      return parts.join(" · ")||k;
+    }
     function ckSpark(values,w,h){ w=w||70; h=h||22; if(!values.length) return "";
       const max=Math.max.apply(null,values.concat([1])), min=Math.min.apply(null,values.concat([0])); const span=(max-min)||1;
       const pts=values.map((v,i)=>{const x=values.length===1?w:(i/(values.length-1))*w; const y=h-2-((v-min)/span)*(h-4); return ckRound(x,1)+","+ckRound(y,1);}).join(" ");
@@ -1483,7 +1501,7 @@ INDEX_HTML = r"""<!doctype html>
       const queueSrc=m.models.length?m.models:[{name:modelName||"—",index:1,state:done?"done":"run"}];
       const queueHtml=queueSrc.map(mm=>{const cls=mm.state==="done"?"done":mm.state==="run"?"run":""; const right=mm.state==="done"?'<span class="qsc">✓</span>':mm.state==="run"?'<span class="qstate">running</span>':'<span class="qstate">queued</span>'; return '<div class="qitem '+cls+'"><span class="qdot"></span><span class="qn mono">'+escapeHtml(String(mm.name||"").replace(/\.gguf$/i,""))+'</span>'+right+'</div>';}).join("");
       const bts=m.bts.slice(-30);
-      const btsHtml=bts.length?bts.map(b=>'<div class="btsrow"><span class="bt">'+ckTime(b.at)+'</span><span class="bk">'+escapeHtml(b.k)+'</span><span>'+escapeHtml(b.m)+'</span></div>').join(""):'<div class="ck-empty" style="padding:10px">Engine attempts, flag ladder, and champion eval appear here.</div>';
+      const btsHtml=bts.length?bts.map(b=>'<div class="btsrow"><span class="bt">'+ckTime(b.at)+'</span><span class="bk">'+escapeHtml(b.k.replace(/_/g," "))+'</span><span>'+escapeHtml(ckMsg(b.k,b.d))+'</span></div>').join(""):'<div class="ck-empty" style="padding:10px">Engine attempts, flag ladder, and champion eval appear here.</div>';
 
       document.getElementById("cockpit").innerHTML=
         '<div class="cmdbar">'+cmd+'</div>'
