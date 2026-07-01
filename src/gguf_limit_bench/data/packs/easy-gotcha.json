@@ -202,11 +202,18 @@
     },
     {
       "question_id": "bookshelf-worm",
-      "prompt": "A bookworm starts eating from the front cover of volume 1 and eats straight through to the back cover of volume 2. If each book is 2 inches thick plus 0.25-inch covers on each side, and the books are on a shelf in order, how far does the worm travel?",
+      "prompt": "Two volumes of an encyclopedia stand upright and closed on a shelf, side by side in normal reading order (Volume 1 on the left, Volume 2 on its right), each shelved the usual way so the pages face the same direction as they would on a bookstore display. Every volume is 2 inches of pages bound between two 0.25-inch-thick covers. A bookworm bores in a straight horizontal line from the front cover of Volume 1 through to the back cover of Volume 2, taking the shortest path. In inches, what is the total thickness of material the worm eats through?",
       "answer": "0.5",
       "tags": [
         "riddle",
         "spatial"
+      ],
+      "accept": [
+        "0.5 inches",
+        "0.5 in",
+        ".5",
+        "1/2",
+        "0.50"
       ]
     },
     {
