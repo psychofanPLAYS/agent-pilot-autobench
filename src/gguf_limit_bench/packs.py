@@ -6,6 +6,31 @@ from pathlib import Path
 import re
 from typing import Any
 
+import yaml
+
+# Canonical on-disk question-set formats (self-contained: system prompt + questions +
+# answers in one file). YAML is the human-friendly authoring format; JSON still loads.
+# See docs/QUESTION-SETS.md.
+_PACK_SUFFIXES = (".yaml", ".yml", ".json")
+
+
+def _read_pack_mapping(path: Path) -> dict[str, Any]:
+    """Parse a question-set file (.yaml/.yml/.json) into a mapping."""
+    text = path.read_text(encoding="utf-8")
+    if path.suffix.lower() == ".json":
+        data = json.loads(text)
+    else:
+        data = yaml.safe_load(text)
+    if not isinstance(data, dict):
+        raise ValueError(f"Question set {path.name!r} must be a mapping at the top level")
+    return data
+
+
+def _pack_id_of(mapping: dict[str, Any]) -> str | None:
+    """A set's id — accepts `id` (preferred) or legacy `pack_id`."""
+    value = mapping.get("id", mapping.get("pack_id"))
+    return str(value) if value is not None else None
+
 try:
     from enum import StrEnum
 except ImportError:  # Python < 3.11
@@ -62,12 +87,14 @@ def available_packs() -> tuple[str, ...]:
     """Return IDs of all available question packs."""
     dynamic: list[str] = []
     if _PACKS_DIR.exists():
-        for path in sorted(_PACKS_DIR.glob("*.json")):
+        for path in sorted(
+            p for p in _PACKS_DIR.iterdir() if p.suffix.lower() in _PACK_SUFFIXES
+        ):
             try:
-                payload = json.loads(path.read_text(encoding="utf-8"))
-                if "pack_id" in payload:
-                    dynamic.append(str(payload["pack_id"]))
-            except (OSError, json.JSONDecodeError):
+                pid = _pack_id_of(_read_pack_mapping(path))
+                if pid:
+                    dynamic.append(pid)
+            except (OSError, ValueError, json.JSONDecodeError, yaml.YAMLError):
                 pass
     known = list(DEFAULT_PACKS)
     for pid in dynamic:
@@ -91,9 +118,6 @@ def load_pack(pack_id: str) -> QuestionPack:
 
     Raises KeyError if the pack is not found.
     """
-    if pack_id == "simple-bench":
-        return _load_simple_bench()
-
     procedural = _PROCEDURAL_LONGCTX_RE.fullmatch(pack_id)
     if procedural:
         # Local import avoids a circular dependency: procedural_packs imports
@@ -113,53 +137,23 @@ def load_pack(pack_id: str) -> QuestionPack:
     if pack_id in LIBRARIAN_BUILDERS:
         return LIBRARIAN_BUILDERS[pack_id](0)
 
-    pack_path = _PACKS_DIR / f"{pack_id}.json"
-    if not pack_path.exists():
+    pack_path = next(
+        (p for suffix in _PACK_SUFFIXES if (p := _PACKS_DIR / f"{pack_id}{suffix}").exists()),
+        None,
+    )
+    if pack_path is None:
         raise KeyError(f"Unknown question pack: {pack_id!r}")
 
-    payload = json.loads(pack_path.read_text(encoding="utf-8"))
-    if payload.get("pack_id") != pack_id:
+    payload = _read_pack_mapping(pack_path)
+    if _pack_id_of(payload) != pack_id:
         raise KeyError(f"Unknown question pack: {pack_id!r}")
 
-    return _load_json_pack(payload, pack_path)
+    return _pack_from_mapping(payload, pack_path)
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
-
-
-def _load_simple_bench() -> QuestionPack:
-    data_path = _DATA_DIR / "simple_bench_public.json"
-    system_prompt_path = _DATA_DIR / "system_prompt.txt"
-
-    payload = json.loads(data_path.read_text(encoding="utf-8"))
-    rows = payload["eval_data"]
-    system_prompt = system_prompt_path.read_text(encoding="utf-8").strip()
-
-    questions: list[PackQuestion] = []
-    for row in rows:
-        qid = str(row["question_id"])
-        questions.append(
-            PackQuestion(
-                question_id=qid,
-                prompt=str(row["prompt"]).strip(),
-                answer=str(row["answer"]).strip().upper(),
-                answer_source="dataset_label:simple-bench",
-                choices=None,
-                tags=(),
-                accept=(),
-            )
-        )
-
-    return QuestionPack(
-        pack_id="simple-bench",
-        title="SimpleBench Public",
-        tier="hard",
-        answer_type=AnswerType.MULTIPLE_CHOICE,
-        system_prompt=system_prompt,
-        questions=tuple(questions),
-    )
 
 
 def _derive_answer_source(question_id: str, answer_type: AnswerType) -> str:
@@ -174,26 +168,48 @@ def _derive_answer_source(question_id: str, answer_type: AnswerType) -> str:
     return f"dataset_label:{prefix}"
 
 
-def _load_json_pack(payload: dict[str, Any], pack_path: Path) -> QuestionPack:
-    pack_id = str(payload["pack_id"])
+def _pack_from_mapping(payload: dict[str, Any], pack_path: Path) -> QuestionPack:
+    """Build a QuestionPack from a self-contained set mapping (YAML or JSON).
+
+    Canonical schema (see docs/QUESTION-SETS.md): `id`, `title`, `tier`,
+    `answer_type`, inline `system_prompt`, and `questions` (each `id`, `prompt`,
+    `answer`, optional `choices`/`accept`/`tags`). Legacy keys still load:
+    `pack_id`, per-question `question_id`, `system_prompt_ref` (external file), and
+    `eval_data` in place of `questions`."""
+    pack_id = _pack_id_of(payload)
+    if not pack_id:
+        raise ValueError(f"Question set {pack_path.name!r} is missing an `id`")
     title = str(payload.get("title", pack_id))
     tier = str(payload.get("tier", "unknown"))
+    if "answer_type" not in payload:
+        raise ValueError(f"Question set {pack_id!r} is missing `answer_type`")
     answer_type = AnswerType(str(payload["answer_type"]))
 
-    # Resolve system_prompt: look in packs dir first, then data dir
+    # Prefer inline `system_prompt` (the canonical, self-contained form); fall back to
+    # a legacy external `system_prompt_ref` for old files.
     system_prompt_ref = payload.get("system_prompt_ref")
-    if system_prompt_ref:
+    if payload.get("system_prompt"):
+        system_prompt = str(payload["system_prompt"]).strip()
+    elif system_prompt_ref:
         sp_path = pack_path.parent / system_prompt_ref
         if not sp_path.exists():
             sp_path = pack_path.parent.parent / system_prompt_ref
         system_prompt = sp_path.read_text(encoding="utf-8").strip()
     else:
-        system_prompt = str(payload.get("system_prompt", ""))
+        raise ValueError(
+            f"Question set {pack_id!r} is missing `system_prompt` (put it up top in the file)"
+        )
 
-    raw_questions: list[dict[str, Any]] = payload.get("questions", [])
+    raw_questions: list[dict[str, Any]] = payload.get("questions") or payload.get("eval_data") or []
+    if not raw_questions:
+        raise ValueError(f"Question set {pack_id!r} has no `questions`")
     questions: list[PackQuestion] = []
     for raw in raw_questions:
-        qid = str(raw["question_id"])
+        if "id" not in raw and "question_id" not in raw:
+            raise ValueError(f"Question set {pack_id!r}: a question is missing `id`")
+        qid = str(raw.get("id", raw.get("question_id")))
+        if "answer" not in raw:
+            raise ValueError(f"Question set {pack_id!r} question {qid!r}: missing `answer`")
         choices_raw: list[str] | None = raw.get("choices")
         choices: tuple[str, ...] | None = (
             tuple(str(c) for c in choices_raw) if choices_raw else None
@@ -206,18 +222,15 @@ def _load_json_pack(payload: dict[str, Any], pack_path: Path) -> QuestionPack:
 
         answer_source = str(raw.get("answer_source", "")) or _derive_answer_source(qid, answer_type)
 
-        # Validate MC questions
+        # Validate MC questions. `choices` is OPTIONAL: some sets (e.g. SimpleBench)
+        # embed the options directly in the prompt, so we only range-check when an
+        # explicit choices list is provided.
         if answer_type is AnswerType.MULTIPLE_CHOICE:
-            if not choices:
-                raise ValueError(
-                    f"Pack {pack_id!r} question {qid!r}: MC question must have non-empty choices"
-                )
             if len(answer) != 1 or answer not in "ABCDEF":
                 raise ValueError(
                     f"Pack {pack_id!r} question {qid!r}: MC answer must be a single letter A-F"
                 )
-            letter_index = ord(answer) - ord("A")
-            if letter_index >= len(choices):
+            if choices and (ord(answer) - ord("A")) >= len(choices):
                 raise ValueError(
                     f"Pack {pack_id!r} question {qid!r}: answer {answer!r} out of range for choices"
                 )

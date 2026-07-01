@@ -85,6 +85,56 @@ def test_load_pack_raises_key_error_for_unknown_id():
         load_pack("nope")
 
 
+def test_load_self_contained_yaml_set(tmp_path):
+    from gguf_limit_bench.packs import _pack_from_mapping, _read_pack_mapping
+
+    path = tmp_path / "my-set.yaml"
+    path.write_text(
+        "id: my-set\n"
+        "title: My Set\n"
+        "answer_type: exact\n"
+        "system_prompt: |\n"
+        "  Answer precisely. Final Answer: X\n"
+        "questions:\n"
+        "  - id: q1\n"
+        "    prompt: What is 2+2?\n"
+        "    answer: '4'\n"
+        "    accept: [four]\n",
+        encoding="utf-8",
+    )
+    pack = _pack_from_mapping(_read_pack_mapping(path), path)
+    assert pack.pack_id == "my-set"
+    assert pack.answer_type is AnswerType.EXACT
+    assert "Final Answer" in pack.system_prompt
+    assert pack.questions[0].question_id == "q1"
+    assert pack.questions[0].answer == "4"
+    assert pack.questions[0].accept == ("four",)
+
+
+def test_simple_bench_is_yaml_backed_with_inline_system_prompt():
+    pack = load_pack("simple-bench")
+    assert pack.system_prompt and "Final Answer" in pack.system_prompt
+
+
+@pytest.mark.parametrize(
+    "body, message",
+    [
+        ("id: x\nanswer_type: exact\nquestions:\n  - id: q\n    prompt: p\n    answer: a\n",
+         "system_prompt"),
+        ("id: x\nsystem_prompt: s\nquestions:\n  - id: q\n    prompt: p\n    answer: a\n",
+         "answer_type"),
+        ("id: x\nanswer_type: exact\nsystem_prompt: s\n", "no `questions`"),
+    ],
+)
+def test_malformed_yaml_set_gives_clear_error(tmp_path, body, message):
+    from gguf_limit_bench.packs import _pack_from_mapping, _read_pack_mapping
+
+    path = tmp_path / "bad.yaml"
+    path.write_text(body, encoding="utf-8")
+    with pytest.raises(ValueError, match=message):
+        _pack_from_mapping(_read_pack_mapping(path), path)
+
+
 # ---------------------------------------------------------------------------
 # Task 8: easy-gotcha pack hardening tests
 # ---------------------------------------------------------------------------
