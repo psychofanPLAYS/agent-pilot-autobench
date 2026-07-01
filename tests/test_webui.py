@@ -319,6 +319,8 @@ def test_webui_abort_writes_control_and_kills_engine(tmp_path, monkeypatch):
     assert ok is True
     assert run_dir.read_control(state.active_run_dir)["action"] == "abort"
     assert len(killed) == 1
+    # a hard-killed engine can't update its own status, so the web server stamps it
+    assert run_dir.read_status(state.active_run_dir)["phase"] == "aborted"
 
 
 def test_webui_rejects_unknown_model_path(tmp_path):

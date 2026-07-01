@@ -234,6 +234,10 @@ class WebUiState:
             run_dir_io.write_control(self.active_run_dir, "abort")
             if self.engine_process is not None:
                 kill_process_tree(self.engine_process)
+            # A hard-killed engine can't update its own status, so stamp the final
+            # phase here — otherwise the run dir stays "running" forever and the
+            # cockpit shows a stale live run after an abort.
+            run_dir_io.write_status(self.active_run_dir, phase="aborted")
             self.run.stop_requested = True
             self.run.events.append(_event("abort", "Abort requested. Killing the engine now."))
             return True, "Run aborted."

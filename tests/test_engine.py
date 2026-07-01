@@ -115,3 +115,32 @@ def test_engine_releases_lock(tmp_path):
     engine.run_engine(tmp_path, lambda m, o, e: tmp_path)
     # lock is free again -> a fresh acquire succeeds
     assert run_dir.acquire_lock(tmp_path, pid=12345) is True
+
+
+def test_engine_heartbeat_refreshes_status_during_a_long_model(tmp_path, monkeypatch):
+    """A slow model with no events must still get a fresh status heartbeat, so the
+    web UI never mistakes a live run for a crashed one on refresh/reattach."""
+    import time
+
+    _spec(tmp_path, ["a"])
+    writes: list = []
+    real_write = run_dir.write_status
+
+    def spy(*args, **kwargs):
+        writes.append(kwargs.get("phase"))
+        return real_write(*args, **kwargs)
+
+    monkeypatch.setattr(engine.run_dir, "write_status", spy)
+
+    def fake_run(model, options, emit):
+        # block (emitting nothing) until the heartbeat thread has ticked a few times
+        deadline = time.time() + 2.0
+        while len(writes) < 3 and time.time() < deadline:
+            time.sleep(0.02)
+        return tmp_path
+
+    engine.run_engine(tmp_path, fake_run, heartbeat_seconds=0.05)
+
+    # initial status + heartbeat tick(s) during the model + final write
+    assert len(writes) >= 3
+    assert run_dir.read_status(tmp_path)["phase"] == "complete"
