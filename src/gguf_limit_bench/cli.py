@@ -1710,6 +1710,8 @@ def engine(
             champion_pack_ids=(
                 tuple(LIBRARIAN_PACK_IDS) if mode_id == "librarian_bench" else None
             ),
+            champion_sample_size=int(options.get("sample_size") or 5),
+            champion_repeats=int(options.get("repeats") or 1),
         )
         emit("receipt_ready", {"model": str(model_path), "path": str(receipt.path)})
         return receipt
@@ -2009,6 +2011,7 @@ def _run_one_autoresearch(
     evaluation: EvaluationMode = EvaluationMode.BENCHMARK,
     forced_server_args: tuple[str, ...] = (),
     champion_sample_size: int = 5,
+    champion_repeats: int = 1,
     champion_selection: str = "sequential",
     champion_pack_ids: tuple[str, ...] | None = None,
     champion_state_db_path: Path | None = None,
@@ -2151,6 +2154,7 @@ def _run_one_autoresearch(
         llama_server=llama_server,
         champion_pack_ids=champion_pack_ids,
         champion_sample_size=champion_sample_size,
+        champion_repeats=champion_repeats,
         champion_selection=champion_selection,
         champion_state_db_path=resolved_state_db_path,
         champion_gpu_name=resolved_gpu_name,

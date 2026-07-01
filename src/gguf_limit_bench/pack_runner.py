@@ -17,6 +17,8 @@ continue to import from there unchanged.
 
 from __future__ import annotations
 
+from collections import Counter
+from dataclasses import replace
 import json
 import time
 from urllib.error import URLError
@@ -60,6 +62,7 @@ def run_pack_questions(
     answer_max_tokens: int = UNLIMITED_THINKING,
     base_url: str,
     timeout_seconds: int = 600,
+    repeats: int = 1,
 ) -> SimpleBenchBatchResult:
     """Run *questions* from *pack* and return a scored batch result.
 
@@ -83,6 +86,7 @@ def run_pack_questions(
     """
     results: list[SimpleBenchQuestionResult] = []
     total = len(questions)
+    effective_repeats = max(1, repeats)
 
     for index, question in enumerate(questions, start=1):
         emit(
@@ -95,15 +99,20 @@ def run_pack_questions(
                 "prompt": question.prompt,
             },
         )
-        result = _run_one_question(
-            pack=pack,
-            question=question,
-            answer_max_tokens=answer_max_tokens,
-            base_url=base_url,
-            timeout_seconds=timeout_seconds,
-            q_id=question.question_id,
-        )
+        reps = [
+            _run_one_question(
+                pack=pack,
+                question=question,
+                answer_max_tokens=answer_max_tokens,
+                base_url=base_url,
+                timeout_seconds=timeout_seconds,
+                q_id=question.question_id,
+            )
+            for _ in range(effective_repeats)
+        ]
+        result = reps[0] if effective_repeats == 1 else _aggregate_repeats(reps)
         results.append(result)
+        pass_count = sum(1 for r in reps if r.correct)
         emit(
             "question_scored",
             {
@@ -117,6 +126,8 @@ def run_pack_questions(
                 "score": 1.0 if result.correct else 0.0,
                 "ttft_ms": result.ttft_ms,
                 "tok_s": result.tokens_per_second,
+                "repeats": effective_repeats,
+                "pass_rate": round(pass_count / effective_repeats, 3),
             },
         )
 
@@ -126,6 +137,42 @@ def run_pack_questions(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _aggregate_repeats(
+    results: list[SimpleBenchQuestionResult],
+) -> SimpleBenchQuestionResult:
+    """Aggregate N repeats of one question by MAJORITY VOTE.
+
+    Matches the reference SimpleBench majority-vote scorer: the question counts as
+    correct iff a strict majority of the repeats are correct (this is the N-repeat
+    fix for the single-``temp=0``-sample validity gap). Timings are medianed and the
+    representative predicted answer is the most common one across repeats."""
+    n = len(results)
+    pass_count = sum(1 for r in results if r.correct)
+    is_correct = pass_count > n / 2
+
+    preds = [r.predicted_answer for r in results if r.predicted_answer is not None]
+    predicted = Counter(preds).most_common(1)[0][0] if preds else None
+
+    if is_correct:
+        outcome = "correct"
+        base = next(r for r in results if r.correct)
+    else:
+        non_correct = [r.outcome for r in results if r.outcome != "correct"]
+        outcome = Counter(non_correct).most_common(1)[0][0] if non_correct else "wrong"
+        base = results[0]
+
+    ttfts = [r.ttft_ms for r in results if r.ttft_ms is not None]
+    tpss = [r.tokens_per_second for r in results if r.tokens_per_second]
+    return replace(
+        base,
+        correct=is_correct,
+        outcome=outcome,
+        predicted_answer=predicted,
+        ttft_ms=_median(ttfts) if ttfts else base.ttft_ms,
+        tokens_per_second=(_median(tpss) or base.tokens_per_second),
+    )
 
 
 def _run_one_question(

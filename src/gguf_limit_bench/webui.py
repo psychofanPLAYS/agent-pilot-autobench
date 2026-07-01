@@ -79,6 +79,8 @@ class WebRunOptions:
     show_thinking: bool = False
     stream_prompts: bool = True
     benchmark_suite_plan: Path | None = None
+    repeats: int = 1
+    sample_size: int = 5
 
 
 @dataclass
@@ -299,6 +301,8 @@ def _spec_payload(
             "benchmark_suite_plan": str(plan) if plan is not None else None,
             "show_thinking": options.show_thinking,
             "stream_prompts": options.stream_prompts,
+            "repeats": options.repeats,
+            "sample_size": options.sample_size,
         },
         "paths": _paths_block(llama_paths),
     }
@@ -417,6 +421,12 @@ def build_run_options(
     benchmark_suite_plan = resolve_benchmark_suite_plan(
         project_root or Path.cwd(), payload.get("benchmark_suite_plan")
     )
+    repeats = int(payload.get("repeats") or 1)
+    if not 1 <= repeats <= 20:
+        raise ValueError("Repeats must be between 1 and 20.")
+    sample_size = int(payload.get("sample_size") or 5)
+    if not 1 <= sample_size <= 200:
+        raise ValueError("Sample size must be between 1 and 200.")
     return WebRunOptions(
         mode_id=mode_id,
         budget_minutes=budget_minutes,
@@ -424,6 +434,8 @@ def build_run_options(
         show_thinking=bool(payload.get("show_thinking", False)),
         stream_prompts=bool(payload.get("stream_prompts", True)),
         benchmark_suite_plan=benchmark_suite_plan,
+        repeats=repeats,
+        sample_size=sample_size,
     )
 
 
@@ -1231,6 +1243,10 @@ INDEX_HTML = r"""<!doctype html>
                   <label for="budget">Budget minutes per model</label>
                   <input id="budget" type="number" min="1" max="1440" value="30" />
                 </div>
+                <div class="field">
+                  <label for="repeats">Repeats per question (N-repeat, majority vote)</label>
+                  <input id="repeats" type="number" min="1" max="20" value="1" />
+                </div>
               <div class="field">
                 <label>Standard forced flags</label>
                 <div id="standard-flags"></div>
@@ -1732,6 +1748,7 @@ INDEX_HTML = r"""<!doctype html>
         mode_id: document.querySelector("#mode").value,
         options: {
           budget_minutes: Number(document.querySelector("#budget").value),
+          repeats: Number(document.querySelector("#repeats").value),
           benchmark_suite_plan: document.querySelector("#benchmark-suite-plan").value,
           forced_server_args: selectedForcedArgs(),
           stream_prompts: document.querySelector("#stream-prompts").checked,

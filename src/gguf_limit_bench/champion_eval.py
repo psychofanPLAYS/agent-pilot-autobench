@@ -61,6 +61,7 @@ def evaluate_champion_packs(
     state_db_path: Path | None = None,
     gpu_name: str = "",
     timeout_seconds: int = 600,
+    repeats: int = 1,
 ) -> None:
     """Evaluate *pack_ids* on the best champion settings and write results.json.
 
@@ -143,6 +144,7 @@ def evaluate_champion_packs(
                     sample_size=sample_size,
                     selection=selection,
                     seed=seed,
+                    repeats=repeats,
                 )
                 pack_dicts.append(pack_dict)
     finally:
@@ -196,6 +198,7 @@ def _eval_one_pack(
     sample_size: int,
     selection: str,
     seed: int | None,
+    repeats: int = 1,
 ) -> dict:
     """Run a single pack and return a pack dict suitable for build_results_payload."""
     try:
@@ -218,6 +221,7 @@ def _eval_one_pack(
         pack=pack,
         questions=chosen,
         base_url=base_url,
+        repeats=repeats,
     )
 
     set_selection_cursor(conn, model_key=model_key, pack_id=pack_id, cursor=next_cursor)
