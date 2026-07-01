@@ -396,10 +396,14 @@ class AutoresearchLoop:
                     "telemetry": sample_telemetry().to_dict(),
                 },
             )
-            remaining_seconds = self.budget_seconds - (time.monotonic() - started)
-            attempt_seconds = remaining_seconds
-            if self.round_seconds is not None:
-                attempt_seconds = min(attempt_seconds, self.round_seconds)
+            # Soft budget: the while-loop above only STARTS a new attempt while under
+            # budget; a started attempt then runs to completion — capped by
+            # round_seconds if set, otherwise given the full budget as a safety ceiling
+            # — rather than being truncated to the leftover time. So a run overruns its
+            # budget by at most one attempt instead of abruptly aborting mid-work.
+            attempt_seconds = (
+                self.round_seconds if self.round_seconds is not None else self.budget_seconds
+            )
             set_timeout = getattr(self.attempt_runner, "set_timeout_seconds", None)
             if callable(set_timeout):
                 set_timeout(max(1, math.ceil(attempt_seconds)))
