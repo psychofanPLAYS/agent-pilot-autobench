@@ -1,4 +1,16 @@
-# AGENTS Instructions For Agent Pilot Autobench
+# AGENTS Instructions For pilotBENCHY
+
+> ## 🚨 READ THIS FIRST — architecture is fixed (SSOT)
+> The run-flow architecture is the **detached-engine cockpit** and it is
+> **non-negotiable**. Before touching `webui.py`, `cli.py`, `engine.py`, or anything
+> in the run/eval path, read **`docs/ARCHITECTURE.md` → "DESIGN DIRECTION — SSOT"**.
+> In one line: **the detached `engine` subprocess does ALL evaluation; the web UI is a
+> THIN client (the primary user surface) that only sends instructions and renders what
+> the engine wrote; the run directory on disk is the only seam.**
+> Do **NOT** run evaluation inside the web server, and do **NOT** pass a `run_model`
+> callback into `serve_webui`/`WebUiState`. If you believe the architecture should
+> change, update that SSOT section first with the owner's sign-off — never silently
+> build a different design. (A prior branch diverged this way and had to be discarded.)
 
 ## Purpose
 

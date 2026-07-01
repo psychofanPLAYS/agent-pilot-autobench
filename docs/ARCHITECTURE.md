@@ -1,31 +1,69 @@
 # Architecture and Code Map
 
-Agent Pilot Autobench is a local-first Python CLI plus browser cockpit around existing llama.cpp tools.
-It does not replace `llama-bench`, `llama-cli`, or `llama-server`; it makes experiments
-repeatable, records evidence, and compares candidates under explicit budgets.
+pilotBENCHY is a local-first benchmarking app around existing llama.cpp tools. The
+**web cockpit is the primary surface** a user interacts with; a CLI and TUI exist for
+power users and automation. It does not replace `llama-bench`, `llama-cli`, or
+`llama-server`; it makes experiments repeatable, records evidence, and compares
+candidates under explicit budgets.
 
-## Data Flow
+---
+
+## ⚠️ DESIGN DIRECTION — SSOT, NON-NEGOTIABLE (read before touching web/engine)
+
+This is the single source of truth for how the run-flow is built. Any change that
+violates these must update this section first (with the owner's sign-off) — do **not**
+silently build a different architecture. (A prior agent diverged by re-adding
+in-process web evaluation; that is exactly what these rules forbid.)
+
+1. **The engine is the only thing that evaluates.** Evaluation runs in a **detached
+   engine subprocess** (its own process group), launched by `cli.py`'s `engine`
+   command. It runs the models, scores them, and writes the canonical record.
+2. **The web UI is a THIN CLIENT and the PRIMARY user surface.** Two jobs only:
+   (a) pass instructions to the engine, (b) render what the engine wrote. It **never**
+   computes a score, queries a model, or holds evaluation state. It must ALSO be a
+   *work of art* — beautiful and genuinely functional, since it is what users see.
+   `serve_webui` / `WebUiState` must **not** accept a `run_model` callback or run eval
+   in-process. The web server may die and the run continues.
+3. **The run directory on disk is the ONLY seam** between web and engine
+   (`run-spec.json`, `control.json`, `status.json`, `live.jsonl`, `telemetry.jsonl`,
+   receipts). No other coupling.
+4. **Impeccable process & window hygiene** — detached process groups, kill-tree on
+   stop/abort (no orphaned engine or llama-server), a status heartbeat, and reattach
+   on browser refresh (a refresh must never kill or orphan an in-flight run).
+5. **Sequential by default.** One model fully evaluated before the next; the only
+   parallel case is a deliberate concurrency "pressure test" against a single model.
+
+Deep reference: `docs/superpowers/specs/2026-06-30-inflight-cockpit-design.md`.
+Modules that implement the seam: `engine.py`, `run_dir.py`, `events.py`,
+`server_probe.py` (kill-tree), and the thin `webui.py`.
+
+## Data Flow (detached-engine architecture)
 
 ```text
-CLI, WebSocket browser cockpit, or terminal TUI fallback
-  -> resolved config and discovered GGUF models
-  -> benchmark/autoresearch runner
-  -> llama.cpp subprocess or benchmark harness
-  -> telemetry, score, and failure classification
-  -> append-only ledgers and per-run receipt
-  -> Markdown, JSON, TSV, and HTML reports
+web cockpit (thin)          run directory (the ONLY seam)         engine (detached)
+  browser renders    <— WS —>  control.json / status.json  <——   sequential runner
+  web server               live.jsonl / telemetry.jsonl / metrics —>  llama.cpp
+  passes orders  —— r/w ——>  run-spec.json  ————————————————————>  (own proc group)
+                                     |
+                              receipts + Markdown/JSON/TSV/HTML reports
 ```
 
-Subprocesses receive argument lists directly (`shell=False`). Benchmark-controlled
-servers bind to `127.0.0.1` by default. Generated models, databases, environments, and
-receipts stay in ignored project-local directories.
+The web server **launches the engine detached and returns immediately** — it never
+evaluates in-process. The engine appends `live.jsonl` (per-question thinking/answer/
+score + lifecycle) and rewrites `status.json` (heartbeat) every ~2s; the UI tails from
+a cursor and re-reads from offset 0 on reconnect. Subprocesses receive argument lists
+directly (`shell=False`); benchmark-controlled servers bind to `127.0.0.1` by default.
+Generated models, databases, environments, and receipts stay in ignored project-local
+directories.
 
 ## Feature Map
 
 | Feature | Command | Main implementation | Outputs | Primary tests |
 | --- | --- | --- | --- | --- |
 | First-run setup | `agent-autobench --first-run` | `cli.py`, `installer.py`, `doctor.py` | `_bin/`, `_db/`, `_runs/` | `test_cli.py`, `test_installer.py`, `test_doctor.py` |
-| Browser cockpit | `apb` / `agent-autobench start` | `webui.py`, `cli.py`, `discovery.py`, FastAPI/WebSocket service | selected model paths, WebSocket run events, telemetry, receipts | `test_webui.py`, `test_cli.py` |
+| Browser cockpit (thin client, PRIMARY surface) | `pilotbench start` | `webui.py` (renders only; spawns detached engine, tails run dir) | run-spec.json + rendered live cockpit | `test_webui.py`, `test_cli.py` |
+| Detached engine (does ALL eval) | `pilotbench engine --run-dir` | `engine.py`, `run_dir.py`, `events.py` | live.jsonl, status.json, receipts | `test_engine.py`, `test_run_dir.py`, `test_events.py` |
+| GPU-free cockpit replay | `pilotbench engine-replay` | `engine_replay.py` | re-streamed live.jsonl | `test_engine_replay.py` |
 | Model discovery | `agent-autobench survey` | `discovery.py`, `selection.py`, `tui.py` | selected model paths | `test_discovery.py`, `test_selection.py`, `test_tui.py` |
 | Raw speed probe | `agent-autobench quick` | `runner.py`, `autoresearch.py` | receipt and speed metrics | `test_autoresearch.py` |
 | Adaptive autoresearch | `agent-autobench autoresearch` | `autoresearch.py`, `learning.py` | best settings, attempts/results TSV | `test_autoresearch.py`, `test_learning.py` |
