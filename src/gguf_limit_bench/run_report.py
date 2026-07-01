@@ -5,6 +5,8 @@ from html import escape
 import json
 from pathlib import Path
 
+from gguf_limit_bench import charts
+
 
 @dataclass(frozen=True)
 class AttemptReport:
@@ -43,12 +45,43 @@ def write_itemized_run_report(receipt_path: Path) -> None:
             best.get("result", {}), attempts, context_profile_rows, perplexity_profile_rows
         ),
         "recommendation": _recommendation(best, attempts),
+        "quality": _results_quality(receipt_path / "results.json"),
     }
     (receipt_path / "report.json").write_text(
         json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8"
     )
     (receipt_path / "itemized-report.md").write_text(_markdown(payload), encoding="utf-8")
     (receipt_path / "report.html").write_text(_html(payload), encoding="utf-8")
+    # Sync-ready metrics record (Agent Index, speed, efficiency) from this receipt.
+    from gguf_limit_bench.metrics import write_run_metrics
+
+    write_run_metrics(receipt_path)
+
+
+def _results_quality(results_path: Path) -> dict:
+    """Per-pack accuracy + aggregate question outcomes from a run's results.json.
+
+    Returns ``{"packs": [...], "correct": int, "wrong": int, "incomplete": int}``;
+    empty lists/zeros when the receipt has no scored librarian results.
+    """
+    empty = {"packs": [], "correct": 0, "wrong": 0, "incomplete": 0}
+    try:
+        payload = json.loads(results_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return empty
+    if not isinstance(payload, dict):
+        return empty
+    packs: list[dict] = []
+    correct = wrong = incomplete = 0
+    for pack in payload.get("packs", []) or []:
+        if not isinstance(pack, dict) or pack.get("status") != "scored":
+            continue
+        if pack.get("accuracy") is not None and pack.get("pack_id"):
+            packs.append({"pack_id": str(pack["pack_id"]), "accuracy": float(pack["accuracy"])})
+        correct += int(pack.get("correct") or 0)
+        wrong += int(pack.get("wrong") or 0)
+        incomplete += int(pack.get("incomplete") or 0)
+    return {"packs": packs, "correct": correct, "wrong": wrong, "incomplete": incomplete}
 
 
 def _attempts_from_events(events_path: Path) -> list[AttemptReport]:
@@ -400,6 +433,7 @@ def _html(payload: dict) -> str:
         for row in payload["attempts"]
     )
     settings = escape(json.dumps(payload["best_settings"], ensure_ascii=True, indent=2))
+    charts_html, chart_runtime = _charts_block(payload)
     metric_rows = "\n".join(
         "<tr>"
         f"<td>{escape(row['metric'])}</td><td>{escape(row['status'])}</td>"
@@ -415,14 +449,21 @@ def _html(payload: dict) -> str:
   <style>
     body {{ margin: 0; background: #101418; color: #e8edf2; font: 15px/1.5 Segoe UI, sans-serif; }}
     main {{ max-width: 1100px; margin: 0 auto; padding: 28px; }}
-    h1, h2 {{ margin-bottom: 8px; }}
+    h1, h2, h3 {{ margin-bottom: 8px; }}
     .panel {{ border: 1px solid #314150; background: #17202a; border-radius: 8px; padding: 18px; margin: 14px 0; }}
     table {{ width: 100%; border-collapse: collapse; }}
     th, td {{ border-bottom: 1px solid #314150; padding: 8px; text-align: left; }}
     code, pre {{ background: #0c1116; border: 1px solid #314150; border-radius: 6px; padding: 10px; overflow: auto; }}
+    .chart-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }}
+    .chart-card {{ border: 1px solid #314150; background: #0f1620; border-radius: 8px; padding: 14px; }}
+    .chart-card.wide {{ grid-column: 1 / -1; }}
+    .chart-card h3 {{ margin: 0 0 4px; font-size: 0.98rem; }}
+    .chart-card p {{ margin: 0 0 10px; color: #9aa8b7; font-size: 0.82rem; }}
+    @media (max-width: 720px) {{ .chart-grid {{ grid-template-columns: 1fr; }} }}
   </style>
 </head>
 <body>
+  {chart_runtime}
   <main>
     <h1>Agent Pilot Itemized Report</h1>
     <section class="panel">
@@ -431,6 +472,7 @@ def _html(payload: dict) -> str:
       <p>Score: <strong>{escape(str(payload.get("score")))}</strong></p>
       <p>{escape(payload["recommendation"])}</p>
     </section>
+    {charts_html}
     <section class="panel">
       <h2>Attempts</h2>
       <table>
@@ -453,6 +495,70 @@ def _html(payload: dict) -> str:
 </body>
 </html>
 """
+
+
+def _run_chart_card(title: str, description: str, chart_html: str, *, wide: bool = False) -> str:
+    cls = "chart-card wide" if wide else "chart-card"
+    return (
+        f'<div class="{cls}"><h3>{escape(title)}</h3>'
+        f"<p>{escape(description)}</p>{chart_html}</div>"
+    )
+
+
+def _charts_block(payload: dict) -> tuple[str, str]:
+    """Return ``(charts_html, chart_runtime)`` for the per-run report.
+
+    ``chart_runtime`` is empty (and no charts emitted) when nothing is plottable,
+    so a bare speed-only receipt does not pay for the inlined library.
+    """
+    quality = payload.get("quality") or {}
+    blocks: list[str] = []
+
+    context = charts.context_scaling_config(payload.get("context_scaling") or [])
+    if context is not None:
+        blocks.append(
+            _run_chart_card(
+                "Context scaling",
+                "Throughput (and cold TTFT) as the context window grows.",
+                charts.render_chart("r-context", context, height=320),
+                wide=True,
+            )
+        )
+    attempts = charts.attempts_progression_config(payload.get("attempts") or [])
+    if attempts is not None:
+        blocks.append(
+            _run_chart_card(
+                "Optimizer progression",
+                "Score across autoresearch attempts.",
+                charts.render_chart("r-attempts", attempts, height=300),
+            )
+        )
+    doughnut = charts.outcome_doughnut_config(
+        quality.get("correct", 0), quality.get("wrong", 0), quality.get("incomplete", 0)
+    )
+    if doughnut is not None:
+        blocks.append(
+            _run_chart_card(
+                "Question outcomes",
+                "Correct, wrong, and incomplete across scored packs.",
+                charts.render_chart("r-outcomes", doughnut, height=300),
+            )
+        )
+    pack_bars = charts.pack_accuracy_bars_config(quality.get("packs") or [])
+    if pack_bars is not None:
+        blocks.append(
+            _run_chart_card(
+                "Per-pack accuracy",
+                "Accuracy on each librarian pack for this run.",
+                charts.render_chart("r-packs", pack_bars, height=300),
+            )
+        )
+    if not blocks:
+        return "", ""
+    section = '<section class="panel"><h2>Visual overview</h2><div class="chart-grid">' + (
+        "".join(blocks)
+    ) + "</div></section>"
+    return section, charts.chartjs_runtime()
 
 
 def _float_or_none(value) -> float | None:

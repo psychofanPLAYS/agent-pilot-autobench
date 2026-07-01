@@ -7,6 +7,25 @@ semantic versioning for published versions.
 
 ### Added
 
+- **World-class, diagram-rich results pages.** The global results dashboard
+  (`results.html`) and each run's `report.html` now lead with interactive charts
+  instead of tables-only. The dashboard opens with a KPI strip and a chart grid —
+  a **quality-vs-speed frontier scatter** (the signature comparison), an **Agent
+  Index ranking**, a **per-pack capability radar**, a **speed breakdown**, and an
+  **efficiency frontier** (Agent Index per GB VRAM) — with the existing comparison
+  tables retained below as drill-down. Per-run reports add a context-scaling curve,
+  optimizer progression, an outcome doughnut, and per-pack accuracy bars. Charts use
+  a vendored Chart.js (MIT) inlined into the page, so the reports stay fully
+  self-contained and work offline from `file://`.
+- **Standardized agent-quality metric (Agent Index) and sync-ready records.** A new
+  `metrics.py` computes a single category-weighted **Agent Index (0–100)** — gate
+  must-pass, with coverage % and a confidence band — plus K-sample median/IQR
+  aggregation standardized across all metrics, efficiency derivations
+  (tok/s-per-GB, tokens/Joule, total-time-for-100-tokens, inter-token latency), and
+  a normalized, schema-versioned `metrics.json` written per receipt. A new
+  `PeakEnergySampler` captures peak VRAM and integrates GPU power into Joules. The
+  record format is identical whether stored locally or synced online later.
+
 - **Let models think — no output cap during evaluation.** Both the pack runner and
   the simple-bench runner now send `n_predict: -1` by default, so a reasoning model
   generates until it stops on its own (bounded only by the request timeout) instead of

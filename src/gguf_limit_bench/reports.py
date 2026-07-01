@@ -5,9 +5,11 @@ from html import escape
 import json
 from pathlib import Path
 
+from gguf_limit_bench import charts
 from gguf_limit_bench.autoresearch import parse_llama_bench_jsonl
 from gguf_limit_bench.discovery import is_non_generative_gguf
 from gguf_limit_bench.evidence import display_status, evidence_status, normalize_success_failure
+from gguf_limit_bench.metrics import agent_index as _agent_index
 
 
 @dataclass(frozen=True)
@@ -584,10 +586,200 @@ def _agent_verdict(comparison: ModelComparison) -> str:
     return verdict
 
 
+def _agent_index_for(
+    pack_scores: dict, suite_general: float | None, suite_agentic: float | None
+) -> float | None:
+    """Standardized Agent Index from a model's pack accuracies + suite scores.
+
+    Returns None when no category-level quality signal was measured (so the model
+    is not plotted as a misleading zero).
+    """
+    signals: dict[str, float] = dict(pack_scores)
+    if suite_general is not None:
+        signals["suite_general"] = float(suite_general)
+    if suite_agentic is not None:
+        signals["suite_agentic"] = float(suite_agentic)
+    if not signals:
+        return None
+    idx = _agent_index(signals)
+    if all(value is None for value in idx.category_subscores.values()):
+        return None
+    return idx.value
+
+
+def _peak_vram_gb(receipt_path: str) -> float | None:
+    metrics_path = Path(receipt_path) / "metrics.json"
+    try:
+        data = json.loads(metrics_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    efficiency = data.get("efficiency") or {}
+    value = efficiency.get("peak_vram_gb")
+    return float(value) if value else None
+
+
+def _dashboard_models(leaderboard: Leaderboard, comparison: ModelComparison) -> list[dict]:
+    by_run = {entry.run_id: entry for entry in leaderboard.entries}
+    models: list[dict] = []
+    for entry in comparison.entries:
+        best = by_run.get(entry.best_run_id)
+        suite_general = best.benchmark_suite_general_score if best else None
+        suite_agentic = best.benchmark_suite_agentic_score if best else None
+        models.append(
+            {
+                "name": entry.model_name,
+                "agent_index": _agent_index_for(entry.pack_scores, suite_general, suite_agentic),
+                "gen_tps": entry.generation_tps,
+                "prompt_tps": entry.prompt_tps,
+                "serving_tps": entry.serving_tps,
+                "cold_ttft": entry.cold_ttft_ms,
+                "vram_gb": _peak_vram_gb(entry.best_receipt_path),
+                "pack_scores": dict(entry.pack_scores),
+                "family": "",
+            }
+        )
+    return models
+
+
+def _index_history(leaderboard: Leaderboard) -> list[dict]:
+    """Best-so-far Agent Index across runs over time (a progress trend).
+
+    Runs are ordered by their timestamped ``run_id``; the series is the running
+    maximum Agent Index, so the line shows how benchmarking more models improves
+    the best known agent-quality result.
+    """
+    points: list[dict] = []
+    best = 0.0
+    seen = False
+    for entry in sorted(leaderboard.entries, key=lambda e: e.run_id):
+        idx = _agent_index_for(
+            entry.pack_scores,
+            entry.benchmark_suite_general_score,
+            entry.benchmark_suite_agentic_score,
+        )
+        if idx is None:
+            continue
+        seen = True
+        best = max(best, idx)
+        points.append({"label": entry.run_id, "index": best})
+    return points if seen else []
+
+
+def _chart_card(title: str, description: str, chart_html: str, *, wide: bool = False) -> str:
+    cls = "chart-card wide" if wide else "chart-card"
+    return (
+        f'<div class="{cls}"><h3>{escape(title)}</h3>'
+        f'<p class="receipt">{escape(description)}</p>{chart_html}</div>'
+    )
+
+
+def _kpi_strip(models: list[dict], leaderboard: Leaderboard) -> str:
+    scored = [m for m in models if m.get("agent_index") is not None]
+    champ = max(scored, key=lambda m: m["agent_index"]) if scored else None
+    fastest = max(models, key=lambda m: m.get("gen_tps") or 0.0) if models else None
+    lead = champ or fastest
+    index_label = f"{champ['agent_index']:.0f}" if champ else "—"
+    speed_label = f"{lead['gen_tps']:.0f} tok/s" if lead and lead.get("gen_tps") else "—"
+    eff_rows = [m for m in models if m.get("vram_gb") and m.get("agent_index") is not None]
+    if eff_rows:
+        best_eff = max(eff_rows, key=lambda m: m["agent_index"] / m["vram_gb"])
+        eff_label = f"{best_eff['agent_index'] / best_eff['vram_gb']:.1f}/GB"
+    else:
+        eff_label = "—"
+    cards = [
+        ("Champion", lead["name"] if lead else "—"),
+        ("Agent Index", index_label),
+        ("Gen speed", speed_label),
+        ("Best efficiency", eff_label),
+        ("Models · runs", f"{len(models)} · {len(leaderboard.entries)}"),
+    ]
+    items = "".join(
+        f'<div class="kpi"><div class="k">{escape(label)}</div>'
+        f'<div class="v">{escape(str(value))}</div></div>'
+        for label, value in cards
+    )
+    return f'<section class="kpis">{items}</section>'
+
+
+def _charts_section(models: list[dict], pack_ids: list[str], history: list[dict]) -> str:
+    blocks: list[str] = []
+    frontier = charts.quality_vs_speed_config(models)
+    if frontier["data"]["datasets"][0]["data"]:
+        blocks.append(
+            _chart_card(
+                "Quality vs speed",
+                "The frontier — up and to the right is better. Bubble size = VRAM.",
+                charts.render_chart("c-frontier", frontier, height=360),
+                wide=True,
+            )
+        )
+    index_bar = charts.agent_index_bar_config(models)
+    if index_bar["data"]["labels"]:
+        height = max(180, 40 * len(index_bar["data"]["labels"]) + 40)
+        blocks.append(
+            _chart_card(
+                "Agent Index ranking",
+                "Composite agent-quality score (0–100), red→green.",
+                charts.render_chart("c-index", index_bar, height=height),
+            )
+        )
+    radar = charts.pack_radar_config(models, pack_ids)
+    if radar["data"]["datasets"]:
+        blocks.append(
+            _chart_card(
+                "Capability profile",
+                "Per-pack accuracy shape for each model.",
+                charts.render_chart("c-radar", radar, height=360),
+            )
+        )
+    if any(m.get("gen_tps") for m in models):
+        blocks.append(
+            _chart_card(
+                "Speed breakdown",
+                "Generation, prompt, and serving throughput per model.",
+                charts.render_chart("c-speed", charts.speed_bars_config(models), height=320),
+            )
+        )
+    efficiency = charts.efficiency_bars_config(models)
+    if efficiency is not None:
+        height = max(180, 40 * len(efficiency["data"]["labels"]) + 40)
+        blocks.append(
+            _chart_card(
+                "Efficiency frontier",
+                "Agent Index per GB of VRAM — the local-hardware advantage.",
+                charts.render_chart("c-eff", efficiency, height=height),
+            )
+        )
+    trend = charts.index_trend_config(history)
+    if trend is not None:
+        blocks.append(
+            _chart_card(
+                "Agent Index over time",
+                "Best agent-quality result so far, across runs as they accumulate.",
+                charts.render_chart("c-trend", trend, height=300),
+                wide=True,
+            )
+        )
+    if not blocks:
+        return ""
+    return (
+        '<section class="panel"><h2>Visual overview</h2>'
+        '<div class="chart-grid">' + "".join(blocks) + "</div></section>"
+    )
+
+
 def _leaderboard_html(leaderboard: Leaderboard) -> str:
     champion = leaderboard.champion
     model_comparison = build_model_comparison(leaderboard)
     pack_ids = _ordered_pack_ids(model_comparison)
+    dashboard_models = _dashboard_models(leaderboard, model_comparison)
+    kpi_strip = _kpi_strip(dashboard_models, leaderboard)
+    charts_section = _charts_section(
+        dashboard_models, pack_ids, _index_history(leaderboard)
+    )
+    chart_runtime = charts.chartjs_runtime() if charts_section else ""
     rows = "\n".join(
         _html_row(rank, entry) for rank, entry in enumerate(leaderboard.entries, start=1)
     )
@@ -623,6 +815,7 @@ def _leaderboard_html(leaderboard: Leaderboard) -> str:
   </style>
 </head>
 <body>
+  {chart_runtime}
   <main class="shell">
     <section class="hero">
       <p class="eyebrow">{escape(hero_eyebrow)}</p>
@@ -630,6 +823,8 @@ def _leaderboard_html(leaderboard: Leaderboard) -> str:
       <p class="lede">{escape(hero_lede)}</p>
       <p class="verdict">{escape(verdict)}</p>
     </section>
+    {kpi_strip}
+    {charts_section}
     <section class="panel">
       <h2>Model comparison</h2>
       <p class="receipt">
@@ -960,9 +1155,45 @@ def _html_css() -> str:
     td.agent { font-weight: 700; color: var(--text); }
     td.pack { color: var(--text); }
     td.pack.empty, td.agent.empty { color: var(--muted); background: transparent; }
+    .kpis {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .kpi {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+    .kpi .k {
+      color: var(--muted);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .kpi .v { color: var(--text); font-size: 1.5rem; font-weight: 800; margin-top: 4px; }
+    .chart-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 12px;
+    }
+    .chart-card {
+      background: var(--panel-strong);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .chart-card.wide { grid-column: 1 / -1; }
+    .chart-card h3 { margin: 0 0 4px; font-size: 1.0rem; }
+    .chart-card .receipt { margin: 0 0 12px; font-size: 0.84rem; }
+    .chart-box { width: 100%; }
     @media (max-width: 720px) {
       h1 { font-size: 1.8rem; }
       .hero, .panel { padding: 18px; }
       table { font-size: 0.88rem; }
+      .chart-grid { grid-template-columns: 1fr; }
     }
     """
