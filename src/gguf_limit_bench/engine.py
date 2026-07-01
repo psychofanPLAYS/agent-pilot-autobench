@@ -108,6 +108,10 @@ def run_engine(
                 emit("run_stopped", {"reason": "control", "before_model": label})
                 stopped = True
                 break
+            # Running score is per-model (each model earns its own Agent Index),
+            # so reset the tally as each model starts.
+            tally["answered"] = 0
+            tally["correct"] = 0
             write_status(phase="running", model=label, model_index=index)
             emit("model_started", {"model": label, "index": index, "total": len(models)})
             try:

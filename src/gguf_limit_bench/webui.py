@@ -1390,9 +1390,9 @@ INDEX_HTML = r"""<!doctype html>
       const models=[]; const bts=[]; let finished=null; const packTotals=new Map();
       for(const ev of events){
         const d=ev.data||{}; const t=ev.type||"";
-        if(t==="model_started"){model=d.model;mi=d.index;mt=d.total; models.push({name:d.model,index:d.index,state:"run"});}
+        if(t==="model_started"){model=d.model;mi=d.index;mt=d.total; models.push({name:d.model,index:d.index,state:"run"}); packTotals.clear();}
         else if(t==="model_finished"){const m=models.find(x=>x.index===d.index); if(m)m.state="done";}
-        else if(t==="question_started"){q.set(d.q_id,{q_id:d.q_id,index:d.index,total:d.total,pack:d.pack,prompt:d.prompt,thinking:"",answer:"",scored:null}); curQ=d.q_id; if(d.pack)packTotals.set(d.pack,d.total||packTotals.get(d.pack)||0);}
+        else if(t==="question_started"){q.set(d.q_id,{q_id:d.q_id,index:d.index,total:d.total,pack:d.pack,prompt:d.prompt,thinking:"",answer:"",scored:null,modelIndex:mi}); curQ=d.q_id; if(d.pack)packTotals.set(d.pack,d.total||packTotals.get(d.pack)||0);}
         else if(t==="question_progress"){const it=q.get(d.q_id); if(it){if(d.thinking!=null)it.thinking=d.thinking; if(d.answer!=null)it.answer=d.answer;}}
         else if(t==="question_scored"){const it=q.get(d.q_id); if(it)it.scored=d;}
         else if(t==="running_score"){running=d;}
@@ -1415,8 +1415,14 @@ INDEX_HTML = r"""<!doctype html>
       const run=state.run||{}; const status=run.status||{}; const tel=state.telemetry||{};
       const m=ckBuild(run.live_events||[]);
       const phase=run.phase||status.phase||"running"; const done=CK_DONE.includes(phase);
+      // Scope score / history / progress to the CURRENT model (each model earns its
+      // own Agent Index); the model queue still shows every model.
+      const modelQs=m.questions.filter(x=>x.modelIndex===m.mi);
+      const scoredQs=modelQs.filter(x=>x.scored);
       const cur=m.questions.find(x=>x.q_id===m.curQ);
-      const answered=m.running?m.running.answered:m.questions.filter(x=>x.scored).length;
+      const answered=scoredQs.length;
+      const correct=scoredQs.filter(x=>x.scored.correct).length;
+      const quality=answered?Math.round(1000*correct/answered)/10:0;
       // run-wide total from status if the engine exposes it, else discovered-plan fallback
       const total=Number(status.question_total)||m.planned||answered||0;
       const progFrac=total?Math.min(1,answered/total):0;
@@ -1454,16 +1460,14 @@ INDEX_HTML = r"""<!doctype html>
           +'<div class="stream ans">'+(escapeHtml(cur.answer)||'<span style="color:var(--faint)">—</span>')+ansCursor+'</div>'
           +'<div class="scorebar">'+chip+meta+'</div>';
       }
-      // history
-      const hist=m.questions.filter(x=>x.scored&&x.q_id!==m.curQ);
+      // history (current model's completed questions)
+      const hist=scoredQs.filter(x=>x.q_id!==m.curQ);
       const histHtml=hist.length?hist.map(h=>{const s=h.scored; return '<div class="hrow"><span class="pf '+(s.correct?'ok':'no')+'"></span><span class="hid mono">'+escapeHtml(h.q_id)+'</span><span class="hsc" style="color:'+(s.correct?'var(--good)':'var(--bad)')+'">'+ckRound(s.score,2).toFixed(2)+'</span><span class="hmeta">'+ckRound(s.ttft_ms)+'ms</span><span class="hmeta">'+ckRound(s.tok_s,1)+' t/s</span></div>';}).join(""):'<div class="ck-empty" style="padding:14px">No completed questions yet.</div>';
 
-      // mission control: live score
-      const quality=m.running?m.running.quality_0_100:0;
-      // telemetry (real from sampler) + tok/s sparkline from scored questions
-      const tok=m.questions.filter(x=>x.scored).map(x=>ckRound(x.scored.tok_s,1));
+      // telemetry (real from sampler) + tok/s sparkline from this model's scored questions
+      const tok=scoredQs.map(x=>ckRound(x.scored.tok_s,1));
       const lastTok=tok.length?tok[tok.length-1]:0;
-      const lastTtft=(()=>{const sc=m.questions.filter(x=>x.scored); return sc.length?ckRound(sc[sc.length-1].scored.ttft_ms):0;})();
+      const lastTtft=scoredQs.length?ckRound(scoredQs[scoredQs.length-1].scored.ttft_ms):0;
       const vu=tel.gpu_used_mb, vt=tel.gpu_total_mb; const vpct=(vu!=null&&vt)?ckRound(vu/vt*100):0;
       const gpu=tel.gpu_util_percent==null?"n/a":tel.gpu_util_percent; const pw=tel.gpu_power_watts==null?"n/a":ckRound(tel.gpu_power_watts);
       const gaugesHtml=
@@ -1487,7 +1491,7 @@ INDEX_HTML = r"""<!doctype html>
         +'<div class="card"><h3>Reasoning terminal <span class="mono" style="text-transform:none;letter-spacing:0;color:var(--faint)">'+escapeHtml(cur?cur.q_id:"")+'</span></h3><div class="pad">'+curHtml+'</div></div>'
         +'<div class="card"><h3>Completed this run <span style="color:var(--faint)">'+(hist.length||"")+'</span></h3><div class="pad"><div class="hist">'+histHtml+'</div></div></div>'
         +'</div><div class="col">'
-        +'<div class="card"><h3>Live score</h3><div class="pad"><div class="score-hero"><span class="big">'+ckRound(quality)+'</span><span class="of">/ 100</span><span class="partial"><span class="beat"></span> live · partial</span></div><div class="scorebar2"><i style="width:'+ckRound(quality)+'%"></i></div><div class="score-sub"><span>correct <b>'+(m.running?m.running.correct:0)+'</b>/<b>'+answered+'</b></span><span>coverage <b>'+ckRound(progFrac*100)+'%</b></span></div></div></div>'
+        +'<div class="card"><h3>Live score</h3><div class="pad"><div class="score-hero"><span class="big">'+ckRound(quality)+'</span><span class="of">/ 100</span><span class="partial"><span class="beat"></span> live · partial</span></div><div class="scorebar2"><i style="width:'+ckRound(quality)+'%"></i></div><div class="score-sub"><span>correct <b>'+correct+'</b>/<b>'+answered+'</b></span><span>coverage <b>'+ckRound(progFrac*100)+'%</b></span></div></div></div>'
         +'<div class="card"><h3>Telemetry</h3><div class="pad gauges">'+gaugesHtml+'</div></div>'
         +'<div class="card"><h3>Phase pipeline</h3><div class="pad"><div class="pipe">'+pipeHtml+'</div></div></div>'
         +'<div class="card"><h3>Model queue <span style="color:var(--faint)">sequential</span></h3><div class="pad"><div class="queue">'+queueHtml+'</div></div></div>'
