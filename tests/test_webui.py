@@ -25,7 +25,7 @@ from gguf_limit_bench.webui import (
 def test_webui_state_lists_models_modes_and_librarian_packs(tmp_path):
     model_root = tmp_path / "models"
     model_root.mkdir()
-    (model_root / "Gemma-3-27B-Q4_K_M.gguf").write_bytes(b"1" * 20)
+    (model_root / "Gemma-4-26B-A4B-Q4_K_M.gguf").write_bytes(b"1" * 20)
     (model_root / "Qwen3.6-35B-A3B-Q4_K_M.gguf").write_bytes(b"1" * 30)
 
     state = WebUiState(root=model_root, runs_root=tmp_path / "_runs")
@@ -65,7 +65,7 @@ def test_webui_shell_explains_run_cost_and_evidence():
 
 
 def test_librarian_web_selection_accepts_any_models():
-    gemma = ModelInfo(path=Path("Gemma-3-27B.gguf"), name="Gemma-3-27B.gguf", family="gemma")
+    gemma = ModelInfo(path=Path("Gemma-4-26B-A4B.gguf"), name="Gemma-4-26B-A4B.gguf", family="gemma")
     qwen = ModelInfo(path=Path("Qwen3.6-35B-A3B.gguf"), name="Qwen3.6-35B-A3B.gguf", family="qwen")
 
     # Agent Pilot benchmarks any GGUF model — no hardcoded Gemma-vs-Qwen requirement.
@@ -80,11 +80,11 @@ def test_librarian_web_selection_accepts_any_models():
 def test_webui_start_run_calls_backend_for_selected_models(tmp_path):
     plans_root = tmp_path / "benchmarks" / "plans"
     plans_root.mkdir(parents=True)
-    plan_path = plans_root / "wiki-librarian-gemma3-27b-direct.plan.json"
-    plan_path.write_text('{"model": "gemma-3-27b-it", "tasks": []}', encoding="utf-8")
+    plan_path = plans_root / "wiki-librarian-gemma4-26b-a4b-thinking.plan.json"
+    plan_path.write_text('{"model": "gemma-4-26b-a4b-it", "tasks": []}', encoding="utf-8")
     model_root = tmp_path / "models"
     model_root.mkdir()
-    gemma_path = model_root / "Gemma-3-27B-Q4_K_M.gguf"
+    gemma_path = model_root / "Gemma-4-26B-A4B-Q4_K_M.gguf"
     qwen_path = model_root / "Qwen3.6-35B-A3B-Q4_K_M.gguf"
     gemma_path.write_bytes(b"1" * 20)
     qwen_path.write_bytes(b"1" * 30)
@@ -121,7 +121,7 @@ def test_webui_start_run_calls_backend_for_selected_models(tmp_path):
     while time.time() < deadline and len(calls) < 2:
         time.sleep(0.02)
     assert sorted((name, options.mode_id, options.budget_minutes) for name, options in calls) == [
-        ("Gemma-3-27B-Q4_K_M.gguf", "librarian_bench", 7),
+        ("Gemma-4-26B-A4B-Q4_K_M.gguf", "librarian_bench", 7),
         ("Qwen3.6-35B-A3B-Q4_K_M.gguf", "librarian_bench", 7),
     ]
     assert calls[0][1].forced_server_args == ("--flash-attn", "on", "--jinja")
@@ -283,7 +283,7 @@ def test_webui_start_endpoint_rejects_malformed_json(tmp_path):
 def test_webui_websocket_sends_hello_and_state(tmp_path):
     model_root = tmp_path / "models"
     model_root.mkdir()
-    (model_root / "Gemma-3-27B-Q4_K_M.gguf").write_bytes(b"1" * 20)
+    (model_root / "Gemma-4-26B-A4B-Q4_K_M.gguf").write_bytes(b"1" * 20)
     state = WebUiState(root=model_root, runs_root=tmp_path / "_runs")
     client = TestClient(create_web_app(state))
 
@@ -294,7 +294,7 @@ def test_webui_websocket_sends_hello_and_state(tmp_path):
     assert hello["type"] == "hello"
     assert hello["protocol"] == 1
     assert state_message["type"] == "state"
-    assert state_message["payload"]["models"][0]["name"] == "Gemma-3-27B-Q4_K_M.gguf"
+    assert state_message["payload"]["models"][0]["name"] == "Gemma-4-26B-A4B-Q4_K_M.gguf"
 
 
 def test_webui_websocket_start_run_dispatches_backend(tmp_path):
@@ -304,7 +304,7 @@ def test_webui_websocket_start_run_dispatches_backend(tmp_path):
     plan_path.write_text('{"model": "qwen3.6-35b-a3b", "tasks": []}', encoding="utf-8")
     model_root = tmp_path / "models"
     model_root.mkdir()
-    gemma_path = model_root / "Gemma-3-27B-Q4_K_M.gguf"
+    gemma_path = model_root / "Gemma-4-26B-A4B-Q4_K_M.gguf"
     qwen_path = model_root / "Qwen3.6-35B-A3B-Q4_K_M.gguf"
     gemma_path.write_bytes(b"1" * 20)
     qwen_path.write_bytes(b"1" * 30)

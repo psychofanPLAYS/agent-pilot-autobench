@@ -19,10 +19,12 @@ that looks like the model is dumb.
 2. **Single-BOS gate (Gemma)** — tokenize a known string; assert exactly one BOS. Two
    BOS => abort (double-BOS silently degrades every score).
 3. **Template-load gate** — confirm the intended template is actually loaded (`--jinja`
-   for froggeric v19); hash it so the knob value is reproducible.
-4. **Thinking-sanity gate (Qwen)** — with thinking=on, assert the output contains a
-   `<think>` block; with thinking=off, assert it does NOT. This is what catches the
-   `chatml` template silently killing thinking. If on and off look identical, abort.
+   for Froggeric v21.3); hash it so the knob value is reproducible.
+4. **Thinking-sanity gate (Qwen)** — with thinking=on, assert the output contains
+   Qwen reasoning evidence (`message.reasoning_content` from llama.cpp's DeepSeek
+   parser, or visible `<think>` tags); with thinking=off, assert it does NOT. This
+   catches `chatml` or a stale template silently killing thinking. If on and off
+   look identical, abort.
 5. **Answer-channel gate** — one warmup question must yield a parseable `Final Answer:`
    / MC letter. If the model can't honor the contract at all, that's a format failure,
    recorded as such, not a content score.

@@ -16,10 +16,10 @@ Two classes:
 
 | Knob | Values (initial) | Notes / why it matters |
 |------|------------------|------------------------|
-| model identity | gemma3-27b, qwen3.5-35B-MoE, qwen3.6-35B-MoE, variants | grounded to OEM HF slug (SSOT key) |
+| model identity | qwen3.6-35B-MoE, qwen3.5-35B-MoE, Gemma 4 variants | grounded to OEM HF slug (SSOT key) |
 | quantization | e.g. Q4_K_M, Q5_K_M, Q6_K, Q8_0, IQ* | quality/speed Pareto axis |
 | **thinking mode** | on / off (+ budget if supported) | primary axis; can help quality but hurt stability/latency |
-| **chat template** | froggeric v19 / stock / other | huge effect on tool-call + format adherence; per-model |
+| **chat template** | Froggeric v21.3 / stock / other | huge effect on tool-call + format adherence; per-model |
 | llama.cpp flags | existing flag ladder | reuse current ladder + Optuna study |
 | sampling | temperature, top-p, top-k, min-p, rep-pen, **seed** | temp=0 + fixed seed for determinism runs; vary to study robustness |
 | context size | 4K, 8K, 16K, 32K... | reuse existing context ladder |
@@ -65,4 +65,4 @@ Two senses of "deterministic" both matter and are kept distinct:
 
 - Exact model/quant list to ship in the default sweep (open question 4).
 - Whether thinking "budget" is a separate axis for models that support it.
-- froggeric v19 template source/pinning so the knob value is reproducible.
+- Froggeric v21.3 template source/pinning so the knob value is reproducible.

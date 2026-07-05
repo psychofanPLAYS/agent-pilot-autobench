@@ -6,8 +6,8 @@ Per-model execution plan for the Qwen MoE line: `Qwen/Qwen3.5-35B-A3B` and
 `Qwen/Qwen3.6-35B-A3B`. This is the richer of the two plans because the model has the
 most knobs that actually move librarian quality: native thinking, a template that can
 silently break that thinking, MoE speed behavior, and MTP speculative decoding.
-Companion: [07-model-plan-gemma3-27b.md](07-model-plan-gemma3-27b.md). Shared
-hardening: [09-hardening-spec.md](09-hardening-spec.md).
+Current comparison should be Qwen3.6-first, with Gemma 4 as the Google-family
+challenger if needed. Shared hardening: [09-hardening-spec.md](09-hardening-spec.md).
 
 ## Identity / SSOT grounding
 
@@ -48,10 +48,11 @@ suite exists to surface.
 
 ### Template (the silent killer)
 
-- `froggeric-v19` — fixes 5 bugs in the official 3.5/3.6 templates; preserves thinking
-  (`thinking=1`), restores the native XML tool-call format, and achieves a ~100%
-  KV-cache hit rate in multi-turn loops (huge for the serving loop's latency). Needs
-  llama.cpp b9180+ (2026-05-16) for MTP. Load with `--jinja`.
+- `froggeric-v21.3` — current pinned custom template for Qwen3.5/3.6; preserves
+  thinking, supports the native XML tool-call format, and keeps the template path
+  reproducible. Load with `--jinja`, `--chat-template-kwargs
+  '{"enable_thinking":true,"preserve_thinking":true}'`, `--reasoning on`, and
+  `--reasoning-format deepseek`.
 - `stock-embedded` — the template baked into the official GGUF's tokenizer_config.
 - `chatml` — **NEGATIVE CONTROL**: `--chat-template chatml` silently disables thinking
   mode. We include it precisely because it should demonstrably tank the thinking-on
@@ -61,7 +62,7 @@ Template x thinking matrix to run per job:
 
 ```
                  thinking=on        thinking=off
-froggeric-v19    A (expected best)  B
+froggeric-v21.3  A (expected best)  B
 stock-embedded   C                  D
 chatml           E (should BREAK    F
                  thinking -> ~= D)
@@ -113,7 +114,7 @@ should beat 3.5.
 ```
 model:     {Qwen3.5-35B-A3B, Qwen3.6-35B-A3B} x {Q4_K_M, Q5_K_M, Q6_K, Q8_0, IQ4}
 thinking:  {on, off}                      # native enable_thinking
-template:  {froggeric-v19, stock-embedded, chatml(neg-control)}
+template:  {froggeric-v21.3, stock-embedded, chatml(neg-control)}
 sampling:  mode-matched (0.6/0.95/20 thinking; 0.7/0.8/20 non-thinking) + low-temp(0.1)
 mtp:       {off, draft-mtp}               # MTP GGUF + recent llama.cpp only
 flags:     standard ladder + q8 KV
@@ -132,7 +133,7 @@ This grid is large. Apply the tiered sweep ruthlessly (see knobs doc):
 ## Success criteria for "Qwen is a good librarian"
 
 - A clear per-job thinking on/off recommendation (not one global setting).
-- froggeric-v19 demonstrably >= stock on format adherence, and chatml demonstrably
+- froggeric-v21.3 demonstrably >= stock on format adherence, and chatml demonstrably
   breaks thinking (validates the harness).
 - gate precision under thinking-on beats Gemma's gate precision (the abstention test).
 - MTP delivers real tok/s gain without a quality drop beyond a set tolerance.
@@ -153,5 +154,5 @@ This grid is large. Apply the tiered sweep ruthlessly (see knobs doc):
 - HF: `Qwen/Qwen3.5-35B-A3B`, `Qwen/Qwen3.6-35B-A3B` (qwen3_5_moe, 35.95B/A3B, 256K).
 - Qwen sampling + thinking switches: Qwen docs / model cards (thinking 0.6/0.95/20 no
   greedy; non-thinking 0.7/0.8/20; /think /no_think; presence_penalty caveat).
-- froggeric/Qwen-Fixed-Chat-Templates v19 (thinking preserved, XML tool calls, KV-cache
-  hit; chatml kills thinking; MTP needs llama.cpp b9180+).
+- froggeric/Qwen-Fixed-Chat-Templates v21.3 (thinking preserved, XML tool calls;
+  chatml kills thinking; use llama.cpp's DeepSeek reasoning parser).

@@ -24,18 +24,57 @@ def test_qwen_recommends_jinja_and_custom_template_when_present(tmp_path):
 
     flags = recommended_model_flags(model, search_roots=(tmp_path,))
 
-    assert flags == ("--jinja", "--chat-template-file", str(template))
+    assert flags == (
+        "--jinja",
+        "--chat-template-file",
+        str(template),
+        "--chat-template-kwargs",
+        '{"enable_thinking":true,"preserve_thinking":true}',
+        "--reasoning",
+        "on",
+        "--reasoning-format",
+        "deepseek",
+    )
+
+
+def test_qwen_recommends_froggeric_v21_reasoning_defaults_when_template_present(tmp_path):
+    template = _make_template(tmp_path)
+    model = tmp_path / "models" / "Qwen3.6-35B-A3B-Q4_K_M.gguf"
+    model.parent.mkdir(parents=True)
+    model.touch()
+
+    flags = recommended_model_flags(model, search_roots=(tmp_path,))
+
+    assert flags == (
+        "--jinja",
+        "--chat-template-file",
+        str(template),
+        "--chat-template-kwargs",
+        '{"enable_thinking":true,"preserve_thinking":true}',
+        "--reasoning",
+        "on",
+        "--reasoning-format",
+        "deepseek",
+    )
 
 
 def test_qwen_falls_back_to_jinja_only_without_template(tmp_path):
     model = tmp_path / "Qwen3.6-35B-A3B-Q4_K_M.gguf"
     model.touch()
 
-    assert recommended_model_flags(model, search_roots=(tmp_path,)) == ("--jinja",)
+    assert recommended_model_flags(model, search_roots=(tmp_path,)) == (
+        "--jinja",
+        "--chat-template-kwargs",
+        '{"enable_thinking":true,"preserve_thinking":true}',
+        "--reasoning",
+        "on",
+        "--reasoning-format",
+        "deepseek",
+    )
 
 
 def test_gemma_recommends_jinja(tmp_path):
-    model = tmp_path / "gemma-3-27B-it-Q4_K_M.gguf"
+    model = tmp_path / "gemma-4-26B-A4B-it-Q4_K_M.gguf"
     model.touch()
 
     assert recommended_model_flags(model) == ("--jinja",)
@@ -56,7 +95,17 @@ def test_template_override_wins(tmp_path):
 
     flags = recommended_model_flags(model, search_roots=(tmp_path,), template_override=override)
 
-    assert flags == ("--jinja", "--chat-template-file", str(override))
+    assert flags == (
+        "--jinja",
+        "--chat-template-file",
+        str(override),
+        "--chat-template-kwargs",
+        '{"enable_thinking":true,"preserve_thinking":true}',
+        "--reasoning",
+        "on",
+        "--reasoning-format",
+        "deepseek",
+    )
 
 
 def test_discover_returns_none_for_non_qwen(tmp_path):

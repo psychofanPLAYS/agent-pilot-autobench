@@ -35,6 +35,15 @@ def test_flight_plan_payload_is_plain_json_shape(tmp_path):
     assert librarian["workflow"] == ["preflight", "librarian-packs", "bias-checks", "report"]
     assert librarian["default_benchmark_suite_plan"] is None
     assert {
+        "filename": "wiki-librarian-gemma4-26b-a4b-thinking.plan.json",
+        "path": str(
+            tmp_path
+            / "benchmarks"
+            / "plans"
+            / "wiki-librarian-gemma4-26b-a4b-thinking.plan.json"
+        ),
+    } in librarian["suggested_benchmark_suite_plans"]
+    assert {
         "filename": "wiki-librarian-qwen3-moe-thinking.plan.json",
         "path": str(
             tmp_path / "benchmarks" / "plans" / "wiki-librarian-qwen3-moe-thinking.plan.json"

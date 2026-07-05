@@ -14,9 +14,21 @@ from pathlib import Path
 from gguf_limit_bench.discovery import parse_model_name
 
 # Directory names and filenames that hold a custom Qwen chat template the user
-# keeps alongside their models (e.g. froggeric-v19).
+# keeps alongside their models (e.g. froggeric v21.3).
 _QWEN_TEMPLATE_DIR_HINTS = ("Qwen-Fixed-Chat-Templates",)
 _TEMPLATE_FILENAMES = ("chat_template.jinja",)
+QWEN_THINKING_KWARGS = '{"enable_thinking":true,"preserve_thinking":true}'
+
+
+def _qwen_reasoning_flags() -> tuple[str, ...]:
+    return (
+        "--chat-template-kwargs",
+        QWEN_THINKING_KWARGS,
+        "--reasoning",
+        "on",
+        "--reasoning-format",
+        "deepseek",
+    )
 
 
 def discover_chat_template(family: str, search_roots: tuple[Path, ...]) -> Path | None:
@@ -52,8 +64,8 @@ def recommended_model_flags(
 ) -> tuple[str, ...]:
     """Recommend llama.cpp flag *combinations* specific to *model*'s family.
 
-    - Qwen3.5/3.6: ``--jinja`` plus the froggeric custom ``--chat-template-file``
-      when one can be found (or *template_override* when given).
+    - Qwen3.5/3.6: ``--jinja``, froggeric custom ``--chat-template-file`` when
+      one can be found, and llama.cpp DeepSeek-style reasoning extraction.
     - Gemma: ``--jinja`` (Jinja template handling; single-BOS correctness).
     - Everything else: no extra flags (GPU/always-on flags are recommended
       separately by :func:`gpu_profiles.recommended_always_on`).
@@ -62,8 +74,8 @@ def recommended_model_flags(
     if family == "qwen":
         template = template_override or discover_chat_template(family, search_roots)
         if template is not None:
-            return ("--jinja", "--chat-template-file", str(template))
-        return ("--jinja",)
+            return ("--jinja", "--chat-template-file", str(template), *_qwen_reasoning_flags())
+        return ("--jinja", *_qwen_reasoning_flags())
     if family == "gemma":
         return ("--jinja",)
     return ()

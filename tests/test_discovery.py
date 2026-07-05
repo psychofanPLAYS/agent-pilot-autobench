@@ -26,10 +26,10 @@ def test_parse_model_name_does_not_mark_plain_qwen35_moe_as_mtp():
 
 
 def test_parse_model_name_detects_gemma_family():
-    info = parse_model_name(Path("google-gemma-3-27b-it-Q4_K_M.gguf"))
+    info = parse_model_name(Path("google-gemma-4-26B-A4B-it-Q4_K_M.gguf"))
 
     assert info.family == "gemma"
-    assert info.parameters == "27B"
+    assert info.parameters == "26B-A4B"
     assert info.quant == "Q4_K_M"
 
 

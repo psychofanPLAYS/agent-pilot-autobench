@@ -16,6 +16,7 @@ from gguf_limit_bench.discovery import parse_model_name
 from gguf_limit_bench.model_identity import IdentityConfidence, resolve_path_identity
 from gguf_limit_bench.pack_runner import _chat
 from gguf_limit_bench.packs import AnswerType
+from gguf_limit_bench.runtime_doctor import reasoning_status_from_message
 
 PREFLIGHT_FAILURE_CLASS = "preflight_fail"
 _KNOWN_STRING = "Librarian preflight tokenization check."
@@ -182,22 +183,27 @@ def _thinking_sanity_gate(
             "No explicit enable_thinking knob was provided for this cell.",
             {"extra_server_args": list(settings.extra_server_args)},
         )
-    text, *_ = _chat(
+    text, message = _thinking_probe_message(
         base_url=base_url,
         system_prompt="You are a benchmark preflight assistant.",
         user_content=_THINKING_PROMPT,
         max_tokens=256,
         timeout_seconds=timeout_seconds,
     )
-    has_think = "<think>" in text.lower()
-    evidence = {"thinking_mode": mode, "contains_think_block": has_think}
-    if (mode == "on" and has_think) or (mode == "off" and not has_think):
+    reasoning = reasoning_status_from_message(message)
+    has_reasoning = bool(reasoning["has_reasoning"])
+    evidence = {
+        "thinking_mode": mode,
+        "reasoning": reasoning,
+        "response_chars": len(text),
+    }
+    if (mode == "on" and has_reasoning) or (mode == "off" and not has_reasoning):
         return PreflightGateReceipt("thinking_sanity", "pass", evidence=evidence)
     expected = "contain" if mode == "on" else "not contain"
     return PreflightGateReceipt(
         "thinking_sanity",
         "fail",
-        f"Expected output to {expected} a <think> block for thinking={mode}.",
+        f"Expected output to {expected} Qwen reasoning evidence for thinking={mode}.",
         evidence,
     )
 
@@ -242,6 +248,82 @@ def _tokenize(
         return None
     tokens = data.get("tokens") if isinstance(data, dict) else None
     return tokens if isinstance(tokens, list) else None
+
+
+def _thinking_probe_message(
+    *,
+    base_url: str,
+    system_prompt: str,
+    user_content: str,
+    max_tokens: int,
+    timeout_seconds: int,
+) -> tuple[str, dict[str, Any]]:
+    text, message = _chat_completion_message(
+        base_url=base_url,
+        system_prompt=system_prompt,
+        user_content=user_content,
+        max_tokens=max_tokens,
+        timeout_seconds=timeout_seconds,
+    )
+    if message:
+        return text, message
+    return _chat_text_and_message(
+        _chat(
+            base_url=base_url,
+            system_prompt=system_prompt,
+            user_content=user_content,
+            max_tokens=max_tokens,
+            timeout_seconds=timeout_seconds,
+        )
+    )
+
+
+def _chat_completion_message(
+    *,
+    base_url: str,
+    system_prompt: str,
+    user_content: str,
+    max_tokens: int,
+    timeout_seconds: int,
+) -> tuple[str, dict[str, Any]]:
+    payload = json.dumps(
+        {
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ],
+            "stream": False,
+            "max_tokens": max_tokens,
+        }
+    ).encode("utf-8")
+    request = Request(
+        f"{base_url}/v1/chat/completions",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=timeout_seconds) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except (OSError, URLError, json.JSONDecodeError):
+        return "", {}
+    choices = data.get("choices") if isinstance(data, dict) else None
+    if not isinstance(choices, list) or not choices:
+        return "", {}
+    message = choices[0].get("message") if isinstance(choices[0], dict) else None
+    if not isinstance(message, dict):
+        return "", {}
+    reasoning = message.get("reasoning_content")
+    content = message.get("content")
+    text = "".join(part for part in (reasoning, content) if isinstance(part, str))
+    return text, message
+
+
+def _chat_text_and_message(result: tuple[Any, ...]) -> tuple[str, dict[str, Any]]:
+    text = str(result[0] if result else "")
+    if len(result) > 5 and isinstance(result[5], dict):
+        return text, result[5]
+    return text, {"content": text}
 
 
 def _thinking_mode(args: tuple[str, ...]) -> str | None:

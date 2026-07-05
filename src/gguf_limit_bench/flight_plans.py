@@ -69,7 +69,7 @@ FLIGHT_PLANS: tuple[FlightPlan, ...] = (
         start_label="Start librarian benchmark",
         recommended=True,
         suggested_benchmark_suite_plans=(
-            "wiki-librarian-gemma3-27b-direct.plan.json",
+            "wiki-librarian-gemma4-26b-a4b-thinking.plan.json",
             "wiki-librarian-qwen3-moe-thinking.plan.json",
         ),
     ),
