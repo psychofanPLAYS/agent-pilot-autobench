@@ -12,7 +12,7 @@ import signal
 import sqlite3
 import subprocess
 import time
-from typing import Annotated, Callable, cast
+from typing import Annotated, Any, Callable, cast
 import webbrowser
 
 import typer
@@ -42,8 +42,11 @@ from gguf_limit_bench.vram import (
 )
 from gguf_limit_bench.benchmark_suite import (
     BenchmarkSuitePlan,
+    benchmark_suite_preflight_to_dict,
     benchmark_suite_run_to_dict,
+    preflight_benchmark_suite,
     run_benchmark_suite,
+    suite_verdict,
 )
 from gguf_limit_bench.config import (
     DEFAULT_DB_PATH,
@@ -52,8 +55,15 @@ from gguf_limit_bench.config import (
     DEFAULT_LLAMA_PERPLEXITY,
     DEFAULT_LLAMA_SERVER,
     DEFAULT_RUNS_ROOT,
+    find_config_path,
     load_config,
     with_cli_overrides,
+)
+from gguf_limit_bench.deployment_readiness import write_deployment_readiness
+from gguf_limit_bench.deployment_proof import (
+    BenchmarkSuitePreflightError,
+    DEFAULT_DEPLOYMENT_SIMPLE_BENCH_MAX_TOKENS,
+    run_deployment_proof,
 )
 from gguf_limit_bench.deployment import export_champion_profile
 from gguf_limit_bench.flight_plans import flight_plan_payloads
@@ -65,6 +75,8 @@ from gguf_limit_bench.evaluation_mode import (
     asks_questions,
     resolve_evaluation_mode,
 )
+from gguf_limit_bench.flag_recommendations import write_flag_recommendations
+from gguf_limit_bench.hard_recommendations import write_hard_recommendations
 from gguf_limit_bench.autodetect import (
     LLAMA_ENV_VARS,
     default_llama_search_roots,
@@ -108,6 +120,8 @@ from gguf_limit_bench.programs import (
     fit_probe_prompt,
     speed_probe_prompt,
 )
+from gguf_limit_bench.qe_results import write_qe_leaderboard
+from gguf_limit_bench.qe_suite import run_qe_format_suite
 from gguf_limit_bench.flag_ladder import (
     build_core_flag_ladder,
     build_flag_ladder_plan,
@@ -120,7 +134,12 @@ from gguf_limit_bench.runtime_capabilities import (
     collect_llama_capabilities,
     inspect_llama_executable,
 )
-from gguf_limit_bench.reports import write_leaderboard
+from gguf_limit_bench.reports import (
+    build_report_audit,
+    build_verdict,
+    score_summary_for_entry,
+    write_leaderboard,
+)
 from gguf_limit_bench.runner import BenchmarkRunner
 from gguf_limit_bench.run_config import PRESETS, RunConfig
 from gguf_limit_bench.server_probe import ServingProbeResult, probe_llama_server_ttft
@@ -135,7 +154,7 @@ from gguf_limit_bench.state_db import (
     record_context_limit,
 )
 from gguf_limit_bench.tui import BenchTui
-from gguf_limit_bench.webui import serve_webui
+from gguf_limit_bench.webui import benchmark_suite_plan_payloads, serve_webui
 from gguf_limit_bench.workflows import WorkflowAugmentedAttemptRunner, WorkflowEvaluator
 
 
@@ -309,6 +328,13 @@ def main(
         return
     # Bare `apb` is the front door. Set up on the very first run, then launch.
     # Explicit --first-run always re-runs setup; --start always skips it.
+    if find_config_path() is None:
+        console.print(
+            f"[yellow]No _CONFIG.toml found from {Path.cwd()} — receipts and app "
+            "state will be created under this directory. Run apb from the "
+            "pilotBENCHY folder (or via the installed apb shim) to keep results "
+            "in one place.[/yellow]"
+        )
     config = load_config()
     needs_setup = first_run_now or (not start_now and not is_setup_complete(project_root()))
     if needs_setup:
@@ -377,6 +403,12 @@ def start(
         "--benchmark-suite-plan",
         help="Run a benchmark-suite plan for selected models and optimize by agent_bench_score.",
     ),
+    required_context: int | None = typer.Option(
+        None,
+        "--required-context",
+        min=1,
+        help="Minimum context that must be proven before Web recommendations can call the stack ready.",
+    ),
     preset: str | None = None,
 ) -> None:
     """Beginner start button: check paths, then open the model picker."""
@@ -406,6 +438,7 @@ def start(
         ttft_probe=ttft_probe,
         context_ladder=context_ladder,
         benchmark_suite_plan=benchmark_suite_plan,
+        required_context=required_context,
         preset=config.benchmark.default_preset,
     )
 
@@ -426,6 +459,7 @@ def _start_app(
     ttft_probe: bool = True,
     context_ladder: list[int] | None = None,
     benchmark_suite_plan: Path | None = None,
+    required_context: int | None = None,
     preset: str = "deep",
 ) -> None:
     report = build_doctor_report(
@@ -456,6 +490,7 @@ def _start_app(
         llama_bench=llama_bench,
         llama_cli=llama_cli,
         llama_perplexity=llama_perplexity,
+        required_context=required_context,
     )
 
 
@@ -767,6 +802,22 @@ def survey(
 def results(
     runs_root: Path | None = None,
     json_out: bool = False,
+    target_model: str | None = typer.Option(
+        None,
+        "--target-model",
+        help="Scope the displayed decision packet to one intended model name or GGUF basename.",
+    ),
+    target_model_path: Path | None = typer.Option(
+        None,
+        "--target-model-path",
+        help="GGUF path to use for target deployment flag proof commands.",
+    ),
+    required_context: int | None = typer.Option(
+        None,
+        "--required-context",
+        min=1,
+        help="Minimum context that must be proven before the result can call a stack ready.",
+    ),
     open_browser: bool = typer.Option(
         False,
         "--open-browser",
@@ -783,18 +834,155 @@ def results(
         help="Localhost port for --serve.",
     ),
 ) -> None:
-    """Show the latest leaderboard and champion in normal language."""
+    """Show the latest leaderboard and verdict in normal language."""
     config = with_cli_overrides(load_config(), runs_root=runs_root)
     runs_root = config.paths.runs_root
     leaderboard = write_leaderboard(runs_root)
+    hard_outputs = write_hard_recommendations(
+        runs_root,
+        target_model=target_model,
+        target_model_path=str(target_model_path) if target_model_path is not None else None,
+        required_context=required_context,
+    )
+    hard_payload = hard_outputs.payload
+    target_scope = hard_payload.get("target_scope") or {}
+    if target_model and target_scope.get("status") == "NO_TARGET_EVIDENCE":
+        if json_out:
+            _print_json(
+                {
+                    "schema_version": 2,
+                    "result_label": "no_target_evidence",
+                    "model": None,
+                    "top_candidate": None,
+                    "verdict": hard_payload.get("model_gate"),
+                    "decision_packet": hard_payload,
+                    "artifacts": {
+                        "hard_recommendations": str(hard_outputs.markdown_path),
+                    },
+                }
+            )
+            return
+        console.print(f"No benchmark receipts found for target model: {target_model}")
+        console.print(
+            "Target scope: "
+            f"{target_scope['target_model']} | {target_scope['status']} | "
+            f"matched {target_scope['matched_receipt_count']}, "
+            f"ignored {target_scope['ignored_receipt_count']}"
+        )
+        operator = _operator_verdict_payload(hard_payload)
+        console.print(f"Operator verdict: {operator['status']} - {operator['headline']}")
+        if hard_payload.get("proof_runbook"):
+            console.print("Proof runbook:")
+            for step in hard_payload["proof_runbook"]:
+                console.print(
+                    f"{step['step']}. [{step['gate']}/{step['id']}] "
+                    f"{step['status']} -> {step['proves']}",
+                    markup=False,
+                )
+        for command in hard_payload.get("proof_commands", []):
+            command_id = command.get("id", command["gate"])
+            typer.echo(f"Proof command ({command['gate']}/{command_id}): {command['command']}")
+        console.print(f"Hard recommendations: {hard_outputs.markdown_path}")
+        return
     if not leaderboard.entries:
         console.print("No benchmark receipts found yet.")
         return
-    if json_out:
-        typer.echo((runs_root / "champion.json").read_text(encoding="utf-8"))
-        return
     champion = leaderboard.champion
-    console.print(f"Champion: {champion.model_name}")
+    verdict = build_verdict(leaderboard)
+    audit = build_report_audit(leaderboard)
+    if json_out:
+        _print_json(
+            {
+                "schema_version": 2,
+                "result_label": (
+                    "recommended_model" if verdict.action == "PROMOTE" else "top_candidate"
+                ),
+                "model": asdict(champion),
+                "top_candidate": asdict(champion),
+                "verdict": asdict(verdict),
+                "report_audit": asdict(audit),
+                "decision_packet": {
+                    "operator_verdict": hard_payload.get("operator_verdict"),
+                    "score_evidence": hard_payload.get("score_evidence"),
+                    "performance_prediction": hard_payload.get("performance_prediction"),
+                    "candidate_assessment": hard_payload.get("candidate_assessment"),
+                    "candidate_rankings": hard_payload.get("candidate_rankings", []),
+                    "settings_candidates": hard_payload.get("settings_candidates", []),
+                    "repeatability": hard_payload.get("repeatability"),
+                    "context_gate": hard_payload.get("context_gate"),
+                    "resource_gate": hard_payload.get("resource_gate"),
+                    "stability_gate": hard_payload.get("stability_gate"),
+                    "proof_runbook": hard_payload.get("proof_runbook", []),
+                    "proof_commands": hard_payload.get("proof_commands", []),
+                    "hard_recommendations": hard_payload.get("hard_recommendations", []),
+                    "proven_components": hard_payload.get("proven_components", []),
+                    "overall_action": hard_payload.get("overall_action"),
+                },
+                "artifacts": {
+                    "leaderboard": str(runs_root / "leaderboard.md"),
+                    "verdict": str(runs_root / "verdict.md"),
+                    "hard_recommendations": str(hard_outputs.markdown_path),
+                    "report_audit": str(runs_root / "report-audit.md"),
+                    "html": str(runs_root / "results.html"),
+                    "legacy_champion": str(runs_root / "champion.json"),
+                },
+            }
+        )
+        return
+    model_label = "Recommended model" if verdict.action == "PROMOTE" else "Top candidate"
+    console.print(f"{model_label}: {champion.model_name}")
+    _print_score_summary(score_summary_for_entry(champion))
+    console.print(f"Verdict: {verdict.action} ({verdict.confidence} confidence)")
+    console.print(f"Report audit: {audit.status} ({audit.warning_count} warning(s))")
+    for warning in audit.warnings:
+        console.print(f"Audit warning: {warning['code']} in {warning['run_id']}")
+    console.print(f"Predicted quality: {verdict.prediction['quality']}")
+    console.print(f"Predicted speed: {verdict.prediction['speed']}")
+    console.print(f"Predicted context: {verdict.prediction['context']}")
+    console.print(f"Recommendation class: {verdict.prediction['recommendation']}")
+    assessment = hard_payload.get("candidate_assessment") or {}
+    performance = assessment.get("known_performance") or {}
+    console.print(
+        "Candidate readiness: "
+        f"{assessment.get('readiness', 'unknown')} "
+        f"({int(assessment.get('readiness_score') or 0)}/100)"
+    )
+    console.print(
+        "Candidate performance: "
+        f"quality={performance.get('quality', 'unmeasured')} "
+        f"speed={performance.get('speed', 'unmeasured')} "
+        f"context={performance.get('context_class', 'unmeasured')}"
+    )
+    if hard_payload.get("candidate_rankings"):
+        console.print("Candidate rankings:")
+        for candidate in hard_payload["candidate_rankings"][:3]:
+            prediction = candidate.get("prediction") or {}
+            gaps = ", ".join(candidate.get("evidence_gaps") or []) or "none"
+            console.print(
+                f"#{candidate['rank']} {candidate['model']} | "
+                f"{candidate['status']} | "
+                f"agent={_format_optional_float(candidate.get('agent_quality_score'))} | "
+                f"{prediction.get('quality', 'unmeasured')}/"
+                f"{prediction.get('speed', 'unmeasured')}/"
+                f"{prediction.get('context', 'unmeasured')} | "
+                f"gaps={gaps}"
+            )
+    for line in _settings_candidate_lines(hard_payload.get("settings_candidates", [])):
+        console.print(line)
+    if hard_payload.get("repeatability"):
+        console.print(_repeatability_cli_line(hard_payload["repeatability"]))
+    console.print(_context_gate_cli_line(hard_payload.get("context_gate")))
+    console.print(_resource_gate_cli_line(hard_payload.get("resource_gate")))
+    if hard_payload.get("proof_runbook"):
+        console.print("Proof runbook:")
+        for step in hard_payload["proof_runbook"]:
+            console.print(
+                f"{step['step']}. [{step['gate']}/{step['id']}] "
+                f"{step['status']} -> {step['proves']}",
+                markup=False,
+            )
+    console.print(verdict.summary)
+    console.print(f"Next run: {verdict.next_run}")
     console.print(f"Score: {champion.score:.2f} | Status: {champion.status}")
     console.print(
         f"Bench speed: {champion.generation_tps:.2f} tok/s generation, "
@@ -807,6 +995,9 @@ def results(
     console.print(f"Context: {champion.context_label}")
     console.print(f"Receipt: {champion.receipt_path}")
     console.print(f"Leaderboard written: {runs_root / 'leaderboard.md'}")
+    console.print(f"Verdict report: {runs_root / 'verdict.md'}")
+    console.print(f"Hard recommendations: {hard_outputs.markdown_path}")
+    console.print(f"Report audit: {runs_root / 'report-audit.md'}")
     report_path = runs_root / "results.html"
     console.print(f"HTML report: {report_path}")
     if open_browser:
@@ -819,6 +1010,12 @@ def results(
         console.print(f"Serving report: {url}")
         console.print("Press Ctrl+C to stop the report server.")
         _serve_report_directory(serve_root, port)
+
+
+def _leaderboard_summary_line(leaderboard) -> str:
+    verdict = build_verdict(leaderboard)
+    label = "Recommended model" if verdict.action == "PROMOTE" else "Top candidate"
+    return f"{label}: {leaderboard.champion.model_name} ({leaderboard.champion.score:.2f})"
 
 
 @app.command("export-plan")
@@ -939,18 +1136,516 @@ def question_packs(
     console.print(table)
 
 
+@app.command("qe-format")
+def qe_format(
+    model: Annotated[str, typer.Option(help="Model label to record in the QE receipt.")],
+    base_url: Annotated[
+        str,
+        typer.Option(help="Base URL of the running QE llama.cpp server."),
+    ] = "http://127.0.0.1:8080",
+    runs_root: Annotated[
+        Path, typer.Option(help="Directory where QE receipts are written.")
+    ] = DEFAULT_RUNS_ROOT,
+    repeats: Annotated[
+        int,
+        typer.Option(min=1, help="Fresh sessions per QE prompt."),
+    ] = 10,
+    max_tokens: Annotated[
+        int,
+        typer.Option(min=1, help="Maximum generated tokens per QE attempt."),
+    ] = 128,
+    timeout_seconds: Annotated[
+        int,
+        typer.Option(min=1, help="Per-request timeout for the QE endpoint."),
+    ] = 600,
+    temperature: Annotated[
+        float,
+        typer.Option(min=0.0, help="QE sampling temperature."),
+    ] = 0.1,
+    top_p: Annotated[
+        float,
+        typer.Option(min=0.0, max=1.0, help="QE nucleus sampling top-p."),
+    ] = 0.8,
+    min_p: Annotated[
+        float,
+        typer.Option(min=0.0, max=1.0, help="QE min-p sampling cutoff."),
+    ] = 0.02,
+    repeat_penalty: Annotated[
+        float,
+        typer.Option(min=0.0, help="QE repeat penalty."),
+    ] = 1.05,
+    dry_multiplier: Annotated[
+        float,
+        typer.Option(min=0.0, help="QE DRY repetition penalty multiplier."),
+    ] = 0.6,
+) -> None:
+    """Run QE fresh-session format checks against a live endpoint."""
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    out_dir = runs_root / f"{stamp}-qe-format-{_safe_receipt_slug(model)}"
+    sampling = {
+        "temperature": temperature,
+        "top_p": top_p,
+        "min_p": min_p,
+        "repeat_penalty": repeat_penalty,
+        "dry_multiplier": dry_multiplier,
+    }
+    summary = run_qe_format_suite(
+        model=model,
+        base_url=base_url,
+        out_dir=out_dir,
+        repeats=repeats,
+        answer_max_tokens=max_tokens,
+        timeout_seconds=timeout_seconds,
+        sampling=sampling,
+    )
+    console.print(f"QE format receipt: {out_dir}")
+    console.print(f"Score: {_format_optional_float(float(summary['score']))}")
+    console.print(f"Format rate: {_format_optional_float(float(summary['format_rate']))}")
+    console.print(
+        f"Direct-answer rate: {_format_optional_float(float(summary['direct_answer_rate']))}"
+    )
+    console.print(f"Attempts: {summary['attempts']}")
+
+
+@app.command("qe-results")
+def qe_results(
+    runs_root: Annotated[
+        Path, typer.Option(help="Directory where QE receipts are stored.")
+    ] = DEFAULT_RUNS_ROOT,
+    json_out: bool = False,
+) -> None:
+    """Rank QE fresh-session receipts and print the current QE gate result."""
+    leaderboard = write_qe_leaderboard(runs_root)
+    if json_out:
+        typer.echo((runs_root / "qe-format-leaderboard.json").read_text(encoding="utf-8"))
+        return
+    if leaderboard.champion is None:
+        console.print("No QE format receipts found yet.")
+        console.print("Next run: apb qe-format --model MODEL --base-url http://127.0.0.1:PORT")
+        return
+    champion = leaderboard.champion
+    label = "QE champion" if champion.action == "PROMOTE_QE_PROFILE" else "QE top candidate"
+    console.print(f"{label}: {champion.model}")
+    console.print(f"Action: {champion.action}")
+    console.print(f"Recommendation: {champion.recommendation}")
+    console.print(f"Next run: {champion.next_run}")
+    console.print(
+        "Score: "
+        f"{champion.score:.6f} | Format: {champion.format_rate:.6f} | "
+        f"Direct-answer: {champion.direct_answer_rate:.6f}"
+    )
+    console.print(f"Attempts: {champion.attempts}")
+    console.print(f"Median generation: {_format_optional_tps(champion.median_tps)}")
+    console.print(f"Median TTFT: {_format_optional_ms(champion.median_ttft_ms)}")
+    console.print(f"Receipt: {champion.receipt_path}")
+    console.print(f"Leaderboard written: {runs_root / 'qe-format-leaderboard.md'}")
+
+
+@app.command("flag-recommendations")
+def flag_recommendations(
+    model: Annotated[Path, typer.Option(help="GGUF model to generate llama-server flags for.")],
+    llama_server: Path | None = None,
+    output_dir: Annotated[
+        Path,
+        typer.Option(help="Directory where flag-recommendations artifacts are written."),
+    ] = DEFAULT_RUNS_ROOT,
+    root: list[Path] | None = typer.Option(
+        None,
+        "--root",
+        help="Optional model/template search root. Repeatable.",
+    ),
+    host: str = "127.0.0.1",
+    port: int = 8080,
+    json_out: bool = False,
+) -> None:
+    """Write recommended llama.cpp serving modes for a model or QE helper."""
+    config = with_cli_overrides(load_config(), llama_server=llama_server, model_roots=root)
+    outputs = write_flag_recommendations(
+        model=model,
+        llama_server=config.paths.llama_server,
+        output_dir=output_dir,
+        gpu_name=detect_gpu_name(),
+        search_roots=tuple(config.paths.model_roots),
+        host=host,
+        port=port,
+    )
+    if json_out:
+        typer.echo(outputs.json_path.read_text(encoding="utf-8"))
+        return
+    payload = json.loads(outputs.json_path.read_text(encoding="utf-8"))
+    console.print(f"Flag recommendations written: {outputs.markdown_path}")
+    console.print(f"JSON: {outputs.json_path}")
+    console.print(f"Lane type: {payload['lane_type']}")
+    for profile in payload["profiles"]:
+        console.print(
+            f"{profile['label']}: ctx {profile['context_size']} | "
+            f"KV K={profile['kv_cache']['k']} V={profile['kv_cache']['v']} | "
+            f"parallel {profile['parallel']}"
+        )
+
+
+@app.command("deployment-readiness")
+def deployment_readiness(
+    runs_root: Path | None = None,
+    json_out: bool = False,
+) -> None:
+    """Gate flag recommendations against score, context, and serving evidence."""
+    config = with_cli_overrides(load_config(), runs_root=runs_root)
+    outputs = write_deployment_readiness(config.paths.runs_root)
+    if json_out:
+        typer.echo(outputs.json_path.read_text(encoding="utf-8"))
+        return
+    payload = json.loads(outputs.json_path.read_text(encoding="utf-8"))
+    console.print(f"Deployment readiness: {payload['action']}")
+    console.print(f"Recommended profile: {payload['recommended_profile_id'] or 'none'}")
+    console.print(str(payload["summary"]))
+    console.print(f"Next run: {payload['next_run']}")
+    console.print(f"Report: {outputs.markdown_path}")
+    for profile in payload["profiles"]:
+        console.print(
+            f"{profile['label']}: {profile['status']} at ctx {profile['context_size']} "
+            f"({profile['reason']})"
+        )
+
+
+@app.command("deployment-proof")
+def deployment_proof(
+    runs_root: Path | None = None,
+    llama_server: Path | None = None,
+    profile: str = typer.Option(
+        "standard", "--profile", help="Profile id from flag-recommendations.json."
+    ),
+    flag_recommendations: Path | None = typer.Option(
+        None,
+        "--flag-recommendations",
+        help="Path to flag-recommendations.json. Defaults to RUNS_ROOT/flag-recommendations.json.",
+    ),
+    benchmark_suite_plan: Path = typer.Option(
+        Path("benchmark-suite.plan.json"),
+        "--benchmark-suite-plan",
+        help="Scored benchmark-suite plan required for deployment proof.",
+    ),
+    budget_minutes: int = typer.Option(30, "--budget-minutes", min=1),
+    simple_bench: Path = typer.Option(
+        DEFAULT_SIMPLE_BENCH_PATH,
+        "--simple-bench",
+        help="SimpleBench JSON file used for the serving pass.",
+    ),
+    simple_bench_system_prompt: Path = typer.Option(
+        DEFAULT_SIMPLE_BENCH_SYSTEM_PROMPT,
+        "--simple-bench-system-prompt",
+        help="System prompt prepended before SimpleBench questions.",
+    ),
+    simple_bench_max_tokens: int = typer.Option(
+        DEFAULT_DEPLOYMENT_SIMPLE_BENCH_MAX_TOKENS,
+        "--simple-bench-max-tokens",
+        min=1,
+        help="Maximum generated tokens per SimpleBench question.",
+    ),
+) -> None:
+    """Run one exact flag-recommendation profile and write score plus serving evidence."""
+    config = with_cli_overrides(load_config(), runs_root=runs_root, llama_server=llama_server)
+    try:
+        receipt = run_deployment_proof(
+            runs_root=config.paths.runs_root,
+            profile_id=profile,
+            flag_recommendations_path=flag_recommendations,
+            benchmark_suite_plan=benchmark_suite_plan,
+            llama_server=config.paths.llama_server,
+            simple_bench=simple_bench,
+            simple_bench_system_prompt=simple_bench_system_prompt,
+            budget_seconds=budget_minutes * 60,
+            simple_bench_max_tokens=simple_bench_max_tokens,
+        )
+    except BenchmarkSuitePreflightError as exc:
+        console.print(f"Deployment proof preflight failed: {exc}")
+        console.print(f"Preflight receipt: {exc.receipt_path}")
+        raise typer.Exit(1) from exc
+    except ValueError as exc:
+        console.print(f"Deployment proof failed: {exc}")
+        raise typer.Exit(1) from exc
+    readiness_outputs = write_deployment_readiness(config.paths.runs_root)
+    receipt_target = _deployment_proof_target(receipt.path)
+    hard_outputs = write_hard_recommendations(
+        config.paths.runs_root,
+        target_model_path=receipt_target.get("model"),
+        required_context=receipt_target.get("context_size"),
+    )
+    readiness_payload = json.loads(readiness_outputs.json_path.read_text(encoding="utf-8"))
+    hard_payload = hard_outputs.payload
+    typer.echo(f"Deployment proof receipt: {receipt.path}")
+    typer.echo(f"Deployment readiness: {readiness_payload['action']}")
+    typer.echo(f"Recommended profile: {readiness_payload.get('recommended_profile_id') or 'none'}")
+    typer.echo(f"Readiness report: {readiness_outputs.markdown_path}")
+    typer.echo(f"Hard recommendations: {hard_payload['overall_action']}")
+    operator = _operator_verdict_payload(hard_payload)
+    score_evidence = _score_evidence_payload(hard_payload)
+    typer.echo(f"Operator verdict: {operator['status']} - {operator['headline']}")
+    prediction = _performance_prediction_payload(hard_payload)
+    typer.echo(f"Performance prediction: {prediction['status']} ({prediction['risk']} risk)")
+    typer.echo(f"Deployment expectation: {prediction['deployment_expectation']}")
+    typer.echo(
+        "Scored candidates: "
+        f"{score_evidence['scored_candidate_count']}/{score_evidence['candidate_count']}"
+    )
+    typer.echo(f"Proven recommendations: {len(hard_payload['hard_recommendations'])}")
+    for line in _settings_candidate_lines(hard_payload.get("settings_candidates", [])):
+        typer.echo(line)
+    typer.echo(f"Hard recommendation report: {hard_outputs.markdown_path}")
+
+
+def _deployment_proof_target(receipt_path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads((receipt_path / "best-settings.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    settings = payload.get("settings") if isinstance(payload.get("settings"), dict) else {}
+    target: dict[str, Any] = {}
+    model = str(payload.get("model") or "")
+    if model:
+        target["model"] = model
+    try:
+        context_size = int(settings.get("context_size"))
+    except (TypeError, ValueError):
+        context_size = 0
+    if context_size > 0:
+        target["context_size"] = context_size
+    return target
+
+
+@app.command("hard-recommendations")
+def hard_recommendations(
+    runs_root: Path | None = None,
+    json_out: bool = False,
+    target_model: str | None = typer.Option(
+        None,
+        "--target-model",
+        help="Scope the recommendation report to one intended model name or GGUF basename.",
+    ),
+    target_model_path: Path | None = typer.Option(
+        None,
+        "--target-model-path",
+        help="GGUF path to use for target deployment flag proof commands.",
+    ),
+    required_context: int | None = typer.Option(
+        None,
+        "--required-context",
+        min=1,
+        help="Minimum context that must be proven before the stack is ready.",
+    ),
+) -> None:
+    """Write one consolidated hard-recommendation report from all evidence gates."""
+    config = with_cli_overrides(load_config(), runs_root=runs_root)
+    outputs = write_hard_recommendations(
+        config.paths.runs_root,
+        target_model=target_model,
+        target_model_path=str(target_model_path) if target_model_path is not None else None,
+        required_context=required_context,
+    )
+    if json_out:
+        _print_json(outputs.payload)
+        return
+    payload = outputs.payload
+    console.print(f"Hard recommendations: {payload['overall_action']}")
+    target_scope = payload.get("target_scope") or {}
+    if target_scope.get("target_model"):
+        console.print(
+            "Target scope: "
+            f"{target_scope['target_model']} | {target_scope['status']} | "
+            f"matched {target_scope['matched_receipt_count']}, "
+            f"ignored {target_scope['ignored_receipt_count']}"
+        )
+    operator = _operator_verdict_payload(payload)
+    score_evidence = _score_evidence_payload(payload)
+    console.print(f"Operator verdict: {operator['status']} - {operator['headline']}")
+    console.print(f"Operator reason: {operator['why']}")
+    prediction = _performance_prediction_payload(payload)
+    console.print(f"Performance prediction: {prediction['status']} ({prediction['risk']} risk)")
+    console.print(f"Deployment expectation: {prediction['deployment_expectation']}")
+    console.print(
+        "Scored candidates: "
+        f"{score_evidence['scored_candidate_count']}/{score_evidence['candidate_count']}"
+    )
+    console.print(f"Proven recommendations: {len(payload['hard_recommendations'])}")
+    for line in _settings_candidate_lines(payload.get("settings_candidates", [])):
+        console.print(line)
+    console.print(f"Proof commands: {len(payload['proof_commands'])}")
+    console.print(f"Model gate: {payload['model_gate']['action']}")
+    console.print(f"Deployment gate: {payload['deployment_gate']['action']}")
+    console.print(_context_gate_cli_line(payload.get("context_gate")))
+    console.print(_resource_gate_cli_line(payload.get("resource_gate")))
+    console.print(f"QE gate: {payload['qe_gate']['action']}")
+    console.print(f"Stability gate: {payload['stability_gate']['action']}")
+    assessment = payload["candidate_assessment"]
+    performance = assessment["known_performance"]
+    console.print(
+        f"Candidate readiness: {assessment['readiness']} ({assessment['readiness_score']}/100)"
+    )
+    console.print(
+        "Candidate performance: "
+        f"quality={performance['quality']} "
+        f"speed={performance['speed']} "
+        f"context={performance['context_class']}"
+    )
+    if payload.get("candidate_rankings"):
+        console.print("Candidate rankings:")
+        for candidate in payload["candidate_rankings"][:3]:
+            prediction = candidate.get("prediction") or {}
+            gaps = ", ".join(candidate.get("evidence_gaps") or []) or "none"
+            console.print(
+                f"#{candidate['rank']} {candidate['model']} | "
+                f"{candidate['status']} | "
+                f"agent={_format_optional_float(candidate.get('agent_quality_score'))} | "
+                f"{prediction.get('quality', 'unmeasured')}/"
+                f"{prediction.get('speed', 'unmeasured')}/"
+                f"{prediction.get('context', 'unmeasured')} | "
+                f"gaps={gaps}"
+            )
+    if payload.get("repeatability"):
+        console.print(_repeatability_cli_line(payload["repeatability"]))
+    console.print(f"Quality: {payload['scorecard']['quality']}")
+    console.print(f"Speed: {payload['scorecard']['speed']}")
+    console.print(f"Context: {payload['scorecard']['context']}")
+    console.print(f"Report: {outputs.markdown_path}")
+    for action in payload["next_actions"]:
+        console.print(f"Next action: {action}")
+    if payload.get("proof_runbook"):
+        console.print("Proof runbook:")
+        for step in payload["proof_runbook"]:
+            console.print(
+                f"{step['step']}. [{step['gate']}/{step['id']}] "
+                f"{step['status']} -> {step['proves']}",
+                markup=False,
+            )
+    for command in payload["proof_commands"]:
+        command_id = command.get("id", command["gate"])
+        typer.echo(f"Proof command ({command['gate']}/{command_id}): {command['command']}")
+
+
 @app.command("benchmark-suite-template")
 def benchmark_suite_template(
     output: Path = Path("benchmark-suite.plan.json"),
     model: str = "local-model",
     base_url: str = "http://127.0.0.1:8080/v1",
-    context: int = 4096,
+    context: int = 131072,
+    template_kind: str = typer.Option(
+        "local_librarian",
+        "--template-kind",
+        help="Plan kind: local_librarian (default) or external.",
+    ),
 ) -> None:
-    """Write an editable plan that wraps real external benchmark harnesses."""
-    plan = {
+    """Write an editable recommendation-grade benchmark-suite plan."""
+    if template_kind == "local_librarian":
+        plan = _local_librarian_benchmark_suite_plan(
+            model=model,
+            base_url=base_url,
+            context=context,
+        )
+    elif template_kind == "external":
+        plan = _external_benchmark_suite_plan(model=model, base_url=base_url, context=context)
+    else:
+        raise typer.BadParameter("template_kind must be local_librarian or external")
+    output.write_text(json.dumps(plan, ensure_ascii=True, indent=2), encoding="utf-8")
+    console.print(f"Benchmark-suite plan written: {output}")
+    console.print("Edit the task commands, then run: agent-autobench benchmark-suite --plan PLAN")
+
+
+def _local_librarian_benchmark_suite_plan(*, model: str, base_url: str, context: int) -> dict:
+    librarian_base_url = base_url.removesuffix("/v1")
+    common_command = [
+        "uv",
+        "run",
+        "--extra",
+        "dev",
+        "python",
+        "-m",
+        "gguf_limit_bench.librarian_suite",
+        "--model",
+        "{model}",
+        "--base-url",
+        "{base_url}",
+        "--out-dir",
+        "{task_dir}",
+        "--score-out",
+        "{task_dir}/score.json",
+        "--settings-json",
+        "{settings_json}",
+        "--sample-size",
+        "0",
+        "--repeats",
+        "3",
+    ]
+    return {
         "model": model,
         "context": context,
-        "settings": {"base_url": base_url, "score_contract": "agent_bench_score"},
+        "settings": {
+            "base_url": librarian_base_url,
+            "score_contract": "agent_bench_score",
+            "context_target": f"required_context_{context}",
+            "plan_kind": "local_librarian_template",
+            "extra_server_args": ["--jinja"],
+            "answer_max_tokens": DEFAULT_DEPLOYMENT_SIMPLE_BENCH_MAX_TOKENS,
+            "requires": (
+                "A live llama.cpp OpenAI-compatible endpoint plus the repo-local "
+                "librarian-suite. No uv/uvx external harness command is required."
+            ),
+        },
+        "tasks": [
+            {
+                "id": "local_librarian_general",
+                "phase": "general",
+                "harness": "librarian-suite",
+                "commands": [
+                    [
+                        *common_command,
+                        "--pack",
+                        "librarian-write-entry",
+                        "--pack",
+                        "librarian-triage",
+                        "--pack",
+                        "librarian-dedupe",
+                    ]
+                ],
+                "score_file": "{task_dir}/score.json",
+                "min_score": 0.01,
+                "timeout_seconds": 3600,
+            },
+            {
+                "id": "local_librarian_agentic",
+                "phase": "agentic",
+                "harness": "librarian-suite",
+                "commands": [
+                    [
+                        *common_command,
+                        "--pack",
+                        "librarian-gate",
+                        "--pack",
+                        "librarian-rerank",
+                        "--pack",
+                        "librarian-query",
+                        "--pack",
+                        "librarian-compress",
+                        "--pack",
+                        "librarian-contradiction",
+                    ]
+                ],
+                "score_file": "{task_dir}/score.json",
+                "min_score": 0.01,
+                "timeout_seconds": 3600,
+            },
+        ],
+    }
+
+
+def _external_benchmark_suite_plan(*, model: str, base_url: str, context: int) -> dict:
+    return {
+        "model": model,
+        "context": context,
+        "settings": {
+            "base_url": base_url,
+            "score_contract": "agent_bench_score",
+            "context_target": f"required_context_{context}",
+        },
         "tasks": [
             {
                 "id": "gsm8k_cot_zeroshot_smoke",
@@ -967,7 +1662,7 @@ def benchmark_suite_template(
                         "--model",
                         "local-chat-completions",
                         "--model_args",
-                        f"model={{model}},base_url={base_url}/chat/completions,eos_string=<|im_end|>",
+                        "model={model},base_url={base_url}/chat/completions,eos_string=<|im_end|>",
                         "--tasks",
                         "gsm8k_cot_zeroshot",
                         "--apply_chat_template",
@@ -1003,7 +1698,7 @@ def benchmark_suite_template(
                 "harness": "inspect-ai",
                 "env": {
                     "LOCAL_API_KEY": "local-no-key",
-                    "LOCAL_BASE_URL": base_url,
+                    "LOCAL_BASE_URL": "{base_url}",
                     "PYTHONIOENCODING": "utf-8",
                 },
                 "commands": [
@@ -1018,7 +1713,7 @@ def benchmark_suite_template(
                         "--model",
                         "openai-api/local/{model}",
                         "--model-base-url",
-                        base_url,
+                        "{base_url}",
                         "--log-dir",
                         "{task_dir}",
                         "--log-format",
@@ -1052,9 +1747,41 @@ def benchmark_suite_template(
             },
         ],
     }
-    output.write_text(json.dumps(plan, ensure_ascii=True, indent=2), encoding="utf-8")
-    console.print(f"Benchmark-suite plan written: {output}")
-    console.print("Edit the task commands, then run: agent-autobench benchmark-suite --plan PLAN")
+
+
+@app.command("benchmark-suite-preflight")
+def benchmark_suite_preflight(
+    plan: Path = typer.Option(
+        Path("benchmark-suite.plan.json"),
+        "--plan",
+        help="Benchmark-suite plan to preflight before launching a model.",
+    ),
+    runs_root: Path | None = None,
+    json_out: bool = False,
+) -> None:
+    """Check benchmark-suite harness commands before spending GPU time."""
+    config = with_cli_overrides(load_config(), runs_root=runs_root)
+    try:
+        suite_plan = BenchmarkSuitePlan.from_path(plan)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        typer.echo(f"Invalid benchmark-suite plan: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    preflight = preflight_benchmark_suite(
+        suite_plan,
+        config.paths.runs_root,
+        plan_path=plan,
+    )
+    payload = benchmark_suite_preflight_to_dict(preflight)
+    payload["plan_path"] = str(plan)
+    if json_out:
+        typer.echo(json.dumps(payload, ensure_ascii=True, indent=2))
+    else:
+        typer.echo(f"Benchmark-suite preflight: {preflight.status}")
+        typer.echo(f"Issues: {preflight.issue_count}")
+        typer.echo(f"Next action: {preflight.next_action}")
+        typer.echo(f"Receipt: {preflight.receipt_path}")
+    if not preflight.ok:
+        raise typer.Exit(1)
 
 
 @app.command("benchmark-suite")
@@ -1081,7 +1808,11 @@ def benchmark_suite(
     if json_out:
         _print_json(payload)
     else:
+        verdict = suite_verdict(suite_run)
         console.print(f"Benchmark suite receipt: {suite_run.receipt_path}")
+        console.print(f"Verdict: {verdict['action']} ({verdict['confidence']} confidence)")
+        console.print(str(verdict["summary"]))
+        console.print(f"Next run: {verdict['next_run']}")
         console.print(f"General score: {_format_optional_float(suite_run.general_score)}")
         console.print(f"Agentic score: {_format_optional_float(suite_run.agentic_score)}")
         console.print(f"agent_bench_score: {suite_run.agent_bench_score:.6f}")
@@ -1097,10 +1828,10 @@ def benchmark_suite(
 @app.command("benchmark-suite-plans")
 def benchmark_suite_plans(json_out: bool = False) -> None:
     """List bundled benchmark-suite plan files."""
-    plans_dir = project_root() / "benchmarks" / "plans"
-    plans = sorted(plans_dir.glob("*.plan.json"))
+    root = project_root()
+    plans = benchmark_suite_plan_payloads(root)
     if json_out:
-        _print_json([str(path) for path in plans])
+        _print_json(plans)
         return
     if not plans:
         console.print("No bundled benchmark-suite plans found.")
@@ -1108,18 +1839,19 @@ def benchmark_suite_plans(json_out: bool = False) -> None:
     table = Table(title="Benchmark Suite Plans")
     table.add_column("Plan")
     table.add_column("Kind")
+    table.add_column("Context")
     table.add_column("Requires")
-    for path in plans:
+    for plan in plans:
+        plan_path = Path(str(plan["path"]))
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            table.add_row(str(path), "invalid", "could not read JSON")
-            continue
-        settings = dict(payload.get("settings", {}))
+            label = str(plan_path.relative_to(root))
+        except ValueError:
+            label = str(plan_path)
         table.add_row(
-            str(path.relative_to(project_root())),
-            str(settings.get("plan_kind", "unknown")),
-            str(settings.get("requires", "")),
+            label,
+            str(plan.get("plan_kind") or "unknown"),
+            str(plan.get("context") or "unknown"),
+            str(plan.get("requires", "")),
         )
     console.print(table)
 
@@ -1136,6 +1868,8 @@ def flight_plans(json_out: bool = False) -> None:
     table.add_column("Recommended", no_wrap=True)
     table.add_column("Mode", no_wrap=True)
     table.add_column("Budget", no_wrap=True)
+    table.add_column("Class", no_wrap=True)
+    table.add_column("Score", no_wrap=True)
     table.add_column("Evidence")
     for plan in plans:
         table.add_row(
@@ -1143,9 +1877,24 @@ def flight_plans(json_out: bool = False) -> None:
             "yes" if plan["recommended"] else "",
             str(plan["mode_id"]),
             f"{plan['budget_minutes']} min/model",
+            str(plan["evidence_class"]),
+            str(plan["score_contract"]),
             str(plan["evidence_goal"]),
         )
     console.print(table)
+    for plan in plans:
+        if plan["recommended"]:
+            console.print(
+                "Recommended plan: "
+                f"{plan['label']} | Class: {plan['evidence_class']} | "
+                f"Score: {plan['score_contract']}"
+            )
+        elif plan["evidence_class"] == "speed_only":
+            console.print(
+                "Speed-only plan: "
+                f"{plan['label']} | Class: {plan['evidence_class']} | "
+                "not a recommendation"
+            )
 
 
 @app.command("init-db")
@@ -1161,6 +1910,13 @@ def export_profile(
     output_dir: Path = Path("results/champions"),
     llama_server: Path | None = None,
     lane: str = "hermes_pilot",
+    allow_unproven: Annotated[
+        bool,
+        typer.Option(
+            "--allow-unproven",
+            help="Export even when deployment-readiness has not proven a deployable profile.",
+        ),
+    ] = False,
 ) -> None:
     """Export the latest champion as a ready-to-edit deployment profile."""
     config = with_cli_overrides(load_config(), runs_root=runs_root, llama_server=llama_server)
@@ -1169,6 +1925,21 @@ def export_profile(
     if not leaderboard.entries:
         console.print("No champion found yet. Run a benchmark first.")
         raise typer.Exit(1)
+    readiness = write_deployment_readiness(runs_root)
+    readiness_payload = json.loads(readiness.json_path.read_text(encoding="utf-8"))
+    readiness_action = str(readiness_payload.get("action") or "UNKNOWN")
+    if readiness_action != "PROMOTE_DEPLOYMENT_PROFILE" and not allow_unproven:
+        console.print(f"Deployment readiness: {readiness_action}")
+        console.print(str(readiness_payload.get("summary") or "Deployment is not proven."))
+        console.print("Refusing to export unproven champion.")
+        console.print(f"Next run: {readiness_payload.get('next_run')}")
+        console.print("Override only for manual lab work: --allow-unproven")
+        raise typer.Exit(1)
+    if readiness_action != "PROMOTE_DEPLOYMENT_PROFILE":
+        console.print(
+            "WARNING: exporting an unproven champion. Do not treat this as a deployment "
+            "recommendation."
+        )
     outputs = export_champion_profile(
         champion_path=runs_root / "champion.json",
         output_dir=output_dir,
@@ -1703,7 +2474,7 @@ def autoresearch(
         help="System prompt prepended before each SimpleBench question.",
     ),
     simple_bench_max_tokens: int = typer.Option(
-        4096,
+        DEFAULT_DEPLOYMENT_SIMPLE_BENCH_MAX_TOKENS,
         "--simple-bench-max-tokens",
         min=1,
         help="Maximum generated tokens per SimpleBench question (room for reasoning models to finish).",
@@ -2009,9 +2780,7 @@ def autoresearch_all(
             break
     leaderboard = write_leaderboard(config.paths.runs_root)
     if leaderboard.entries:
-        console.print(
-            f"Champion: {leaderboard.champion.model_name} ({leaderboard.champion.score:.2f})"
-        )
+        console.print(_leaderboard_summary_line(leaderboard))
         console.print(f"Leaderboard: {config.paths.runs_root / 'leaderboard.md'}")
 
 
@@ -2038,6 +2807,22 @@ def tui(
         "--benchmark-suite-plan",
         help="Run a benchmark-suite plan for selected models and optimize by agent_bench_score.",
     ),
+    target_model: str | None = typer.Option(
+        None,
+        "--target-model",
+        help="Scope post-run TUI decision lines to one intended model name or GGUF basename.",
+    ),
+    target_model_path: Path | None = typer.Option(
+        None,
+        "--target-model-path",
+        help="GGUF path to use for target deployment flag proof commands.",
+    ),
+    required_context: int | None = typer.Option(
+        None,
+        "--required-context",
+        min=1,
+        help="Minimum context that must be proven before TUI recommendations can call the stack ready.",
+    ),
 ) -> None:
     """Open the interactive TUI model picker and run the autoresearch loop."""
     config = with_cli_overrides(
@@ -2052,6 +2837,9 @@ def tui(
     picker = BenchTui(
         root=config.paths.model_roots[0],
         runs_root=config.paths.runs_root,
+        target_model=target_model,
+        target_model_path=str(target_model_path) if target_model_path is not None else None,
+        required_context=required_context,
     )
     picker.run_model = lambda model: (
         _run_one_autoresearch(
@@ -2079,9 +2867,7 @@ def tui(
     if getattr(picker, "ran_inside_tui", False):
         leaderboard = write_leaderboard(config.paths.runs_root)
         if leaderboard.entries:
-            console.print(
-                f"Champion: {leaderboard.champion.model_name} ({leaderboard.champion.score:.2f})"
-            )
+            console.print(_leaderboard_summary_line(leaderboard))
             console.print(f"Leaderboard: {config.paths.runs_root / 'leaderboard.md'}")
     else:
         _run_tui_selection(
@@ -2194,7 +2980,7 @@ def _run_one_autoresearch(
     flag_context_size: int = MIN_SERIOUS_CONTEXT_SIZE,
     simple_bench: Path = DEFAULT_SIMPLE_BENCH_PATH,
     simple_bench_system_prompt: Path = DEFAULT_SIMPLE_BENCH_SYSTEM_PROMPT,
-    simple_bench_max_tokens: int = 4096,
+    simple_bench_max_tokens: int = DEFAULT_DEPLOYMENT_SIMPLE_BENCH_MAX_TOKENS,
     llama_server_extra_args: tuple[str, ...] = (),
     capability_collector: Callable[[Path], LlamaRuntimeCapabilities] = collect_llama_capabilities,
     flag_ladder_attempt_runner: AttemptRunner | None = None,
@@ -2570,9 +3356,7 @@ def _run_tui_selection(
         _print_receipt_outputs(receipt.path)
     leaderboard = write_leaderboard(runs_root)
     if leaderboard.entries:
-        console.print(
-            f"Champion: {leaderboard.champion.model_name} ({leaderboard.champion.score:.2f})"
-        )
+        console.print(_leaderboard_summary_line(leaderboard))
         console.print(f"Leaderboard: {runs_root / 'leaderboard.md'}")
 
 
@@ -2718,6 +3502,129 @@ def _format_optional_tps(value: float | None) -> str:
 
 def _format_optional_float(value: float | None) -> str:
     return "not measured" if value is None else f"{value:.6f}"
+
+
+def _print_score_summary(score_summary: dict[str, object]) -> None:
+    console.print("Benchmark scores:")
+    console.print(f"Score contract: {score_summary.get('score_contract') or 'unknown'}")
+    console.print(
+        "Agent bench score: "
+        f"{_format_optional_float(_float_from_summary(score_summary, 'agent_bench_score'))}"
+    )
+    console.print(
+        "General score: "
+        f"{_format_optional_float(_float_from_summary(score_summary, 'general_score'))}"
+    )
+    console.print(
+        "Agentic score: "
+        f"{_format_optional_float(_float_from_summary(score_summary, 'agentic_score'))}"
+    )
+    console.print(
+        "Generation speed: "
+        f"{_format_optional_tps(_float_from_summary(score_summary, 'generation_tps'))}"
+    )
+    console.print(
+        f"Serving speed: {_format_optional_tps(_float_from_summary(score_summary, 'serving_tps'))}"
+    )
+    context = score_summary.get("context")
+    console.print(f"Context: {context if context is not None else 'not measured'}")
+
+
+def _float_from_summary(score_summary: dict[str, object], key: str) -> float | None:
+    value = score_summary.get(key)
+    if isinstance(value, int | float):
+        return float(value)
+    return None
+
+
+def _operator_verdict_payload(payload: dict) -> dict:
+    operator = payload.get("operator_verdict")
+    if isinstance(operator, dict):
+        return operator
+    return {
+        "status": "UNKNOWN",
+        "headline": "Hard-recommendation payload has no operator verdict.",
+        "why": "Refresh hard recommendations with the current pilotBENCHY build.",
+        "next_command": "apb hard-recommendations --runs-root _runs",
+    }
+
+
+def _performance_prediction_payload(payload: dict) -> dict:
+    prediction = payload.get("performance_prediction")
+    if isinstance(prediction, dict):
+        return prediction
+    return {
+        "status": "UNKNOWN",
+        "risk": "unknown",
+        "deployment_expectation": "refresh_required",
+        "expected_user_experience": "Refresh hard recommendations with the current build.",
+    }
+
+
+def _score_evidence_payload(payload: dict) -> dict:
+    score_evidence = payload.get("score_evidence")
+    if isinstance(score_evidence, dict):
+        return score_evidence
+    candidate_rankings = payload.get("candidate_rankings")
+    candidates = candidate_rankings if isinstance(candidate_rankings, list) else []
+    hard_recommendations = payload.get("hard_recommendations")
+    recommendations = hard_recommendations if isinstance(hard_recommendations, list) else []
+    return {
+        "candidate_count": len(candidates),
+        "scored_candidate_count": sum(
+            1
+            for candidate in candidates
+            if isinstance(candidate, dict) and candidate.get("agent_quality_score") is not None
+        ),
+        "proven_recommendation_count": len(recommendations),
+    }
+
+
+def _settings_candidate_lines(candidates: object) -> list[str]:
+    if not isinstance(candidates, list) or not candidates:
+        return ["Settings candidates: none"]
+    lines = ["Settings candidates:"]
+    for item in candidates[:5]:
+        if not isinstance(item, dict):
+            continue
+        score = item.get("recommendation_score")
+        score_label = f"{score:.4f}" if isinstance(score, int | float) else "unmeasured"
+        lines.append(
+            f"#{int(item.get('rank') or 0)} {item.get('profile_id') or 'unknown'} | "
+            f"{item.get('status') or 'unknown'} | "
+            f"{item.get('decision') or 'unknown'} | "
+            f"ctx={int(item.get('context_size') or 0)} | "
+            f"score={score_label}"
+        )
+    return lines
+
+
+def _repeatability_cli_line(repeatability: dict) -> str:
+    run_count = int(repeatability.get("run_count") or 0)
+    run_label = "run" if run_count == 1 else "runs"
+    return (
+        f"Repeatability: {repeatability.get('confidence', 'unmeasured')} ({run_count} {run_label})"
+    )
+
+
+def _context_gate_cli_line(context_gate: object) -> str:
+    if not isinstance(context_gate, dict):
+        return "Context gate: unmeasured"
+    return (
+        f"Context gate: {context_gate.get('action') or 'unknown'} | "
+        f"required={context_gate.get('required_context') or 'unknown'} | "
+        f"proven={context_gate.get('proven_context') or 'none'} | "
+        f"profile={context_gate.get('profile_id') or 'unknown'}"
+    )
+
+
+def _resource_gate_cli_line(resource_gate: object) -> str:
+    if not isinstance(resource_gate, dict):
+        return "Resource gate: unmeasured"
+    return (
+        f"Resource gate: {resource_gate.get('action') or 'unknown'} | "
+        f"required={resource_gate.get('required') or 'unknown'}"
+    )
 
 
 def _is_mtp_model(model: Path) -> bool:

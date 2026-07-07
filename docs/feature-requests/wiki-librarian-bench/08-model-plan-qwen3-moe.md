@@ -119,7 +119,7 @@ sampling:  mode-matched (0.6/0.95/20 thinking; 0.7/0.8/20 non-thinking) + low-te
 mtp:       {off, draft-mtp}               # MTP GGUF + recent llama.cpp only
 flags:     standard ladder + q8 KV
 context:   {4k, 8k, 16k, 32k, 64k, 128k, 256k}
-jobs:      all 7 librarian packs
+jobs:      all 8 librarian packs
 seeds:     N=5 repeats per cell (stability) — sampling on, fixed seed
 ```
 

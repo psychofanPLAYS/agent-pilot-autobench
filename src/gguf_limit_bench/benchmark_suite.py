@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+import importlib.util
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
+import sys
 import time
 from typing import Any, TypeGuard
 
@@ -102,6 +106,31 @@ class BenchmarkSuiteRun:
         )
 
 
+@dataclass(frozen=True)
+class BenchmarkSuitePreflightIssue:
+    task_id: str
+    phase: str
+    harness: str
+    command_index: int
+    executable: str
+    failure_class: str
+    detail: str
+
+
+@dataclass(frozen=True)
+class BenchmarkSuitePreflight:
+    ok: bool
+    status: str
+    model: str
+    context: int
+    issue_count: int
+    issues: tuple[BenchmarkSuitePreflightIssue, ...]
+    receipt_path: str
+    next_action: str
+    plan_path: str | None = None
+    plan_fingerprint: str | None = None
+
+
 def benchmark_suite_run_to_dict(run: BenchmarkSuiteRun) -> dict[str, Any]:
     return {
         "run_id": run.run_id,
@@ -115,6 +144,84 @@ def benchmark_suite_run_to_dict(run: BenchmarkSuiteRun) -> dict[str, Any]:
         "ok": run.ok,
         "results": [asdict(result) for result in run.results],
     }
+
+
+def benchmark_suite_preflight_to_dict(preflight: BenchmarkSuitePreflight) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "ok": preflight.ok,
+        "status": preflight.status,
+        "model": preflight.model,
+        "context": preflight.context,
+        "issue_count": preflight.issue_count,
+        "issues": [asdict(issue) for issue in preflight.issues],
+        "receipt_path": preflight.receipt_path,
+        "next_action": preflight.next_action,
+        "plan_path": preflight.plan_path,
+        "plan_fingerprint": preflight.plan_fingerprint,
+    }
+
+
+def preflight_benchmark_suite(
+    plan: BenchmarkSuitePlan,
+    runs_root: Path,
+    *,
+    plan_path: Path | None = None,
+) -> BenchmarkSuitePreflight:
+    runs_root.mkdir(parents=True, exist_ok=True)
+    issues: list[BenchmarkSuitePreflightIssue] = []
+    for task in plan.tasks:
+        for command_index, command in enumerate(task.commands, start=1):
+            issues.extend(_preflight_command_shape(task, command_index, command, plan))
+            resolved = _resolve_local_command(command)
+            executable = resolved[0]
+            if not _command_available(executable):
+                issues.append(
+                    BenchmarkSuitePreflightIssue(
+                        task_id=task.id,
+                        phase=task.phase,
+                        harness=task.harness,
+                        command_index=command_index,
+                        executable=executable,
+                        failure_class="harness_missing",
+                        detail=f"Executable `{executable}` was not found on PATH.",
+                    )
+                )
+                continue
+            module_issue = _preflight_python_module(task, command_index, resolved)
+            if module_issue is not None:
+                issues.append(module_issue)
+    plan_fingerprint = _plan_fingerprint(plan_path, plan)
+    status = "PASS" if not issues else "HARNESS_MISSING"
+    if any(issue.failure_class == "invalid_plan" for issue in issues):
+        status = "INVALID_PLAN"
+    next_action = (
+        "Benchmark-suite command preflight passed; run the suite against the live model."
+        if not issues
+        else _preflight_next_action(issues)
+    )
+    receipt_path = runs_root / "benchmark-suite-preflight.json"
+    preflight = BenchmarkSuitePreflight(
+        ok=not issues,
+        status=status,
+        model=plan.model,
+        context=plan.context,
+        issue_count=len(issues),
+        issues=tuple(issues),
+        receipt_path=str(receipt_path),
+        next_action=next_action,
+        plan_path=None if plan_path is None else str(plan_path),
+        plan_fingerprint=plan_fingerprint,
+    )
+    payload = benchmark_suite_preflight_to_dict(preflight)
+    receipt_path.write_text(
+        json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8"
+    )
+    (runs_root / "benchmark-suite-preflight.md").write_text(
+        _preflight_markdown(payload),
+        encoding="utf-8",
+    )
+    return preflight
 
 
 def run_benchmark_suite(
@@ -195,6 +302,7 @@ def run_benchmark_suite(
         json.dumps(benchmark_suite_run_to_dict(suite_run), ensure_ascii=True, indent=2),
         encoding="utf-8",
     )
+    _write_suite_verdict(receipt_path, suite_run)
     _suite_event(
         receipt_path,
         "benchmark_suite_finished",
@@ -206,6 +314,290 @@ def run_benchmark_suite(
         },
     )
     return suite_run
+
+
+def _command_available(executable: str) -> bool:
+    path = Path(executable)
+    if path.is_absolute() or path.parent != Path("."):
+        return path.exists()
+    return shutil.which(executable) is not None
+
+
+def _preflight_next_action(issues: list[BenchmarkSuitePreflightIssue]) -> str:
+    invalid = [issue for issue in issues if issue.failure_class == "invalid_plan"]
+    if invalid:
+        details = "; ".join(issue.detail for issue in invalid[:3])
+        return (
+            f"Fix benchmark-suite plan wiring before deployment proof: {details}. "
+            "Regenerate the plan or edit it, then rerun benchmark-suite-preflight."
+        )
+    missing = ", ".join(sorted({issue.executable for issue in issues}))
+    harnesses = ", ".join(sorted({issue.harness for issue in issues}))
+    return (
+        f"Install or expose missing benchmark harness executable(s): {missing}. "
+        f"Affected harnesses: {harnesses}. Rerun benchmark-suite-preflight before deployment proof."
+    )
+
+
+def _preflight_command_shape(
+    task: BenchmarkSuiteTask,
+    command_index: int,
+    command: tuple[str, ...],
+    plan: BenchmarkSuitePlan,
+) -> list[BenchmarkSuitePreflightIssue]:
+    issues: list[BenchmarkSuitePreflightIssue] = []
+    joined = "\n".join(command)
+    if "{base_url}" in joined and not str(plan.settings.get("base_url") or "").strip():
+        issues.append(
+            BenchmarkSuitePreflightIssue(
+                task_id=task.id,
+                phase=task.phase,
+                harness=task.harness,
+                command_index=command_index,
+                executable=command[0],
+                failure_class="invalid_plan",
+                detail="Command uses {base_url}, but plan.settings.base_url is blank.",
+            )
+        )
+    if task.harness == "librarian-suite":
+        issues.extend(_preflight_librarian_command(task, command_index, command, plan))
+    return issues
+
+
+def _preflight_librarian_command(
+    task: BenchmarkSuiteTask,
+    command_index: int,
+    command: tuple[str, ...],
+    plan: BenchmarkSuitePlan,
+) -> list[BenchmarkSuitePreflightIssue]:
+    issues: list[BenchmarkSuitePreflightIssue] = []
+    settings_arg = _value_after(command, "--settings-json")
+    if settings_arg is None:
+        issues.append(
+            _invalid_plan_issue(
+                task,
+                command_index,
+                command[0],
+                "librarian-suite command must pass --settings-json.",
+            )
+        )
+    else:
+        expanded_settings = _expand_token(
+            settings_arg,
+            plan=plan,
+            runs_root=None,
+            receipt_path=None,
+            task_dir=None,
+        )
+        try:
+            payload = json.loads(expanded_settings)
+        except json.JSONDecodeError:
+            payload = {}
+        args = tuple(str(item) for item in payload.get("extra_server_args", ()))
+        if "--jinja" not in args:
+            issues.append(
+                _invalid_plan_issue(
+                    task,
+                    command_index,
+                    command[0],
+                    (
+                        "librarian-suite settings_json must include runtime "
+                        "extra_server_args with --jinja."
+                    ),
+                )
+            )
+    for pack_id in _values_after_all(command, "--pack"):
+        try:
+            from gguf_limit_bench.packs import load_pack
+
+            load_pack(pack_id)
+        except Exception as exc:  # pragma: no cover - defensive receipt detail
+            issues.append(
+                _invalid_plan_issue(
+                    task,
+                    command_index,
+                    command[0],
+                    f"librarian-suite pack `{pack_id}` could not be loaded: {exc}",
+                )
+            )
+    return issues
+
+
+def _preflight_python_module(
+    task: BenchmarkSuiteTask,
+    command_index: int,
+    command: tuple[str, ...],
+) -> BenchmarkSuitePreflightIssue | None:
+    if not command:
+        return None
+    executable = Path(command[0]).name.lower()
+    if executable not in {Path(sys.executable).name.lower(), "python", "python.exe"}:
+        return None
+    try:
+        module_index = command.index("-m")
+    except ValueError:
+        return None
+    if module_index + 1 >= len(command):
+        return _invalid_plan_issue(
+            task,
+            command_index,
+            command[0],
+            "Python command uses -m without a module name.",
+        )
+    module_name = command[module_index + 1]
+    if importlib.util.find_spec(module_name) is None:
+        return BenchmarkSuitePreflightIssue(
+            task_id=task.id,
+            phase=task.phase,
+            harness=task.harness,
+            command_index=command_index,
+            executable=command[0],
+            failure_class="harness_missing",
+            detail=f"Python module `{module_name}` is not importable in the current environment.",
+        )
+    return None
+
+
+def _invalid_plan_issue(
+    task: BenchmarkSuiteTask,
+    command_index: int,
+    executable: str,
+    detail: str,
+) -> BenchmarkSuitePreflightIssue:
+    return BenchmarkSuitePreflightIssue(
+        task_id=task.id,
+        phase=task.phase,
+        harness=task.harness,
+        command_index=command_index,
+        executable=executable,
+        failure_class="invalid_plan",
+        detail=detail,
+    )
+
+
+def _value_after(args: tuple[str, ...], option: str) -> str | None:
+    values = _values_after_all(args, option)
+    return values[0] if values else None
+
+
+def _values_after_all(args: tuple[str, ...], option: str) -> list[str]:
+    values: list[str] = []
+    for index, arg in enumerate(args):
+        if arg == option and index + 1 < len(args):
+            values.append(args[index + 1])
+        elif arg.startswith(f"{option}="):
+            values.append(arg.removeprefix(f"{option}="))
+    return values
+
+
+def _plan_fingerprint(plan_path: Path | None, plan: BenchmarkSuitePlan) -> str:
+    if plan_path is not None:
+        try:
+            return sha256(plan_path.read_bytes()).hexdigest()
+        except OSError:
+            pass
+    payload = {
+        "model": plan.model,
+        "context": plan.context,
+        "settings": plan.settings,
+        "tasks": [asdict(task) for task in plan.tasks],
+    }
+    return sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _preflight_markdown(payload: dict[str, Any]) -> str:
+    lines = [
+        "# Benchmark Suite Preflight",
+        "",
+        f"- Status: `{payload['status']}`",
+        f"- Model: `{payload['model']}`",
+        f"- Context: `{payload['context']}`",
+        f"- Issues: `{payload['issue_count']}`",
+        f"- Next action: {payload['next_action']}",
+        "",
+        "| Task | Phase | Harness | Command | Executable | Failure | Detail |",
+        "| --- | --- | --- | ---: | --- | --- | --- |",
+    ]
+    for issue in payload.get("issues", []):
+        lines.append(
+            f"| `{issue['task_id']}` | `{issue['phase']}` | `{issue['harness']}` | "
+            f"{issue['command_index']} | `{issue['executable']}` | "
+            f"`{issue['failure_class']}` | {issue['detail']} |"
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def suite_verdict(suite_run: BenchmarkSuiteRun) -> dict[str, Any]:
+    if suite_run.ok:
+        action = "PROMOTE"
+        confidence = "high"
+        summary = (
+            "This benchmark-suite run passed the required general and agentic phases. "
+            "It is valid recommendation evidence for this model/settings profile."
+        )
+        next_run = "Compare challenger models or settings with the same benchmark-suite plan."
+    else:
+        action = "REJECT"
+        confidence = "high"
+        summary = (
+            "This benchmark-suite run did not pass. Do not promote this model/settings "
+            "profile from speed, fit, or partial evidence."
+        )
+        next_run = "Inspect failed task receipts, fix the cause, then rerun the same plan."
+    return {
+        "action": action,
+        "confidence": confidence,
+        "model": suite_run.model,
+        "context": suite_run.context,
+        "agent_bench_score": suite_run.agent_bench_score,
+        "general_score": suite_run.general_score,
+        "agentic_score": suite_run.agentic_score,
+        "suite_ok": suite_run.ok,
+        "summary": summary,
+        "next_run": next_run,
+        "receipt_path": suite_run.receipt_path,
+    }
+
+
+def _write_suite_verdict(receipt_path: Path, suite_run: BenchmarkSuiteRun) -> None:
+    verdict = suite_verdict(suite_run)
+    (receipt_path / "suite-verdict.json").write_text(
+        json.dumps(verdict, ensure_ascii=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (receipt_path / "suite-verdict.md").write_text(
+        _suite_verdict_markdown(verdict),
+        encoding="utf-8",
+    )
+
+
+def _suite_verdict_markdown(verdict: dict[str, Any]) -> str:
+    lines = [
+        "# Benchmark Suite Verdict",
+        "",
+        f"- Action: `{verdict['action']}`",
+        f"- Confidence: `{verdict['confidence']}`",
+        f"- Model: `{verdict['model']}`",
+        f"- Context: `{verdict['context']}`",
+        f"- Agent bench score: `{verdict['agent_bench_score']:.6f}`",
+        f"- General score: `{_fmt_optional_score(verdict['general_score'])}`",
+        f"- Agentic score: `{_fmt_optional_score(verdict['agentic_score'])}`",
+        "",
+        "## Why",
+        "",
+        str(verdict["summary"]),
+        "",
+        "## Next Run",
+        "",
+        str(verdict["next_run"]),
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def _fmt_optional_score(value: Any) -> str:
+    return "unmeasured" if value is None else f"{float(value):.6f}"
 
 
 def _task_from_dict(payload: dict[str, Any]) -> BenchmarkSuiteTask:
@@ -251,15 +643,17 @@ def _run_task(
     task_dir = receipt_path / _safe_id(task.id)
     task_dir.mkdir(parents=True, exist_ok=False)
     commands = tuple(
-        tuple(
-            _expand_token(
-                part,
-                plan=plan,
-                runs_root=runs_root,
-                receipt_path=receipt_path,
-                task_dir=task_dir,
+        _resolve_local_command(
+            tuple(
+                _expand_token(
+                    part,
+                    plan=plan,
+                    runs_root=runs_root,
+                    receipt_path=receipt_path,
+                    task_dir=task_dir,
+                )
+                for part in command
             )
-            for part in command
         )
         for command in task.commands
     )
@@ -411,6 +805,50 @@ def _display_command(command: tuple[str, ...]) -> list[str]:
     return [Path(part).name if index == 0 else part for index, part in enumerate(command)]
 
 
+def _resolve_local_command(command: tuple[str, ...]) -> tuple[str, ...]:
+    """Run in-repo Python benchmark helpers even when `uv` is absent from PATH."""
+    if len(command) < 4:
+        return command
+    executable = Path(command[0]).name.lower()
+    if executable not in {"uv", "uv.exe"} or command[1] != "run" or shutil.which(command[0]):
+        return command
+    python_index = _uv_run_python_index(command)
+    if python_index is None:
+        return command
+    return (sys.executable, *command[python_index + 1 :])
+
+
+def _uv_run_python_index(command: tuple[str, ...]) -> int | None:
+    options_with_values = {
+        "--active",
+        "--all-extras",
+        "--extra",
+        "--group",
+        "--no-dev",
+        "--with",
+        "--with-editable",
+        "--with-requirements",
+        "--isolated",
+        "--python",
+        "--project",
+        "--directory",
+        "--env-file",
+    }
+    index = 2
+    while index < len(command):
+        token = command[index]
+        if token == "python":
+            return index
+        if token in options_with_values and index + 1 < len(command):
+            index += 2
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        return None
+    return None
+
+
 def _remaining_timeout(deadline: float | None, task_timeout_seconds: int) -> float:
     if deadline is None:
         return float(task_timeout_seconds)
@@ -436,17 +874,17 @@ def _score_from_task_output(
                 task_dir=task_dir,
             )
         )
-        if not score_path.is_absolute():
+        if not score_path.is_absolute() and not score_path.exists():
             score_path = task_dir / score_path
         if score_path.exists():
-            score = _score_from_json_text(score_path.read_text(encoding="utf-8"))
+            score = _score_from_json_text(score_path.read_text(encoding="utf-8"), task=task)
             if score is not None:
                 return score
     for line in reversed(stdout.splitlines()):
-        score = _score_from_json_text(line)
+        score = _score_from_json_text(line, task=task)
         if score is not None:
             return score
-    return _score_from_json_text(stdout)
+    return _score_from_json_text(stdout, task=task)
 
 
 def _redacted_env(env: dict[str, str]) -> dict[str, str]:
@@ -459,11 +897,14 @@ def _redacted_env(env: dict[str, str]) -> dict[str, str]:
     return redacted
 
 
-def _score_from_json_text(text: str) -> float | None:
+def _score_from_json_text(text: str, task: BenchmarkSuiteTask | None = None) -> float | None:
     try:
         payload = json.loads(text)
     except json.JSONDecodeError:
         return None
+    if task is not None and task.harness == "librarian-suite" and isinstance(payload, dict):
+        score = payload.get("agent_bench_score")
+        return float(score) if _is_number(score) else None
     return _find_score(payload)
 
 
@@ -630,6 +1071,15 @@ def _expand_token(
     replacements = {
         "model": "" if plan is None else plan.model,
         "context": "" if plan is None else str(plan.context),
+        "base_url": "" if plan is None else str(plan.settings.get("base_url", "")),
+        "settings_json": ""
+        if plan is None
+        else json.dumps(
+            plan.settings,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
         "runs_root": "" if runs_root is None else str(runs_root),
         "receipt_dir": "" if receipt_path is None else str(receipt_path),
         "task_dir": "" if task_dir is None else str(task_dir),

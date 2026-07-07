@@ -16,14 +16,15 @@ Each job is a pure, seed-deterministic generator that returns a
 | `librarian-triage` | `triage.py` | EXACT | 16 | keep/drop salience + durable-fact count extraction |
 | `librarian-dedupe` | `dedupe.py` | MC | 12 | duplicate / related / new classification |
 | `librarian-gate` | `gate.py` | MC | 11 | inject vs skip (incl. distractor + stale cases) |
+| `librarian-query` | `query.py` | MC | 12 | query expansion / HyDE payload selection without answering |
 | `librarian-rerank` | `rerank.py` | MC | 14 | pick the snippet that answers the query |
 | `librarian-compress` | `compress.py` | MC | 16 | pick the faithful, complete summary |
 | `librarian-contradiction` | `contradiction.py` | MC | 14 | confirms / contradicts / unrelated |
 
-Total: 99 gold-labeled questions at seed 0. Each generator yields 10-16 questions
+Total: 111 gold-labeled questions at seed 0. Each generator yields 10-16 questions
 per seed, deterministic per seed and varying across seeds.
 
-Integration: `packs.available_packs()` lists all 7 ids and `packs.load_pack(id)`
+Integration: `packs.available_packs()` lists all 8 ids and `packs.load_pack(id)`
 builds them through the librarian registry.
 
 ## v0.1 - validity hardening (DONE)
@@ -40,7 +41,7 @@ Bundled benchmark-suite plans exist:
 - `benchmarks/plans/wiki-librarian-gemma4-26b-a4b-thinking.plan.json`
 - `benchmarks/plans/wiki-librarian-qwen3-moe-thinking.plan.json`
 
-They call `python -m gguf_limit_bench.librarian_suite`, split the seven librarian
+They call `python -m gguf_limit_bench.librarian_suite`, split the eight librarian
 packs across general/agentic suite phases, and emit `librarian_bench_score`,
 `agent_bench_score`, per-pack JSON, TSV, Markdown, and suite summaries. See
 [10-runnable-presets.md](10-runnable-presets.md).
@@ -73,6 +74,19 @@ surface (`results.json/results.md` or `librarian-suite-summary.json/.tsv/.md`) w
 `failure_class: preflight_fail`, `status: preflight_fail`, and `asked: 0`. It does
 not call `run_pack_questions()` and does not record the cell as a zero-quality model
 score.
+
+## v0.3.1 - recommendation-grade score gate (DONE)
+
+Raw librarian scores are now separated from recommendation-grade
+`agent_bench_score`. A librarian receipt must have at least 3 scored packs and 30
+scored attempts before pilotBENCHY treats the score as hard recommendation
+evidence. Smaller samples still keep their raw `librarian_bench_score`,
+per-pack accuracy, TSV/Markdown receipts, and audit trail, but they are marked as
+`weak_sample`, do not populate `agent_bench_score`, and cannot win the model
+comparison by raw accuracy alone.
+
+This encodes the live-run lesson below: two-pack samples were useful smoke tests,
+but not discriminating enough for model recommendations.
 
 ## v0.4 - first real end-to-end model-vs-model run (DONE, live)
 
@@ -130,8 +144,9 @@ the cell with `preflight_fail`.
 
 - Q1 (inject gate): built `librarian-gate` as a model-driven inject/skip decision,
   including correct-skip on keyword distractors and stale/deprecated memories.
-- Q2 (query understanding / HyDE): not built yet. `librarian-rerank` covers retrieval
-  reranking; a dedicated query-rewrite/HyDE job is still open.
+- Q2 (query understanding / HyDE): built as `librarian-query`. It asks the model to
+  choose a retrieval payload with a lexical vector and HyDE-style synthetic document
+  while rejecting direct-answer, wrong-intent, and keyword-spam payloads.
 - `write_entry` is scoped to EXACT single-token answers (type + slug), not full JSON.
 
 ## Remaining work

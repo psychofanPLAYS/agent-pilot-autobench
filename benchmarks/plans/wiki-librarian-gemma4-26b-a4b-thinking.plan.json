@@ -1,12 +1,13 @@
 {
   "model": "gemma-4-26b-a4b-it",
-  "context": 8192,
+  "context": 131072,
   "settings": {
     "base_url": "http://127.0.0.1:8080",
     "score_contract": "agent_bench_score",
     "plan_kind": "wiki_librarian_gemma4_26b_a4b_thinking",
     "source_doc": "docs/feature-requests/wiki-librarian-bench/12-model-plan-gemma4.md",
     "comparison_family": "wiki_librarian_current_models",
+    "context_target": "required_context_131072",
     "model_plan": {
       "hf_slug": "google/gemma-4-26B-A4B-it",
       "architecture": "gemma4",
@@ -29,7 +30,7 @@
         "no MTP"
       ]
     },
-    "requires": "A Gemma 4 26B-A4B IT GGUF served by a local OpenAI-compatible llama.cpp endpoint on http://127.0.0.1:8080 with the Gemma 4 Jinja template active."
+    "requires": "A Gemma 4 26B-A4B IT GGUF served by a local OpenAI-compatible llama.cpp endpoint on http://127.0.0.1:8080 with the Gemma 4 Jinja template active and at least 131072 context."
   },
   "tasks": [
     {
@@ -94,6 +95,8 @@
           "librarian-gate",
           "--pack",
           "librarian-rerank",
+          "--pack",
+          "librarian-query",
           "--pack",
           "librarian-compress",
           "--pack",

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -62,6 +63,7 @@ def evaluate_champion_packs(
     gpu_name: str = "",
     timeout_seconds: int = 600,
     repeats: int = 3,
+    budget_seconds: float | None = None,
 ) -> None:
     """Evaluate *pack_ids* on the best champion settings and write results.json.
 
@@ -96,6 +98,12 @@ def evaluate_champion_packs(
         How many times to run the selected question slice. The selection cursor
         advances once per pack, so repeats measure variance without consuming
         additional question-bank positions.
+    budget_seconds:
+        Optional wall-clock budget for the whole evaluation, measured from
+        server-ready. Questions/repeats/packs that do not start before the
+        budget runs out are skipped and the results payload is marked
+        ``budget_exhausted`` — a partial-but-honest result instead of an
+        unbounded run. ``None`` means no budget.
     """
     if repeats < 1:
         raise ValueError("repeats must be at least 1.")
@@ -142,7 +150,13 @@ def evaluate_champion_packs(
                         pack_dicts=pack_dicts,
                         repeats=repeats,
                     )
+            deadline = None if budget_seconds is None else time.monotonic() + budget_seconds
+            budget_exhausted = False
             for pack_id in pack_ids:
+                if deadline is not None and time.monotonic() >= deadline:
+                    budget_exhausted = True
+                    pack_dicts.append(_budget_skipped_pack_dict(pack_id))
+                    continue
                 pack_dict = _eval_one_pack(
                     conn=conn,
                     base_url=base_url,
@@ -152,6 +166,7 @@ def evaluate_champion_packs(
                     selection=selection,
                     seed=seed,
                     repeats=repeats,
+                    deadline=deadline,
                 )
                 pack_dicts.append(pack_dict)
     finally:
@@ -166,6 +181,7 @@ def evaluate_champion_packs(
         gpu_name=gpu_name,
         pack_dicts=pack_dicts,
         repeats=repeats,
+        budget_exhausted=budget_exhausted,
     )
 
 
@@ -179,6 +195,7 @@ def _write_results(
     gpu_name: str,
     pack_dicts: list[dict],
     repeats: int,
+    budget_exhausted: bool = False,
 ) -> None:
     recommended_flags = list(recommended_always_on(gpu_name))
     payload = build_results_payload(
@@ -194,6 +211,8 @@ def _write_results(
     payload["score_contract"] = (
         "agent_bench_score = accuracy * completion_rate over scored attempts"
     )
+    if budget_exhausted:
+        payload["budget_exhausted"] = True
     write_results(run_dir, payload)
 
 
@@ -212,6 +231,7 @@ def _eval_one_pack(
     selection: str,
     seed: int | None,
     repeats: int,
+    deadline: float | None = None,
 ) -> dict:
     """Run a single pack and return a pack dict suitable for build_results_payload."""
     try:
@@ -235,6 +255,7 @@ def _eval_one_pack(
         questions=chosen,
         base_url=base_url,
         repeats=repeats,
+        deadline_monotonic=deadline,
     )
 
     set_selection_cursor(conn, model_key=model_key, pack_id=pack_id, cursor=next_cursor)
@@ -299,6 +320,13 @@ def _median(values: list[float]) -> float | None:
     if len(ordered) % 2:
         return ordered[middle]
     return (ordered[middle - 1] + ordered[middle]) / 2
+
+
+def _budget_skipped_pack_dict(pack_id: str) -> dict:
+    """Pack dict for a pack that never started because the eval budget ran out."""
+    payload = _empty_pack_dict(pack_id)
+    payload["status"] = "skipped_budget_exhausted"
+    return payload
 
 
 def _empty_pack_dict(pack_id: str) -> dict:

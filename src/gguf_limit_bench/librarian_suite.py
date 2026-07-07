@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import fields
 import json
 from pathlib import Path
 from typing import Any
 
+from gguf_limit_bench.agent_quality import librarian_agent_quality_gate
 from gguf_limit_bench.autoresearch import AutoresearchSettings
 from gguf_limit_bench.librarian.preflight import (
     PREFLIGHT_FAILURE_CLASS,
@@ -12,7 +14,7 @@ from gguf_limit_bench.librarian.preflight import (
     write_preflight_receipt,
 )
 from gguf_limit_bench.librarian.registry import LIBRARIAN_PACK_IDS
-from gguf_limit_bench.pack_runner import run_pack_questions
+from gguf_limit_bench.pack_runner import UNLIMITED_THINKING, run_pack_questions
 from gguf_limit_bench.packs import load_pack
 from gguf_limit_bench.results_report import render_results_markdown
 
@@ -104,6 +106,7 @@ def run_librarian_suite(
             run_pack_questions(
                 pack=pack,
                 questions=questions,
+                answer_max_tokens=_answer_max_tokens_from_settings(settings_payload),
                 base_url=base_url,
                 timeout_seconds=timeout_seconds,
                 sampling=_sampling_from_settings(settings_payload),
@@ -250,6 +253,12 @@ def _suite_summary(
     accuracy = correct / asked if asked else 0.0
     completion_rate = (asked - incomplete) / asked if asked else 0.0
     librarian_bench_score = accuracy * completion_rate
+    scored_pack_count = sum(1 for pack in pack_summaries if pack.get("status") == "scored")
+    agent_quality_gate = librarian_agent_quality_gate(
+        scored_pack_count=scored_pack_count,
+        scored_attempt_count=asked,
+    )
+    recommendation_grade = agent_quality_gate == "recommendation_grade"
     return {
         "model": model,
         "base_url": base_url,
@@ -261,8 +270,11 @@ def _suite_summary(
         "accuracy": accuracy,
         "completion_rate": completion_rate,
         "librarian_bench_score": librarian_bench_score,
-        "agent_bench_score": librarian_bench_score,
+        "agent_bench_score": librarian_bench_score if recommendation_grade else None,
         "score": librarian_bench_score,
+        "scored_pack_count": scored_pack_count,
+        "agent_quality_gate": agent_quality_gate,
+        "recommendation_grade": recommendation_grade,
         "failure_class": failure_class,
         "failure": failure,
         "score_contract": "librarian_bench_score = accuracy * completion_rate over scored attempts",
@@ -310,6 +322,8 @@ def _summary_markdown(summary: dict[str, Any]) -> str:
         f"# Librarian Suite: {summary['model']}",
         "",
         f"- Score: `{_fmt_float(summary['librarian_bench_score'])}`",
+        f"- Agent bench score: `{summary['agent_bench_score'] if summary['agent_bench_score'] is not None else 'not recommendation-grade'}`",
+        f"- Agent quality gate: `{summary['agent_quality_gate']}`",
         f"- Accuracy: `{summary['correct']}/{summary['asked']}`",
         f"- Completion: `{_fmt_float(summary['completion_rate'])}`",
         "",
@@ -342,6 +356,17 @@ def _sampling_from_settings(settings: dict[str, Any]) -> dict[str, object]:
         for key in ("temperature", "top_p", "top_k", "min_p", "repeat_penalty")
         if source.get(key) is not None
     }
+
+
+def _answer_max_tokens_from_settings(settings: dict[str, Any]) -> int:
+    value = settings.get("answer_max_tokens")
+    if value is None:
+        return UNLIMITED_THINKING
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return UNLIMITED_THINKING
+    return max(0, parsed)
 
 
 def _letter_counts(values) -> dict[str, int]:
@@ -379,14 +404,20 @@ def _safe_id(value: str) -> str:
 
 
 def _autoresearch_settings_from_payload(settings: dict[str, Any]) -> AutoresearchSettings:
-    extras = settings.get("extra_server_args", ())
+    payload: dict[str, Any] = {}
+    field_names = {field.name for field in fields(AutoresearchSettings)}
+    for name in field_names:
+        if name in settings:
+            payload[name] = settings[name]
+    extras = payload.get("extra_server_args", ())
     if isinstance(extras, str):
         extras = tuple(extras.split())
     elif isinstance(extras, list | tuple):
         extras = tuple(str(item) for item in extras)
     else:
         extras = ()
-    return AutoresearchSettings(extra_server_args=extras)
+    payload["extra_server_args"] = extras
+    return AutoresearchSettings(**payload)
 
 
 if __name__ == "__main__":

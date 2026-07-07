@@ -17,6 +17,8 @@ class FlightPlan:
     mode_id: str
     budget_minutes: int
     evidence_goal: str
+    evidence_class: str
+    score_contract: str
     workflow: tuple[str, ...]
     start_label: str
     recommended: bool = False
@@ -39,32 +41,14 @@ class FlightPlan:
 
 FLIGHT_PLANS: tuple[FlightPlan, ...] = (
     FlightPlan(
-        id="quick_check",
-        label="Quick check",
-        description="Fast proof that the model loads and produces a speed receipt.",
-        mode_id="quick",
-        budget_minutes=5,
-        evidence_goal="Load success, rough throughput, and a receipt path.",
-        workflow=("preflight", "speed"),
-        start_label="Start quick check",
-    ),
-    FlightPlan(
-        id="find_best_settings",
-        label="Find best settings",
-        description="Recommended general run: prove fit, speed, quality, and useful flags.",
-        mode_id="best_settings",
-        budget_minutes=30,
-        evidence_goal="Actionable settings with accuracy-first scoring and report links.",
-        workflow=("preflight", "fit", "speed", "intelligence", "flag-ablation", "report"),
-        start_label="Find best settings",
-    ),
-    FlightPlan(
         id="librarian_benchmark",
         label="Librarian benchmark",
         description="Recommended agent-memory test for local models; one model runs, two compare.",
         mode_id="librarian_bench",
         budget_minutes=30,
         evidence_goal="Preflight-gated librarian score, per-pack matrix, receipts, and winner.",
+        evidence_class="recommendation",
+        score_contract="agent_bench_score",
         workflow=("preflight", "librarian-packs", "bias-checks", "report"),
         start_label="Start librarian benchmark",
         recommended=True,
@@ -74,12 +58,26 @@ FLIGHT_PLANS: tuple[FlightPlan, ...] = (
         ),
     ),
     FlightPlan(
+        id="find_best_settings",
+        label="Find best settings",
+        description="Recommended general run: prove fit, speed, quality, and useful flags.",
+        mode_id="best_settings",
+        budget_minutes=30,
+        evidence_goal="Actionable settings with accuracy-first scoring and report links.",
+        evidence_class="recommendation",
+        score_contract="simple_bench_score",
+        workflow=("preflight", "fit", "speed", "intelligence", "flag-ablation", "report"),
+        start_label="Find best settings",
+    ),
+    FlightPlan(
         id="overnight_campaign",
         label="Overnight campaign",
         description="Long run for serious comparisons when the machine can work unattended.",
         mode_id="deep",
         budget_minutes=60,
         evidence_goal="Deep campaign receipts across fit, speed, quality, flags, and context.",
+        evidence_class="recommendation",
+        score_contract="agent_bench_score",
         workflow=(
             "preflight",
             "fit",
@@ -90,6 +88,19 @@ FLIGHT_PLANS: tuple[FlightPlan, ...] = (
             "report",
         ),
         start_label="Start overnight campaign",
+        advanced=True,
+    ),
+    FlightPlan(
+        id="quick_check",
+        label="Quick check",
+        description="Fast proof that the model loads and produces a speed receipt.",
+        mode_id="quick",
+        budget_minutes=5,
+        evidence_goal="Load success, rough throughput, and a receipt path.",
+        evidence_class="speed_only",
+        score_contract="none",
+        workflow=("preflight", "speed"),
+        start_label="Start quick check",
         advanced=True,
     ),
 )

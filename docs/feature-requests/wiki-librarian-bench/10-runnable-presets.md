@@ -8,13 +8,13 @@ and Qwen3.6.
 - `benchmarks/plans/wiki-librarian-gemma4-26b-a4b-thinking.plan.json`
 - `benchmarks/plans/wiki-librarian-qwen3-moe-thinking.plan.json`
 
-Both plans run the seven v0 librarian packs through `gguf_limit_bench.librarian_suite`
+Both plans run the eight v0 librarian packs through `gguf_limit_bench.librarian_suite`
 against a local llama.cpp OpenAI-compatible endpoint on `http://127.0.0.1:8080`.
 They split the packs into two suite phases so the existing ledgers work:
 
 - general: `librarian-write-entry`, `librarian-triage`, `librarian-dedupe`
-- agentic: `librarian-gate`, `librarian-rerank`, `librarian-compress`,
-  `librarian-contradiction`
+- agentic: `librarian-gate`, `librarian-rerank`, `librarian-query`,
+  `librarian-compress`, `librarian-contradiction`
 
 Before any pack question is scored, `librarian_suite` now runs the five hardening
 preflight gates. If model identity, template loading, Gemma BOS, Qwen thinking, or

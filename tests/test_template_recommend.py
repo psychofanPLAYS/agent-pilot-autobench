@@ -80,6 +80,20 @@ def test_gemma_recommends_jinja(tmp_path):
     assert recommended_model_flags(model) == ("--jinja",)
 
 
+def test_gemma_recommends_official_template_when_present(tmp_path):
+    template = tmp_path / "Gemma-4-Templates" / "chat_template.jinja"
+    template.parent.mkdir(parents=True)
+    template.write_text("{{ messages }}", encoding="utf-8")
+    model = tmp_path / "gemma-4-26B-A4B-it-Q4_K_M.gguf"
+    model.touch()
+
+    assert recommended_model_flags(model, search_roots=(tmp_path,)) == (
+        "--jinja",
+        "--chat-template-file",
+        str(template),
+    )
+
+
 def test_unknown_family_gets_no_template_flags(tmp_path):
     model = tmp_path / "some-random-model-Q4_K_M.gguf"
     model.touch()
@@ -87,7 +101,7 @@ def test_unknown_family_gets_no_template_flags(tmp_path):
     assert recommended_model_flags(model) == ()
 
 
-def test_template_override_wins(tmp_path):
+def test_qwen_template_override_keeps_reasoning_flags(tmp_path):
     override = tmp_path / "custom.jinja"
     override.write_text("{{ messages }}", encoding="utf-8")
     model = tmp_path / "Qwen3.5-9B-Q8_0.gguf"
@@ -108,9 +122,22 @@ def test_template_override_wins(tmp_path):
     )
 
 
-def test_discover_returns_none_for_non_qwen(tmp_path):
+def test_gemma_ignores_qwen_template_folder(tmp_path):
     _make_template(tmp_path)
     assert discover_chat_template("gemma", (tmp_path,)) is None
+
+
+def test_gemma_template_override_wins(tmp_path):
+    override = tmp_path / "custom-gemma.jinja"
+    override.write_text("{{ messages }}", encoding="utf-8")
+    model = tmp_path / "gemma-4-26B-A4B-it-Q4_K_M.gguf"
+    model.touch()
+
+    assert recommended_model_flags(model, template_override=override) == (
+        "--jinja",
+        "--chat-template-file",
+        str(override),
+    )
 
 
 def test_merge_flags_skips_already_present_flags():

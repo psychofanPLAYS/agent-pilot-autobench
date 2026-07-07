@@ -568,7 +568,9 @@ class AutoresearchLoop:
             "parallel_max": self.parallel_max,
             "max_attempts": self.max_attempts,
             "round_seconds": self.round_seconds,
-            "candidate_sequence": [settings.to_dict() for settings in self.candidate_sequence or ()],
+            "candidate_sequence": [
+                settings.to_dict() for settings in self.candidate_sequence or ()
+            ],
             "skipped_profiles": list(self.skipped_profiles),
             "benchmark_suite_plan": _benchmark_suite_plan_to_dict(self.benchmark_suite_plan),
             "context_ladder": list(self.context_ladder or ()),
@@ -581,7 +583,9 @@ class AutoresearchLoop:
                 "selection": self.champion_selection,
                 "seed": self.champion_seed,
                 "state_db_path": (
-                    None if self.champion_state_db_path is None else str(self.champion_state_db_path)
+                    None
+                    if self.champion_state_db_path is None
+                    else str(self.champion_state_db_path)
                 ),
                 "gpu_name": self.champion_gpu_name,
             },
@@ -632,6 +636,11 @@ class AutoresearchLoop:
                 seed=self.champion_seed,
                 state_db_path=self.champion_state_db_path,
                 gpu_name=self.champion_gpu_name,
+                # Keep the post-run champion eval on the same order of time
+                # the user agreed to: at most the run budget again (with a
+                # 10-minute floor so slow models still produce evidence),
+                # recorded as budget_exhausted partial results when cut short.
+                budget_seconds=max(float(self.budget_seconds), 600.0),
             )
             receipt.event("champion_pack_eval_finished", {"run_dir": str(receipt.path)})
         except Exception as exc:  # noqa: BLE001
@@ -671,15 +680,16 @@ class AutoresearchLoop:
         timeout_seconds: float,
     ) -> AttemptResult:
         assert self.benchmark_suite_plan is not None
+        suite_settings = {
+            **self.benchmark_suite_plan.settings,
+            **settings.to_dict(),
+            "gguf_model_path": str(self.model),
+            "score_contract": "agent_bench_score",
+        }
         plan = BenchmarkSuitePlan(
-            model=self.benchmark_suite_plan.model,
+            model=str(self.model),
             context=settings.context_size,
-            settings={
-                **self.benchmark_suite_plan.settings,
-                **settings.to_dict(),
-                "gguf_model_path": str(self.model),
-                "score_contract": "agent_bench_score",
-            },
+            settings=suite_settings,
             tasks=self.benchmark_suite_plan.tasks,
         )
         suite_run = run_benchmark_suite(plan, self.runs_root, timeout_seconds=timeout_seconds)
@@ -1111,7 +1121,7 @@ def _flag_ladder_tsv(rows: list[dict]) -> str:
 
 def _flag_ladder_markdown(payload: dict) -> str:
     result_label = (
-        f"Champion: `{payload['champion_profile']}`"
+        f"Promoted profile: `{payload['champion_profile']}`"
         if payload["champion_profile"] is not None
         else f"Provisional best: `{payload['provisional_best_profile']}` (partial ladder)"
     )
@@ -1127,7 +1137,7 @@ def _flag_ladder_markdown(payload: dict) -> str:
         "",
         "Positive slowdown means slower than L0; negative means faster.",
         "",
-        "| Profile | OK | Partial | Champion | Score | Accuracy | Gen TPS | Prefill TPS | "
+        "| Profile | OK | Partial | Promoted | Score | Accuracy | Gen TPS | Prefill TPS | "
         "Slowdown vs L0 | TTFT ms | Questions | Warnings | Failure |",
         "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]

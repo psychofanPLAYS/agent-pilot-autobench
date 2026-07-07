@@ -14,6 +14,7 @@ EXPECTED_IDS = {
     "librarian-triage",
     "librarian-dedupe",
     "librarian-gate",
+    "librarian-query",
     "librarian-rerank",
     "librarian-compress",
     "librarian-contradiction",

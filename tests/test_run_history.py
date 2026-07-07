@@ -3,7 +3,7 @@ import json
 from gguf_limit_bench.run_history import truncated_previous_runs_text
 
 
-def test_truncated_previous_runs_text_summarizes_champion(tmp_path):
+def test_truncated_previous_runs_text_summarizes_top_candidate(tmp_path):
     run = tmp_path / "20260527-test"
     run.mkdir()
     (run / "best-settings.json").write_text(
@@ -27,7 +27,8 @@ def test_truncated_previous_runs_text_summarizes_champion(tmp_path):
 
     assert "Previous runs" in text
     assert "Winner.gguf" in text
-    assert "Champion" in text
+    assert "Top candidate" in text
+    assert "Champion" not in text
 
 
 def test_truncated_previous_runs_text_handles_empty_folder(tmp_path):

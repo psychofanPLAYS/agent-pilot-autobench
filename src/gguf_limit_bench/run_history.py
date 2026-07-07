@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from gguf_limit_bench.reports import Leaderboard, LeaderboardEntry, build_leaderboard
+from gguf_limit_bench.reports import (
+    Leaderboard,
+    LeaderboardEntry,
+    build_leaderboard,
+    build_verdict,
+)
 
 
 def truncated_previous_runs_text(runs_root: Path, limit: int = 8) -> str:
@@ -27,10 +32,12 @@ def _history_text(leaderboard: Leaderboard, limit: int) -> str:
             f"... {remaining} older run(s) hidden. Open _runs/results.html for the full report."
         )
     champion = leaderboard.champion
+    verdict = build_verdict(leaderboard)
+    result_label = "Recommended model" if verdict.action == "PROMOTE" else "Top candidate"
     lines.extend(
         [
             "",
-            f"Champion: {champion.model_name}",
+            f"{result_label}: {champion.model_name}",
             f"Proof: {champion.receipt_path}",
             f"Meaning: {champion.status} | context {champion.context_label}",
         ]

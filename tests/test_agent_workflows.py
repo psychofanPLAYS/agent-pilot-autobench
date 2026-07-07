@@ -100,7 +100,13 @@ def test_default_model_root_is_repo_relative(monkeypatch, tmp_path):
     result = runner.invoke(app, ["survey", "--json-out"])
 
     assert result.exit_code == 0
-    assert seen_roots == [Path("_models")]
+    # Relative config paths are anchored to the folder holding _CONFIG.toml
+    # (or stay cwd-relative when no config file exists).
+    from gguf_limit_bench.config import find_config_path
+
+    found = find_config_path()
+    expected = Path("_models") if found is None else found.parent / "_models"
+    assert seen_roots == [expected]
 
 
 def test_bulk_autoresearch_supports_total_budget_and_finish_early(tmp_path, monkeypatch):

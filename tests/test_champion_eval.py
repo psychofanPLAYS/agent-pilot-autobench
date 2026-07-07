@@ -354,3 +354,87 @@ def test_librarian_preflight_failure_writes_receipts_without_scoring(tmp_path, m
     assert payload["packs"][0]["failure_class"] == "preflight_fail"
     assert payload["packs"][0]["asked"] == 0
     assert "preflight_fail" in markdown
+
+
+def test_evaluate_champion_packs_budget_exhausted_marks_partial(tmp_path, monkeypatch):
+    """With a zero budget, packs are skipped and the payload says budget_exhausted."""
+    monkeypatch.setattr("gguf_limit_bench.champion_eval.llama_server_session", _fake_server_session)
+    monkeypatch.setattr(
+        "gguf_limit_bench.champion_eval.run_pack_questions",
+        lambda **kwargs: _make_fake_run_pack_questions(**kwargs),
+    )
+    monkeypatch.setattr(
+        "gguf_limit_bench.champion_eval.load_pack",
+        lambda pack_id: _make_fake_load_pack(pack_id),
+    )
+
+    from gguf_limit_bench.champion_eval import evaluate_champion_packs
+
+    model = tmp_path / "model.gguf"
+    model.touch()
+    llama_server = tmp_path / "llama-server.exe"
+    llama_server.touch()
+    run_dir = tmp_path / "run-budget"
+    run_dir.mkdir()
+
+    evaluate_champion_packs(
+        model=model,
+        llama_server=llama_server,
+        best_settings=_FAKE_SETTINGS,
+        run_dir=run_dir,
+        pack_ids=("easy-mc",),
+        sample_size=3,
+        selection="sequential",
+        seed=None,
+        state_db_path=None,
+        gpu_name="",
+        budget_seconds=0.0,
+    )
+
+    import json as _json
+
+    payload = _json.loads((run_dir / "results.json").read_text(encoding="utf-8"))
+    assert payload["budget_exhausted"] is True
+    assert payload["packs"][0]["status"] == "skipped_budget_exhausted"
+    assert payload["packs"][0]["asked"] == 0
+
+
+def test_evaluate_champion_packs_no_budget_runs_everything(tmp_path, monkeypatch):
+    """Without a budget the behavior is unchanged: all packs run, no partial marker."""
+    monkeypatch.setattr("gguf_limit_bench.champion_eval.llama_server_session", _fake_server_session)
+    monkeypatch.setattr(
+        "gguf_limit_bench.champion_eval.run_pack_questions",
+        lambda **kwargs: _make_fake_run_pack_questions(**kwargs),
+    )
+    monkeypatch.setattr(
+        "gguf_limit_bench.champion_eval.load_pack",
+        lambda pack_id: _make_fake_load_pack(pack_id),
+    )
+
+    from gguf_limit_bench.champion_eval import evaluate_champion_packs
+
+    model = tmp_path / "model.gguf"
+    model.touch()
+    llama_server = tmp_path / "llama-server.exe"
+    llama_server.touch()
+    run_dir = tmp_path / "run-nobudget"
+    run_dir.mkdir()
+
+    evaluate_champion_packs(
+        model=model,
+        llama_server=llama_server,
+        best_settings=_FAKE_SETTINGS,
+        run_dir=run_dir,
+        pack_ids=("easy-mc",),
+        sample_size=3,
+        selection="sequential",
+        seed=None,
+        state_db_path=None,
+        gpu_name="",
+    )
+
+    import json as _json
+
+    payload = _json.loads((run_dir / "results.json").read_text(encoding="utf-8"))
+    assert "budget_exhausted" not in payload
+    assert payload["packs"][0]["asked"] > 0

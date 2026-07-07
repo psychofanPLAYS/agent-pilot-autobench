@@ -88,14 +88,25 @@ def load_config(config_path: Path | None = None) -> PilotbenchConfig:
     payload = tomllib.loads(path.read_text(encoding="utf-8"))
     paths = payload.get("paths", {})
     benchmark = payload.get("benchmark", {})
+    # Relative paths in the config file mean "next to the config file", not
+    # "wherever the process happens to be started from" — otherwise running
+    # apb from another directory silently scatters _runs/_db into that cwd.
+    base = path.parent
+
+    def _anchored(value: object, default: Path) -> Path:
+        return _anchor(_path(value, default), base)
+
     config = PilotbenchConfig(
         paths=PathSettings(
-            model_roots=_paths(paths.get("model_roots"), DEFAULT_MODEL_ROOTS),
-            llama_bench=_path(paths.get("llama_bench"), DEFAULT_LLAMA_BENCH),
-            llama_cli=_path(paths.get("llama_cli"), DEFAULT_LLAMA_CLI),
-            llama_server=_path(paths.get("llama_server"), DEFAULT_LLAMA_SERVER),
-            llama_perplexity=_path(paths.get("llama_perplexity"), DEFAULT_LLAMA_PERPLEXITY),
-            runs_root=_path(paths.get("runs_root"), DEFAULT_RUNS_ROOT),
+            model_roots=tuple(
+                _anchor(root, base)
+                for root in _paths(paths.get("model_roots"), DEFAULT_MODEL_ROOTS)
+            ),
+            llama_bench=_anchored(paths.get("llama_bench"), DEFAULT_LLAMA_BENCH),
+            llama_cli=_anchored(paths.get("llama_cli"), DEFAULT_LLAMA_CLI),
+            llama_server=_anchored(paths.get("llama_server"), DEFAULT_LLAMA_SERVER),
+            llama_perplexity=_anchored(paths.get("llama_perplexity"), DEFAULT_LLAMA_PERPLEXITY),
+            runs_root=_anchored(paths.get("runs_root"), DEFAULT_RUNS_ROOT),
         ),
         benchmark=BenchmarkSettings(
             default_preset=str(benchmark.get("default_preset", DEFAULT_PRESET)),
@@ -103,7 +114,11 @@ def load_config(config_path: Path | None = None) -> PilotbenchConfig:
             learning=_bool(benchmark.get("learning"), True),
             workflow_eval=_bool(benchmark.get("workflow_eval"), True),
             ttft_probe=_bool(benchmark.get("ttft_probe"), True),
-            perplexity_corpus=_optional_path(benchmark.get("perplexity_corpus")),
+            perplexity_corpus=(
+                None
+                if (corpus := _optional_path(benchmark.get("perplexity_corpus"))) is None
+                else _anchor(corpus, base)
+            ),
             perplexity_contexts=_ints(
                 benchmark.get("perplexity_contexts"), DEFAULT_PERPLEXITY_CONTEXTS
             ),
@@ -225,6 +240,10 @@ def with_cli_overrides(
 
 def _path(value: object, default: Path) -> Path:
     return default if value in (None, "") else Path(str(value))
+
+
+def _anchor(value: Path, base: Path) -> Path:
+    return value if value.is_absolute() else base / value
 
 
 def _optional_path(value: object) -> Path | None:

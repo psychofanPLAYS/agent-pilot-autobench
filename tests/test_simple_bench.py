@@ -6,6 +6,12 @@ import pytest
 
 from gguf_limit_bench import simple_bench_runner
 from gguf_limit_bench.autoresearch import AttemptResult, AutoresearchLoop, AutoresearchSettings
+from gguf_limit_bench.benchmark_suite import (
+    BenchmarkSuitePlan,
+    BenchmarkSuiteResult,
+    BenchmarkSuiteRun,
+    BenchmarkSuiteTask,
+)
 from gguf_limit_bench.flag_ladder import (
     build_core_flag_ladder,
     build_flag_ladder_plan,
@@ -23,6 +29,7 @@ from gguf_limit_bench.simple_bench import (
     load_simple_bench_system_prompt,
 )
 from gguf_limit_bench.simple_bench_runner import (
+    CompletionMeasurement,
     _write_launch_receipt,
     _write_short_logs,
     measure_simple_bench_completion,
@@ -387,7 +394,10 @@ def test_autoresearch_settings_can_hold_flag_specific_fields():
 def test_short_logs_keep_warning_lines_and_bounded_tail(tmp_path):
     (tmp_path / "server.stdout.log").write_text("server ready\nnormal info\n", encoding="utf-8")
     (tmp_path / "server.stderr.log").write_text(
-        "warning: cache fallback\nerror: draft disabled\n",
+        "warning: cache fallback\n"
+        "error: draft disabled\n"
+        "18.26.395.388 W common_chat_try_specialized_template: "
+        "detected an outdated gemma4 chat template\n",
         encoding="utf-8",
     )
 
@@ -399,11 +409,12 @@ def test_short_logs_keep_warning_lines_and_bounded_tail(tmp_path):
         returncode=0,
     )
 
-    assert warning_count == 2
+    assert warning_count == 3
     assert "cache fallback" in (tmp_path / "warnings.log").read_text(encoding="utf-8")
+    assert "outdated gemma4" in (tmp_path / "warnings.log").read_text(encoding="utf-8")
     tail = (tmp_path / "server-tail.log").read_text(encoding="utf-8")
     assert "profile=MTP-draft-3" in tail
-    assert "warning_count=2" in tail
+    assert "warning_count=3" in tail
 
 
 def test_remaining_attempt_timeout_is_bounded_and_fails_when_exhausted(monkeypatch):
@@ -457,7 +468,10 @@ def test_candidate_sequence_writes_flag_slowdown_comparison(tmp_path):
     payload = json.loads((receipt.path / "flag-ladder-results.json").read_text(encoding="utf-8"))
     assert payload["champion_profile"] == "L0-baseline"
     assert payload["rows"][1]["slowdown_vs_baseline_percent"] == 20.0
-    assert "Slowdown vs L0" in (receipt.path / "flag-ladder-results.md").read_text(encoding="utf-8")
+    markdown = (receipt.path / "flag-ladder-results.md").read_text(encoding="utf-8")
+    assert "Promoted profile: `L0-baseline`" in markdown
+    assert "Champion:" not in markdown
+    assert "Slowdown vs L0" in markdown
 
 
 def test_partial_candidate_sequence_is_labeled_and_has_no_champion(tmp_path):
@@ -761,3 +775,143 @@ def test_batch_result_new_fields_default_to_zero():
     )
     assert batch.incomplete == 0
     assert batch.completion_rate == 0.0
+
+
+def test_llama_server_simple_bench_runner_runs_suite_against_owned_server(tmp_path, monkeypatch):
+    benchmark_path = tmp_path / "simplebench.json"
+    benchmark_path.write_text(
+        json.dumps({"eval_data": [{"question_id": 1, "prompt": "Pick one", "answer": "A"}]}),
+        encoding="utf-8",
+    )
+    system_prompt_path = tmp_path / "system.txt"
+    system_prompt_path.write_text("Use Final Answer: X", encoding="utf-8")
+    suite_plan = BenchmarkSuitePlan(
+        model="template-label",
+        context=4096,
+        tasks=(
+            BenchmarkSuiteTask(
+                id="general",
+                phase="general",
+                harness="fake",
+                commands=(("fake",),),
+            ),
+            BenchmarkSuiteTask(
+                id="agentic",
+                phase="agentic",
+                harness="fake",
+                commands=(("fake",),),
+            ),
+        ),
+    )
+    seen_suite = {}
+
+    class FakeProcess:
+        returncode = None
+
+        def poll(self):
+            return None
+
+    def fake_run_benchmark_suite(plan, runs_root, timeout_seconds=None):
+        seen_suite["plan"] = plan
+        seen_suite["runs_root"] = runs_root
+        seen_suite["timeout_seconds"] = timeout_seconds
+        result = BenchmarkSuiteResult(
+            id="general",
+            phase="general",
+            harness="fake",
+            ok=True,
+            score=0.75,
+            pass_fail="pass",
+            runtime_seconds=0.01,
+            failure_class="none",
+            receipt_path=str(tmp_path / "suite" / "general"),
+            stdout_tail="",
+            stderr_tail="",
+            commands=(("fake",),),
+        )
+        agentic = BenchmarkSuiteResult(
+            id="agentic",
+            phase="agentic",
+            harness="fake",
+            ok=True,
+            score=0.85,
+            pass_fail="pass",
+            runtime_seconds=0.01,
+            failure_class="none",
+            receipt_path=str(tmp_path / "suite" / "agentic"),
+            stdout_tail="",
+            stderr_tail="",
+            commands=(("fake",),),
+            tool_validity="pass",
+        )
+        return BenchmarkSuiteRun(
+            run_id="suite",
+            receipt_path=str(tmp_path / "suite"),
+            model=plan.model,
+            context=plan.context,
+            settings=plan.settings,
+            agent_bench_score=0.80,
+            general_score=0.75,
+            agentic_score=0.85,
+            results=(result, agentic),
+        )
+
+    monkeypatch.setattr(simple_bench_runner, "_free_port", lambda: 54321)
+    monkeypatch.setattr(
+        simple_bench_runner.subprocess, "Popen", lambda *args, **kwargs: FakeProcess()
+    )
+    monkeypatch.setattr(simple_bench_runner, "_wait_until_ready", lambda *args, **kwargs: 1.0)
+    monkeypatch.setattr(simple_bench_runner, "_warmup_server", lambda *args, **kwargs: None)
+    monkeypatch.setattr(simple_bench_runner, "_stop_process", lambda process: None)
+    monkeypatch.setattr(simple_bench_runner, "run_benchmark_suite", fake_run_benchmark_suite)
+    monkeypatch.setattr(
+        simple_bench_runner,
+        "sample_telemetry",
+        lambda: type(
+            "Snapshot",
+            (),
+            {"to_dict": lambda self: {"gpu_used_mb": 20000, "gpu_total_mb": 24564}},
+        )(),
+    )
+    monkeypatch.setattr(
+        simple_bench_runner,
+        "measure_simple_bench_completion",
+        lambda **kwargs: CompletionMeasurement(
+            ok=True,
+            response="Final Answer: A",
+            ttft_ms=12.0,
+            tokens_per_second=44.0,
+            generated_tokens=4,
+            output_chars=15,
+            prompt_tokens_per_second=900.0,
+        ),
+    )
+    runner = simple_bench_runner.LlamaServerSimpleBenchAttemptRunner(
+        llama_server=tmp_path / "llama-server.exe",
+        model=tmp_path / "Winner.gguf",
+        benchmark_path=benchmark_path,
+        system_prompt_path=system_prompt_path,
+        timeout_seconds=60,
+        benchmark_suite_plan=suite_plan,
+        runs_root=tmp_path,
+    )
+    runner.set_receipt_path(tmp_path / "receipt")
+
+    result = runner(AutoresearchSettings(profile_name="standard", context_size=131072))
+
+    assert result.ok is True
+    assert result.agent_bench_score == 0.80
+    assert result.benchmark_suite_ok is True
+    assert seen_suite["runs_root"] == tmp_path
+    assert seen_suite["plan"].model == str(tmp_path / "Winner.gguf")
+    assert seen_suite["plan"].context == 131072
+    assert seen_suite["plan"].settings["base_url"] == "http://127.0.0.1:54321"
+    assert seen_suite["plan"].settings["gguf_model_path"] == str(tmp_path / "Winner.gguf")
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "receipt" / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert any(
+        event["type"] == "llama_server_ready" and event["data"]["telemetry"]["gpu_used_mb"] == 20000
+        for event in events
+    )

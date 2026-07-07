@@ -13,8 +13,9 @@ from textual.widgets import DataTable, Footer, Header, ProgressBar, Static
 
 from gguf_limit_bench.discovery import ModelInfo, discover_models
 from gguf_limit_bench.evaluation_mode import EvaluationMode
+from gguf_limit_bench.hard_recommendations import build_hard_recommendations
 from gguf_limit_bench.modes import DEFAULT_RUN_MODE, next_mode
-from gguf_limit_bench.reports import write_leaderboard
+from gguf_limit_bench.reports import build_leaderboard, score_summary_for_entry
 from gguf_limit_bench.run_history import truncated_previous_runs_text
 from gguf_limit_bench.run_config import PRESETS, RunConfig
 from gguf_limit_bench.selection import SelectionState
@@ -110,11 +111,17 @@ class BenchTui(App):
         root: Path,
         run_model: RunModelCallback | None = None,
         runs_root: Path = Path("_runs"),
+        target_model: str | None = None,
+        target_model_path: str | None = None,
+        required_context: int | None = None,
     ) -> None:
         super().__init__()
         self.root = root
         self.runs_root = runs_root
         self.run_model = run_model
+        self.target_model = target_model
+        self.target_model_path = target_model_path
+        self.required_context = required_context
         self.models: list[ModelInfo] = []
         self.models_to_run: list[ModelInfo] = []
         self.ran_inside_tui = False
@@ -288,10 +295,33 @@ class BenchTui(App):
         self.call_from_thread(self.exit)
 
     def _show_champion(self) -> None:
-        board = write_leaderboard(self.runs_root)
-        name = board.champion.model_name if board.entries else None
-        score = board.champion.score if board.entries else None
+        board = build_leaderboard(self.runs_root)
+        payload = _hard_recommendation_payload(
+            self.runs_root,
+            target_model=self.target_model,
+            target_model_path=self.target_model_path,
+            required_context=self.required_context,
+        )
+        target_scope = payload.get("target_scope") if isinstance(payload, dict) else None
+        no_target_evidence = (
+            bool(self.target_model)
+            and isinstance(target_scope, dict)
+            and target_scope.get("status") == "NO_TARGET_EVIDENCE"
+        )
+        name = board.champion.model_name if board.entries and not no_target_evidence else None
+        score = board.champion.score if board.entries and not no_target_evidence else None
         message = format_champion_line(name, score)
+        if self.target_model:
+            message = (
+                target_scope_text(
+                    self.runs_root,
+                    target_model=self.target_model,
+                    target_model_path=self.target_model_path,
+                    required_context=self.required_context,
+                )
+                + "\n"
+                + message
+            )
 
         # Append per-pack scoreboard from the newest results.json, if present.
         extra_lines: list[str] = []
@@ -316,6 +346,116 @@ class BenchTui(App):
 
         if extra_lines:
             message = message + "\n" + "\n".join(extra_lines)
+        message = (
+            message
+            + "\n"
+            + score_summary_text(
+                self.runs_root,
+                target_model=self.target_model,
+                target_model_path=self.target_model_path,
+                required_context=self.required_context,
+            )
+        )
+        message = (
+            message
+            + "\n"
+            + operator_verdict_text(
+                self.runs_root,
+                target_model=self.target_model,
+                target_model_path=self.target_model_path,
+                required_context=self.required_context,
+            )
+        )
+        message = (
+            message
+            + "\n"
+            + performance_prediction_text(
+                self.runs_root,
+                target_model=self.target_model,
+                target_model_path=self.target_model_path,
+                required_context=self.required_context,
+            )
+        )
+        message = (
+            message
+            + "\n"
+            + candidate_assessment_text(
+                self.runs_root,
+                target_model=self.target_model,
+                target_model_path=self.target_model_path,
+                required_context=self.required_context,
+            )
+        )
+        message = (
+            message
+            + "\n"
+            + candidate_rankings_text(
+                self.runs_root,
+                target_model=self.target_model,
+                target_model_path=self.target_model_path,
+                required_context=self.required_context,
+            )
+        )
+        message = (
+            message
+            + "\n"
+            + settings_candidates_text(
+                self.runs_root,
+                target_model=self.target_model,
+                target_model_path=self.target_model_path,
+                required_context=self.required_context,
+            )
+        )
+        message = (
+            message
+            + "\n"
+            + repeatability_text(
+                self.runs_root,
+                target_model=self.target_model,
+                target_model_path=self.target_model_path,
+                required_context=self.required_context,
+            )
+        )
+        message = (
+            message
+            + "\n"
+            + context_gate_text(
+                self.runs_root,
+                target_model=self.target_model,
+                target_model_path=self.target_model_path,
+                required_context=self.required_context,
+            )
+        )
+        message = (
+            message
+            + "\n"
+            + resource_gate_text(
+                self.runs_root,
+                target_model=self.target_model,
+                target_model_path=self.target_model_path,
+                required_context=self.required_context,
+            )
+        )
+        message = (
+            message
+            + "\n"
+            + stability_gate_text(
+                self.runs_root,
+                target_model=self.target_model,
+                target_model_path=self.target_model_path,
+                required_context=self.required_context,
+            )
+        )
+        message = (
+            message
+            + "\n"
+            + decision_runbook_text(
+                self.runs_root,
+                target_model=self.target_model,
+                target_model_path=self.target_model_path,
+                required_context=self.required_context,
+            )
+        )
 
         self.call_from_thread(
             self.query_one("#dashboard", Static).update,
@@ -481,16 +621,34 @@ def active_run_status(runs_root: Path) -> str | None:
         dirs = [p for p in runs_root.glob("*") if p.is_dir()]
     except OSError:
         return None
+    # Only real run receipts count. Bookkeeping dirs like the persistent
+    # Optuna store (_runs/learning) are touched constantly and would
+    # otherwise win the "newest dir" race and be reported as the run.
+    receipt_dirs = [
+        p
+        for p in dirs
+        if any((p / marker).exists() for marker in ("events.jsonl", "command.txt", "status.json"))
+    ]
+    if receipt_dirs:
+        dirs = receipt_dirs
     if not dirs:
         return None
     newest = max(dirs, key=lambda p: p.stat().st_mtime)
 
     profile: str | None = None
+    attempts = 0
+    last_event: str | None = None
     events = newest / "events.jsonl"
     if events.exists():
         try:
             for line in events.read_text(encoding="utf-8").splitlines():
-                data = json.loads(line).get("data", {})
+                payload = json.loads(line)
+                data = payload.get("data", {})
+                kind = str(payload.get("type") or "")
+                if kind:
+                    last_event = kind
+                if kind == "autoresearch_attempt_started":
+                    attempts = max(attempts, int(data.get("attempt") or 0))
                 settings = data.get("settings")
                 if isinstance(settings, dict) and settings.get("profile_name"):
                     profile = settings["profile_name"]
@@ -520,11 +678,19 @@ def active_run_status(runs_root: Path) -> str | None:
     parts = [f"Running: {newest.name[:44]}"]
     if profile:
         parts.append(f"profile {profile}")
-    if asked:
+    if last_event == "champion_pack_eval_started":
+        # The champion pack eval writes its receipts only when it finishes, so
+        # question counts freeze during this (long) phase — say so instead.
+        parts.append("champion pack eval running (scores land when it finishes)")
+    elif asked:
         tail = f"asked {asked}Q · {correct} correct"
         if last_pred:
             tail += f" · last={last_pred}"
         parts.append(tail)
+    elif attempts and last_event and last_event.startswith("context_ladder"):
+        parts.append(f"profiling context ladder after {attempts} attempts")
+    elif attempts:
+        parts.append(f"speed attempt {attempts}")
     else:
         parts.append("launching server / warming up…")
     return "  ·  ".join(parts)
@@ -542,8 +708,449 @@ def _newest_results_json(runs_root: Path) -> Path | None:
 
 def format_champion_line(model_name: str | None, score: float | None) -> str:
     if model_name is None or score is None:
-        return "Champion: not decided yet"
-    return f"Champion: {model_name} ({score:.2f})"
+        return "Top candidate: not decided yet"
+    return f"Top candidate: {model_name} ({score:.2f})"
+
+
+def _hard_recommendation_payload(
+    runs_root: Path,
+    *,
+    target_model: str | None = None,
+    target_model_path: str | None = None,
+    required_context: int | None = None,
+) -> dict | None:
+    try:
+        return build_hard_recommendations(
+            runs_root,
+            target_model=target_model,
+            target_model_path=target_model_path,
+            required_context=required_context,
+        )
+    except (OSError, ValueError, KeyError):  # TUI status should never crash on reports.
+        return None
+
+
+def target_scope_text(
+    runs_root: Path,
+    *,
+    target_model: str | None = None,
+    target_model_path: str | None = None,
+    required_context: int | None = None,
+) -> str:
+    payload = _hard_recommendation_payload(
+        runs_root,
+        target_model=target_model,
+        target_model_path=target_model_path,
+        required_context=required_context,
+    )
+    if payload is None:
+        return "Target scope: unscoped"
+    scope = payload.get("target_scope")
+    return format_target_scope(scope if isinstance(scope, dict) else None)
+
+
+def operator_verdict_text(
+    runs_root: Path,
+    *,
+    target_model: str | None = None,
+    target_model_path: str | None = None,
+    required_context: int | None = None,
+) -> str:
+    payload = _hard_recommendation_payload(
+        runs_root,
+        target_model=target_model,
+        target_model_path=target_model_path,
+        required_context=required_context,
+    )
+    if payload is None:
+        return "Operator verdict: unmeasured"
+    verdict = payload.get("operator_verdict")
+    return format_operator_verdict(verdict if isinstance(verdict, dict) else None)
+
+
+def performance_prediction_text(
+    runs_root: Path,
+    *,
+    target_model: str | None = None,
+    target_model_path: str | None = None,
+    required_context: int | None = None,
+) -> str:
+    payload = _hard_recommendation_payload(
+        runs_root,
+        target_model=target_model,
+        target_model_path=target_model_path,
+        required_context=required_context,
+    )
+    if payload is None:
+        return "Performance prediction: unmeasured"
+    prediction = payload.get("performance_prediction")
+    return format_performance_prediction(prediction if isinstance(prediction, dict) else None)
+
+
+def score_summary_text(
+    runs_root: Path,
+    *,
+    target_model: str | None = None,
+    target_model_path: str | None = None,
+    required_context: int | None = None,
+) -> str:
+    if target_model:
+        payload = _hard_recommendation_payload(
+            runs_root,
+            target_model=target_model,
+            target_model_path=target_model_path,
+            required_context=required_context,
+        )
+        scope = payload.get("target_scope") if isinstance(payload, dict) else None
+        if isinstance(scope, dict) and scope.get("status") == "NO_TARGET_EVIDENCE":
+            return "Benchmark scores: unmeasured"
+    try:
+        leaderboard = build_leaderboard(runs_root)
+    except (OSError, ValueError, KeyError):  # TUI status should never crash on reports.
+        return "Benchmark scores: unmeasured"
+    if not leaderboard.entries:
+        return "Benchmark scores: unmeasured"
+    return format_score_summary(score_summary_for_entry(leaderboard.champion))
+
+
+def candidate_assessment_text(
+    runs_root: Path,
+    *,
+    target_model: str | None = None,
+    target_model_path: str | None = None,
+    required_context: int | None = None,
+) -> str:
+    payload = _hard_recommendation_payload(
+        runs_root,
+        target_model=target_model,
+        target_model_path=target_model_path,
+        required_context=required_context,
+    )
+    if payload is None:
+        return "Candidate readiness: unmeasured"
+    assessment = payload.get("candidate_assessment")
+    return format_candidate_assessment(assessment if isinstance(assessment, dict) else None)
+
+
+def format_score_summary(summary: dict | None) -> str:
+    if not summary:
+        return "Benchmark scores: unmeasured"
+    context = summary.get("context") or summary.get("context_label") or "unmeasured"
+    return (
+        f"Benchmark scores: contract={summary.get('score_contract') or 'unknown'} "
+        f"agent={_score_value(summary.get('agent_bench_score'))} "
+        f"general={_score_value(summary.get('general_score'))} "
+        f"agentic={_score_value(summary.get('agentic_score'))} "
+        f"gen={_tps_value(summary.get('generation_tps'))} tok/s "
+        f"serving={_tps_value(summary.get('serving_tps'))} tok/s "
+        f"ctx={context}"
+    )
+
+
+def format_operator_verdict(verdict: dict | None) -> str:
+    if not verdict:
+        return "Operator verdict: unmeasured"
+    next_command = verdict.get("next_command")
+    suffix = f" | next {next_command}" if next_command else ""
+    return (
+        f"Operator verdict: {verdict.get('status') or 'unknown'} | "
+        f"{verdict.get('headline') or 'no headline'}"
+        f"{suffix}"
+    )
+
+
+def format_target_scope(scope: dict | None) -> str:
+    if not scope or not scope.get("target_model"):
+        return "Target scope: unscoped"
+    return (
+        f"Target scope: {scope.get('target_model')} | "
+        f"{scope.get('status') or 'unknown'} | "
+        f"matched {int(scope.get('matched_receipt_count') or 0)}, "
+        f"ignored {int(scope.get('ignored_receipt_count') or 0)}"
+    )
+
+
+def format_performance_prediction(prediction: dict | None) -> str:
+    if not prediction:
+        return "Performance prediction: unmeasured"
+    return (
+        f"Performance prediction: {prediction.get('status') or 'unknown'} "
+        f"({prediction.get('risk') or 'unknown'} risk) | "
+        f"expectation={prediction.get('deployment_expectation') or 'unknown'} | "
+        f"{prediction.get('expected_user_experience') or 'no experience summary'}"
+    )
+
+
+def candidate_rankings_text(
+    runs_root: Path,
+    *,
+    target_model: str | None = None,
+    target_model_path: str | None = None,
+    required_context: int | None = None,
+) -> str:
+    payload = _hard_recommendation_payload(
+        runs_root,
+        target_model=target_model,
+        target_model_path=target_model_path,
+        required_context=required_context,
+    )
+    if payload is None:
+        return "Candidate rankings: none"
+    rankings = payload.get("candidate_rankings")
+    return format_candidate_rankings(rankings if isinstance(rankings, list) else [])
+
+
+def settings_candidates_text(
+    runs_root: Path,
+    *,
+    target_model: str | None = None,
+    target_model_path: str | None = None,
+    required_context: int | None = None,
+) -> str:
+    payload = _hard_recommendation_payload(
+        runs_root,
+        target_model=target_model,
+        target_model_path=target_model_path,
+        required_context=required_context,
+    )
+    if payload is None:
+        return "Settings candidates: none"
+    candidates = payload.get("settings_candidates")
+    return format_settings_candidates(candidates if isinstance(candidates, list) else [])
+
+
+def decision_runbook_text(
+    runs_root: Path,
+    *,
+    target_model: str | None = None,
+    target_model_path: str | None = None,
+    required_context: int | None = None,
+) -> str:
+    payload = _hard_recommendation_payload(
+        runs_root,
+        target_model=target_model,
+        target_model_path=target_model_path,
+        required_context=required_context,
+    )
+    if payload is None:
+        return "Proof runbook: none"
+    runbook = payload.get("proof_runbook")
+    return format_decision_runbook(runbook if isinstance(runbook, list) else [])
+
+
+def repeatability_text(
+    runs_root: Path,
+    *,
+    target_model: str | None = None,
+    target_model_path: str | None = None,
+    required_context: int | None = None,
+) -> str:
+    payload = _hard_recommendation_payload(
+        runs_root,
+        target_model=target_model,
+        target_model_path=target_model_path,
+        required_context=required_context,
+    )
+    if payload is None:
+        return "Repeatability: unmeasured"
+    repeatability = payload.get("repeatability")
+    return format_repeatability(repeatability if isinstance(repeatability, dict) else None)
+
+
+def context_gate_text(
+    runs_root: Path,
+    *,
+    target_model: str | None = None,
+    target_model_path: str | None = None,
+    required_context: int | None = None,
+) -> str:
+    payload = _hard_recommendation_payload(
+        runs_root,
+        target_model=target_model,
+        target_model_path=target_model_path,
+        required_context=required_context,
+    )
+    if payload is None:
+        return "Context gate: unmeasured"
+    context_gate = payload.get("context_gate")
+    return format_context_gate(context_gate if isinstance(context_gate, dict) else None)
+
+
+def resource_gate_text(
+    runs_root: Path,
+    *,
+    target_model: str | None = None,
+    target_model_path: str | None = None,
+    required_context: int | None = None,
+) -> str:
+    payload = _hard_recommendation_payload(
+        runs_root,
+        target_model=target_model,
+        target_model_path=target_model_path,
+        required_context=required_context,
+    )
+    if payload is None:
+        return "Resource gate: unmeasured"
+    resource_gate = payload.get("resource_gate")
+    return format_resource_gate(resource_gate if isinstance(resource_gate, dict) else None)
+
+
+def stability_gate_text(
+    runs_root: Path,
+    *,
+    target_model: str | None = None,
+    target_model_path: str | None = None,
+    required_context: int | None = None,
+) -> str:
+    payload = _hard_recommendation_payload(
+        runs_root,
+        target_model=target_model,
+        target_model_path=target_model_path,
+        required_context=required_context,
+    )
+    if payload is None:
+        return "Stability gate: unmeasured"
+    stability_gate = payload.get("stability_gate")
+    return format_stability_gate(stability_gate if isinstance(stability_gate, dict) else None)
+
+
+def format_candidate_assessment(assessment: dict | None) -> str:
+    if not assessment:
+        return "Candidate readiness: unmeasured"
+    performance = assessment.get("known_performance") or {}
+    missing = assessment.get("missing_evidence") or []
+    missing_gates = [
+        str(item.get("gate")) for item in missing if isinstance(item, dict) and item.get("gate")
+    ]
+    missing_label = ", ".join(missing_gates) if missing_gates else "none"
+    return (
+        "Candidate readiness: "
+        f"{assessment.get('readiness') or 'unknown'} "
+        f"({int(assessment.get('readiness_score') or 0)}/100) | "
+        "performance "
+        f"quality={performance.get('quality') or 'unmeasured'} "
+        f"speed={performance.get('speed') or 'unmeasured'} "
+        f"context={performance.get('context_class') or 'unmeasured'} | "
+        f"missing {missing_label}"
+    )
+
+
+def format_candidate_rankings(rankings: list[dict]) -> str:
+    if not rankings:
+        return "Candidate rankings: none"
+    lines = ["Candidate rankings:"]
+    for item in rankings[:3]:
+        prediction = item.get("prediction") or {}
+        gaps = ", ".join(item.get("evidence_gaps") or []) or "none"
+        agent_score = item.get("agent_quality_score")
+        agent_label = (
+            f"{agent_score:.4f}" if isinstance(agent_score, int | float) else "not measured"
+        )
+        lines.append(
+            f"#{int(item.get('rank') or 0)} {item.get('model') or 'unknown'} | "
+            f"{item.get('status') or 'unknown'} | "
+            f"agent={agent_label} | "
+            f"{prediction.get('quality') or 'unmeasured'}/"
+            f"{prediction.get('speed') or 'unmeasured'}/"
+            f"{prediction.get('context') or 'unmeasured'} | "
+            f"gaps={gaps}"
+        )
+    return "\n".join(lines)
+
+
+def format_settings_candidates(candidates: list[dict]) -> str:
+    if not candidates:
+        return "Settings candidates: none"
+    lines = ["Settings candidates:"]
+    for item in candidates[:5]:
+        score = item.get("recommendation_score")
+        score_label = f"{score:.4f}" if isinstance(score, int | float) else "unmeasured"
+        lines.append(
+            f"#{int(item.get('rank') or 0)} {item.get('profile_id') or 'unknown'} | "
+            f"{item.get('status') or 'unknown'} | "
+            f"{item.get('decision') or 'unknown'} | "
+            f"ctx={int(item.get('context_size') or 0)} | "
+            f"score={score_label}"
+        )
+    return "\n".join(lines)
+
+
+def format_decision_runbook(runbook: list[dict]) -> str:
+    if not runbook:
+        return "Proof runbook: none"
+    lines = ["Proof runbook:"]
+    for item in runbook[:6]:
+        line = (
+            f"{int(item.get('step') or 0)}. "
+            f"[{item.get('gate') or 'unknown'}/{item.get('id') or 'unknown'}] "
+            f"{item.get('status') or 'unknown'} -> {item.get('proves') or 'receipt'}"
+        )
+        if item.get("command"):
+            line += f" | {item['command']}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def format_repeatability(repeatability: dict | None) -> str:
+    if not repeatability:
+        return "Repeatability: unmeasured"
+    run_count = int(repeatability.get("run_count") or 0)
+    run_label = "run" if run_count == 1 else "runs"
+    return (
+        f"Repeatability: {repeatability.get('confidence') or 'unmeasured'} "
+        f"({run_count} {run_label}) | "
+        f"score={_range_label(repeatability.get('score'))} "
+        f"gen={_range_label(repeatability.get('generation_tps'))} tok/s "
+        f"ttft={_range_label(repeatability.get('cold_ttft_ms'))} ms"
+    )
+
+
+def format_context_gate(context_gate: dict | None) -> str:
+    if not context_gate:
+        return "Context gate: unmeasured"
+    return (
+        f"Context gate: {context_gate.get('action') or 'unknown'} | "
+        f"required={context_gate.get('required_context') or 'unknown'} | "
+        f"proven={context_gate.get('proven_context') or 'none'} | "
+        f"profile={context_gate.get('profile_id') or 'unknown'}"
+    )
+
+
+def format_resource_gate(resource_gate: dict | None) -> str:
+    if not resource_gate:
+        return "Resource gate: unmeasured"
+    return (
+        f"Resource gate: {resource_gate.get('action') or 'unknown'} | "
+        f"required={resource_gate.get('required') or 'unknown'}"
+    )
+
+
+def format_stability_gate(stability_gate: dict | None) -> str:
+    if not stability_gate:
+        return "Stability gate: unmeasured"
+    return (
+        f"Stability gate: {stability_gate.get('action') or 'unknown'} | "
+        f"confidence={stability_gate.get('confidence') or 'unknown'} | "
+        f"required={stability_gate.get('required') or 'unknown'}"
+    )
+
+
+def _range_label(metric: object) -> str:
+    if not isinstance(metric, dict):
+        return "unmeasured"
+    minimum = metric.get("min")
+    maximum = metric.get("max")
+    if not isinstance(minimum, int | float) or not isinstance(maximum, int | float):
+        return "unmeasured"
+    return f"{minimum:.4f}-{maximum:.4f}"
+
+
+def _score_value(value: object) -> str:
+    return f"{value:.4f}" if isinstance(value, int | float) else "unmeasured"
+
+
+def _tps_value(value: object) -> str:
+    return f"{value:.2f}" if isinstance(value, int | float) else "unmeasured"
 
 
 def format_scoreboard(per_pack: list[dict]) -> str:

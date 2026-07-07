@@ -1,6 +1,12 @@
 import json
 
-from gguf_limit_bench.reports import build_leaderboard, build_model_comparison, write_leaderboard
+from gguf_limit_bench.reports import (
+    build_report_audit,
+    build_leaderboard,
+    build_model_comparison,
+    build_verdict,
+    write_leaderboard,
+)
 
 
 def _write_run(
@@ -175,6 +181,339 @@ def test_suite_backed_leaderboard_uses_agent_bench_score_and_status(tmp_path):
     assert "BENCHMARK SUITE" in markdown
 
 
+def test_verdict_promotes_only_suite_backed_agent_quality(tmp_path):
+    _write_run(
+        tmp_path,
+        "suite-backed",
+        0.82,
+        55.0,
+        context=131072,
+        serving_ttft_ms=420.0,
+        serving_tokens_per_second=51.0,
+        agent_bench_score=0.82,
+        benchmark_suite_ok=True,
+        benchmark_suite_general_score=0.78,
+        benchmark_suite_agentic_score=0.86,
+    )
+
+    verdict = build_verdict(build_leaderboard(tmp_path))
+
+    assert verdict.action == "PROMOTE"
+    assert verdict.confidence == "high"
+    assert verdict.champion_model == "suite-backed.gguf"
+    assert verdict.agent_quality_score == 0.82
+    assert verdict.expected_generation_tps == 55.0
+    assert verdict.expected_serving_tps == 51.0
+    assert verdict.context_label == "131072"
+    assert verdict.prediction["quality"] == "strong"
+    assert verdict.prediction["speed"] == "interactive"
+    assert verdict.prediction["context"] == "long_agentic"
+    assert "suite-backed" in verdict.summary.lower()
+
+
+def test_verdict_promotes_librarian_agent_quality_without_suite_flag(tmp_path):
+    run = _write_run(
+        tmp_path,
+        "librarian-backed",
+        0.68,
+        38.0,
+        context=98304,
+        serving_ttft_ms=900.0,
+        serving_tokens_per_second=34.0,
+    )
+    (run / "results.json").write_text(
+        json.dumps(
+            {
+                "packs": [
+                    {
+                        "pack_id": "librarian-gate",
+                        "status": "scored",
+                        "asked": 10,
+                        "correct": 8,
+                        "incomplete": 0,
+                        "accuracy": 0.80,
+                    },
+                    {
+                        "pack_id": "librarian-rerank",
+                        "status": "scored",
+                        "asked": 10,
+                        "correct": 6,
+                        "incomplete": 0,
+                        "accuracy": 0.60,
+                    },
+                    {
+                        "pack_id": "librarian-compress",
+                        "status": "scored",
+                        "asked": 10,
+                        "correct": 7,
+                        "incomplete": 0,
+                        "accuracy": 0.70,
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    verdict = build_verdict(build_leaderboard(tmp_path))
+
+    assert verdict.action == "PROMOTE"
+    assert verdict.confidence == "medium"
+    assert verdict.agent_quality_score == 0.70
+    assert verdict.prediction["quality"] == "usable"
+    assert verdict.prediction["speed"] == "interactive"
+    assert "librarian" in verdict.summary.lower()
+
+
+def test_verdict_retests_tiny_librarian_sample_as_weak_evidence(tmp_path):
+    run = _write_run(tmp_path, "tiny-librarian-sample", 0.95, 44.0, context=131072)
+    (run / "results.json").write_text(
+        json.dumps(
+            {
+                "packs": [
+                    {
+                        "pack_id": "librarian-gate",
+                        "status": "scored",
+                        "asked": 4,
+                        "correct": 4,
+                        "incomplete": 0,
+                        "accuracy": 1.0,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    leaderboard = build_leaderboard(tmp_path)
+    verdict = build_verdict(leaderboard)
+    audit = build_report_audit(leaderboard)
+
+    assert leaderboard.champion.agent_bench_score is None
+    assert verdict.action == "RETEST"
+    assert verdict.confidence == "low"
+    assert verdict.prediction["quality"] == "unmeasured"
+    assert audit.status == "warning"
+    assert audit.warnings[0]["code"] == "weak_agent_quality"
+    assert "3 scored packs" in audit.warnings[0]["message"]
+
+
+def test_model_comparison_ranks_recommendation_grade_librarian_over_tiny_sample(tmp_path):
+    weak = _write_run(tmp_path, "tiny-perfect", 0.99, 60.0, context=131072)
+    weak.joinpath("results.json").write_text(
+        json.dumps(
+            {
+                "packs": [
+                    {
+                        "pack_id": "librarian-gate",
+                        "status": "scored",
+                        "asked": 4,
+                        "correct": 4,
+                        "incomplete": 0,
+                        "accuracy": 1.0,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    broad = _write_run(tmp_path, "broad-usable", 0.70, 40.0, context=131072)
+    broad.joinpath("results.json").write_text(
+        json.dumps(
+            {
+                "packs": [
+                    {
+                        "pack_id": "librarian-gate",
+                        "status": "scored",
+                        "asked": 10,
+                        "correct": 7,
+                        "incomplete": 0,
+                        "accuracy": 0.70,
+                    },
+                    {
+                        "pack_id": "librarian-rerank",
+                        "status": "scored",
+                        "asked": 10,
+                        "correct": 7,
+                        "incomplete": 0,
+                        "accuracy": 0.70,
+                    },
+                    {
+                        "pack_id": "librarian-compress",
+                        "status": "scored",
+                        "asked": 10,
+                        "correct": 7,
+                        "incomplete": 0,
+                        "accuracy": 0.70,
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    comparison = build_model_comparison(build_leaderboard(tmp_path))
+
+    assert comparison.entries[0].model_name == "broad-usable.gguf"
+    assert comparison.entries[0].agent_bench_score == 0.70
+    assert comparison.entries[1].model_name == "tiny-perfect.gguf"
+    assert comparison.entries[1].agent_bench_score is None
+
+
+def test_verdict_rejects_speed_only_as_not_enough_evidence(tmp_path):
+    _write_run(tmp_path, "fast-fit-only", 120.0, 120.0, context=262144)
+
+    verdict = build_verdict(build_leaderboard(tmp_path))
+
+    assert verdict.action == "RETEST"
+    assert verdict.confidence == "low"
+    assert verdict.agent_quality_score is None
+    assert verdict.prediction["quality"] == "unmeasured"
+    assert verdict.prediction["recommendation"] == "needs_agent_benchmark"
+    assert "benchmark-suite" in verdict.next_run
+    assert "not an intelligence result" in verdict.summary.lower()
+
+
+def test_report_audit_flags_promotion_eligible_speed_only_receipts(tmp_path):
+    _write_run(tmp_path, "fast-fit-only", 120.0, 120.0, context=262144)
+
+    audit = build_report_audit(build_leaderboard(tmp_path))
+
+    assert audit.status == "warning"
+    assert audit.warning_count == 1
+    assert audit.warnings[0]["code"] == "missing_agent_quality"
+    assert audit.warnings[0]["run_id"] == "fast-fit-only"
+    assert "Speed/context evidence is not enough" in audit.warnings[0]["message"]
+
+
+def test_report_audit_accepts_suite_and_librarian_quality(tmp_path):
+    _write_run(
+        tmp_path,
+        "suite-backed",
+        0.82,
+        55.0,
+        context=131072,
+        agent_bench_score=0.82,
+        benchmark_suite_ok=True,
+        benchmark_suite_general_score=0.78,
+        benchmark_suite_agentic_score=0.86,
+    )
+    run = _write_run(tmp_path, "librarian-backed", 0.68, 38.0, context=98304)
+    (run / "results.json").write_text(
+        json.dumps(
+            {
+                "packs": [
+                    {
+                        "pack_id": "librarian-gate",
+                        "status": "scored",
+                        "asked": 10,
+                        "correct": 8,
+                        "incomplete": 0,
+                        "accuracy": 0.80,
+                    },
+                    {
+                        "pack_id": "librarian-rerank",
+                        "status": "scored",
+                        "asked": 10,
+                        "correct": 6,
+                        "incomplete": 0,
+                        "accuracy": 0.60,
+                    },
+                    {
+                        "pack_id": "librarian-compress",
+                        "status": "scored",
+                        "asked": 10,
+                        "correct": 7,
+                        "incomplete": 0,
+                        "accuracy": 0.70,
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    audit = build_report_audit(build_leaderboard(tmp_path))
+
+    assert audit.status == "pass"
+    assert audit.warning_count == 0
+
+
+def test_results_html_and_leaderboard_lead_with_benchmark_scores(tmp_path):
+    _write_run(
+        tmp_path,
+        "suite-backed",
+        0.82,
+        55.0,
+        context=131072,
+        serving_ttft_ms=420.0,
+        serving_tokens_per_second=38.0,
+        agent_bench_score=0.82,
+        benchmark_suite_ok=True,
+        benchmark_suite_general_score=0.78,
+        benchmark_suite_agentic_score=0.86,
+    )
+
+    write_leaderboard(tmp_path)
+
+    html = (tmp_path / "results.html").read_text(encoding="utf-8")
+    markdown = (tmp_path / "leaderboard.md").read_text(encoding="utf-8")
+    assert html.index("Benchmark scores") < html.index("Verdict: PROMOTE")
+    assert "Agent bench score" in html
+    assert "0.8200" in html
+    assert "General score" in html
+    assert "0.7800" in html
+    assert "Agentic score" in html
+    assert "0.8600" in html
+    assert "Report Audit" in html
+    assert markdown.index("## Benchmark Scores") < markdown.index("## Verdict")
+    assert "- Score contract: `agent_bench_score`" in markdown
+    assert "- Agent bench score: `0.8200`" in markdown
+    assert "- General score: `0.7800`" in markdown
+    assert "- Agentic score: `0.8600`" in markdown
+    assert "## Verdict" in markdown
+    assert "Action: `PROMOTE`" in markdown
+    assert "## Recommended Model" in markdown
+    assert "## Champion" not in markdown
+    assert "## Report Audit" in markdown
+
+
+def test_write_leaderboard_writes_verdict_artifacts(tmp_path):
+    _write_run(
+        tmp_path,
+        "suite-backed",
+        0.75,
+        44.0,
+        context=65536,
+        agent_bench_score=0.75,
+        benchmark_suite_ok=True,
+        benchmark_suite_general_score=0.70,
+        benchmark_suite_agentic_score=0.80,
+    )
+
+    write_leaderboard(tmp_path)
+
+    verdict_json = json.loads((tmp_path / "verdict.json").read_text(encoding="utf-8"))
+    verdict_md = (tmp_path / "verdict.md").read_text(encoding="utf-8")
+    assert verdict_json["action"] == "PROMOTE"
+    assert verdict_json["champion_model"] == "suite-backed.gguf"
+    assert verdict_json["prediction"]["quality"] == "strong"
+    assert "# pilotBENCHY Verdict" in verdict_md
+    assert "Action: `PROMOTE`" in verdict_md
+
+
+def test_write_leaderboard_writes_report_audit_artifacts(tmp_path):
+    _write_run(tmp_path, "fast-fit-only", 120.0, 120.0, context=262144)
+
+    write_leaderboard(tmp_path)
+
+    audit_json = json.loads((tmp_path / "report-audit.json").read_text(encoding="utf-8"))
+    audit_md = (tmp_path / "report-audit.md").read_text(encoding="utf-8")
+    assert audit_json["status"] == "warning"
+    assert audit_json["warning_count"] == 1
+    assert "missing_agent_quality" in audit_md
+
+
 def test_write_leaderboard_writes_markdown_and_champion_json(tmp_path):
     _write_run(tmp_path, "winner", 99.0, 90.0)
 
@@ -215,11 +554,17 @@ def test_results_html_is_actionable_and_beautiful_enough_to_open(tmp_path):
     assert "Plain-English takeaway" in html
     assert "winner.gguf" in html
     assert "What to do next" in html
+    assert "agent-autobench deployment-readiness" in html
     assert "agent-autobench export-profile" in html
+    assert "export is only a deployment" in html
+    assert "Candidate settings" in html
+    assert "Winning settings" not in html
     assert "LOAD FAIL" in html
     assert "Evidence" in html
     assert "Model comparison" in html
     assert "_runs\\model-comparison.md" in html
+    assert "model comparison view" in html
+    assert "per-model winner view" not in html
     # Must not carry the old Agent Pilot browser branding.
     assert "Agent Pilot Autobench Results" not in html
     assert "Gemma vs Qwen" not in html
@@ -328,6 +673,55 @@ def test_model_comparison_groups_repeated_runs_by_model_path(tmp_path):
     assert qwen.serving_tps == 35.0
 
 
+def test_model_comparison_picks_best_agent_score_for_same_model(tmp_path):
+    low = _write_run(
+        tmp_path,
+        "same-model-low-suite",
+        0.60,
+        55.0,
+        agent_bench_score=0.60,
+        benchmark_suite_ok=True,
+        benchmark_suite_general_score=0.55,
+        benchmark_suite_agentic_score=0.65,
+    )
+    high = _write_run(
+        tmp_path,
+        "same-model-high-librarian",
+        0.90,
+        40.0,
+        agent_bench_score=0.90,
+    )
+    low_payload = json.loads((low / "best-settings.json").read_text(encoding="utf-8"))
+    high_payload = json.loads((high / "best-settings.json").read_text(encoding="utf-8"))
+    high_payload["model"] = low_payload["model"]
+    (high / "best-settings.json").write_text(json.dumps(high_payload), encoding="utf-8")
+
+    comparison = build_model_comparison(build_leaderboard(tmp_path))
+
+    assert len(comparison.entries) == 1
+    assert comparison.entries[0].best_run_id == "same-model-high-librarian"
+    assert comparison.entries[0].agent_bench_score == 0.90
+
+
+def test_results_html_does_not_call_ranked_unscored_candidate_fastest(tmp_path):
+    _write_run(tmp_path, "fast-speed-only", 80.0, 80.0, context=32768)
+    _write_run(
+        tmp_path,
+        "slower-workflow-weak",
+        40.0,
+        40.0,
+        context=65536,
+        workflow_score=2.0,
+        workflow_results=[{"name": "tool_choice", "passed": True}],
+    )
+
+    write_leaderboard(tmp_path)
+
+    html = (tmp_path / "results.html").read_text(encoding="utf-8")
+    assert "fastest measured model so far" not in html
+    assert "highest-ranked unscored candidate so far" in html
+
+
 def test_write_leaderboard_writes_model_level_comparison_report(tmp_path):
     _write_run(tmp_path, "winner", 99.0, 90.0, serving_ttft_ms=250.0)
 
@@ -338,7 +732,7 @@ def test_write_leaderboard_writes_model_level_comparison_report(tmp_path):
     assert "pilotBENCHY Model Comparison" in markdown
     assert "Agent Pilot Model Comparison" not in markdown
     assert "winner.gguf" in markdown
-    assert "per-model champion" in markdown or "Keep iterating" in markdown
+    assert "per-model recommendation" in markdown or "Keep iterating" in markdown
     assert payload[0]["model_name"] == "winner.gguf"
     assert payload[0]["run_count"] == 1
     assert payload[0]["browser_report_path"].endswith("report.html")
@@ -410,12 +804,13 @@ def test_results_json_yields_agent_quality_and_pack_scores(tmp_path):
     assert entry.librarian_score == 0.5
     assert entry.scored_pack_count == 2
     assert entry.pack_scores == {"librarian-gate": 0.75, "librarian-dedupe": 0.25}
-    # agent_bench_score is populated from librarian_score when otherwise None.
-    assert entry.agent_bench_score == 0.5
+    # Raw librarian score is preserved, but weak samples do not become recommendation-grade.
+    assert entry.agent_bench_score is None
 
     comparison = build_model_comparison(leaderboard)
     model = next(e for e in comparison.entries if e.model_name == "librarian-model.gguf")
     assert model.librarian_score == 0.5
+    assert model.agent_bench_score is None
     assert model.pack_scores == {"librarian-gate": 0.75, "librarian-dedupe": 0.25}
     assert model.scored_pack_count == 2
 
@@ -426,8 +821,30 @@ def test_results_html_renders_agent_quality_matrix(tmp_path):
         json.dumps(
             {
                 "packs": [
-                    {"pack_id": "librarian-gate", "status": "scored", "accuracy": 0.9},
-                    {"pack_id": "librarian-rerank", "status": "scored", "accuracy": 0.4},
+                    {
+                        "pack_id": "librarian-gate",
+                        "status": "scored",
+                        "asked": 10,
+                        "correct": 9,
+                        "incomplete": 0,
+                        "accuracy": 0.9,
+                    },
+                    {
+                        "pack_id": "librarian-rerank",
+                        "status": "scored",
+                        "asked": 10,
+                        "correct": 4,
+                        "incomplete": 0,
+                        "accuracy": 0.4,
+                    },
+                    {
+                        "pack_id": "librarian-compress",
+                        "status": "scored",
+                        "asked": 10,
+                        "correct": 8,
+                        "incomplete": 0,
+                        "accuracy": 0.8,
+                    },
                 ]
             }
         ),
@@ -441,7 +858,7 @@ def test_results_html_renders_agent_quality_matrix(tmp_path):
     assert "Best model by agent quality" in html
     assert "gate" in html and "rerank" in html
     assert "90%" in html
-    assert "Agent score" in markdown
+    assert "Eligible agent score" in markdown
     assert "90%" in markdown
 
 
@@ -560,7 +977,7 @@ def test_agent_quality_uses_librarian_suite_weighted_score_not_pack_mean(tmp_pat
     entry = next(e for e in build_leaderboard(tmp_path).entries if e.run_id == "uneven-packs")
 
     assert entry.librarian_score == 0.9
-    assert entry.agent_bench_score == 0.9
+    assert entry.agent_bench_score is None
 
 
 def test_leaderboard_excludes_non_generative_models(tmp_path):

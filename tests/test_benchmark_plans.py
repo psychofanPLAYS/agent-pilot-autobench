@@ -3,6 +3,13 @@ from pathlib import Path
 from gguf_limit_bench.benchmark_suite import BenchmarkSuitePlan
 
 
+RECOMMENDATION_GRADE_AGENT_CONTEXT = 131_072
+RECOMMENDATION_GRADE_PLAN_KINDS = {
+    "wiki_librarian_gemma4_26b_a4b_thinking",
+    "wiki_librarian_qwen3_moe_thinking",
+}
+
+
 def test_bundled_benchmark_suite_plans_are_valid_and_complete():
     plan_paths = sorted(Path("benchmarks/plans").glob("*.plan.json"))
 
@@ -22,3 +29,5 @@ def test_bundled_benchmark_suite_plans_are_valid_and_complete():
         assert "path/to" not in text
         assert "{task_dir}" in text
         assert plan.settings["score_contract"] == "agent_bench_score"
+        if plan.settings["plan_kind"] in RECOMMENDATION_GRADE_PLAN_KINDS:
+            assert plan.context >= RECOMMENDATION_GRADE_AGENT_CONTEXT

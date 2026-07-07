@@ -13,9 +13,10 @@ from pathlib import Path
 
 from gguf_limit_bench.discovery import parse_model_name
 
-# Directory names and filenames that hold a custom Qwen chat template the user
-# keeps alongside their models (e.g. froggeric v21.3).
+# Directory names and filenames that hold custom chat templates the user keeps
+# alongside their models (e.g. froggeric v21.3 or official Gemma templates).
 _QWEN_TEMPLATE_DIR_HINTS = ("Qwen-Fixed-Chat-Templates",)
+_GEMMA_TEMPLATE_DIR_HINTS = ("Gemma-4-Templates", "Gemma-Fixed-Chat-Templates")
 _TEMPLATE_FILENAMES = ("chat_template.jinja",)
 QWEN_THINKING_KWARGS = '{"enable_thinking":true,"preserve_thinking":true}'
 
@@ -34,24 +35,25 @@ def _qwen_reasoning_flags() -> tuple[str, ...]:
 def discover_chat_template(family: str, search_roots: tuple[Path, ...]) -> Path | None:
     """Return a custom chat-template ``.jinja`` for *family*, if one is on disk.
 
-    Only Qwen has a known custom template convention today. Looks for a
-    ``Qwen-Fixed-Chat-Templates/chat_template.jinja`` under any search root, then
-    falls back to any ``*/chat_template.jinja`` whose path mentions ``qwen``.
+    Looks for known family template folders under each search root, then falls
+    back to any ``*/chat_template.jinja`` whose path mentions the family.
     """
-    if family != "qwen":
+    if family not in {"qwen", "gemma"}:
         return None
+    hints = _QWEN_TEMPLATE_DIR_HINTS if family == "qwen" else _GEMMA_TEMPLATE_DIR_HINTS
     for raw_root in search_roots:
         root = Path(raw_root)
         if not root.exists():
             continue
-        for hint in _QWEN_TEMPLATE_DIR_HINTS:
+        for hint in hints:
             for filename in _TEMPLATE_FILENAMES:
                 candidate = root / hint / filename
                 if candidate.is_file():
                     return candidate
         for filename in _TEMPLATE_FILENAMES:
             for candidate in sorted(root.glob(f"*/{filename}")):
-                if "qwen" in str(candidate).lower() and candidate.is_file():
+                relative = str(candidate.relative_to(root)).lower()
+                if family in relative and candidate.is_file():
                     return candidate
     return None
 
@@ -77,6 +79,9 @@ def recommended_model_flags(
             return ("--jinja", "--chat-template-file", str(template), *_qwen_reasoning_flags())
         return ("--jinja", *_qwen_reasoning_flags())
     if family == "gemma":
+        template = template_override or discover_chat_template(family, search_roots)
+        if template is not None:
+            return ("--jinja", "--chat-template-file", str(template))
         return ("--jinja",)
     return ()
 

@@ -21,6 +21,10 @@ from gguf_limit_bench.programs import MIN_SERIOUS_CONTEXT_SIZE
 runner = CliRunner()
 
 
+def _path_arg(path: Path) -> str:
+    return path.as_posix()
+
+
 class FakeAttemptRunner:
     def __init__(self, llama_bench: Path, model: Path, timeout_seconds: int = 300) -> None:
         self.model = model
@@ -83,6 +87,565 @@ def test_autoresearch_rejects_extra_args_that_override_managed_server_fields(mon
     )
 
     assert result.exit_code == 2
+
+
+def test_qe_format_command_writes_fresh_session_receipt(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_run_qe_format_suite(**kwargs):
+        calls.append(kwargs)
+        kwargs["out_dir"].mkdir(parents=True)
+        (kwargs["out_dir"] / "qe-format-summary.json").write_text(
+            json.dumps({"score": 0.75, "attempts": 20}),
+            encoding="utf-8",
+        )
+        return {
+            "score": 0.75,
+            "format_rate": 0.8,
+            "direct_answer_rate": 0.1,
+            "attempts": 20,
+        }
+
+    monkeypatch.setattr("gguf_limit_bench.cli.run_qe_format_suite", fake_run_qe_format_suite)
+
+    result = runner.invoke(
+        app,
+        [
+            "qe-format",
+            "--model",
+            "qwen3.5-qe-2b",
+            "--base-url",
+            "http://127.0.0.1:8081",
+            "--runs-root",
+            str(tmp_path),
+            "--repeats",
+            "10",
+            "--timeout-seconds",
+            "77",
+            "--max-tokens",
+            "96",
+            "--temperature",
+            "0.1",
+            "--top-p",
+            "0.8",
+            "--min-p",
+            "0.02",
+            "--repeat-penalty",
+            "1.05",
+            "--dry-multiplier",
+            "0.6",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls[0]["model"] == "qwen3.5-qe-2b"
+    assert calls[0]["base_url"] == "http://127.0.0.1:8081"
+    assert calls[0]["repeats"] == 10
+    assert calls[0]["timeout_seconds"] == 77
+    assert calls[0]["answer_max_tokens"] == 96
+    assert calls[0]["sampling"] == {
+        "temperature": 0.1,
+        "top_p": 0.8,
+        "min_p": 0.02,
+        "repeat_penalty": 1.05,
+        "dry_multiplier": 0.6,
+    }
+    assert calls[0]["out_dir"].parent == tmp_path
+    assert "QE format receipt:" in result.output
+    assert "Score: 0.750000" in result.output
+
+
+def test_qe_results_command_prints_hard_recommendation(tmp_path):
+    run = tmp_path / "runs" / "qe-good"
+    run.mkdir(parents=True)
+    (run / "qe-format-summary.json").write_text(
+        json.dumps(
+            {
+                "model": "qwen-qe",
+                "score": 0.95,
+                "format_rate": 0.94,
+                "direct_answer_rate": 0.0,
+                "attempts": 50,
+                "median_tps": 180.0,
+                "median_ttft_ms": 125.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["qe-results", "--runs-root", str(tmp_path / "runs")])
+
+    assert result.exit_code == 0, result.output
+    assert "QE champion: qwen-qe" in result.output
+    assert "Action: PROMOTE_QE_PROFILE" in result.output
+    assert "Leaderboard written:" in result.output
+    assert (tmp_path / "runs" / "qe-format-leaderboard.md").exists()
+
+
+def test_qe_results_command_labels_retest_as_top_candidate_not_champion(tmp_path):
+    run = tmp_path / "runs" / "qe-retest"
+    run.mkdir(parents=True)
+    (run / "qe-format-summary.json").write_text(
+        json.dumps(
+            {
+                "model": "qwen-qe",
+                "score": 0.78,
+                "format_rate": 0.78,
+                "direct_answer_rate": 0.0,
+                "attempts": 50,
+                "median_tps": 180.0,
+                "median_ttft_ms": 125.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["qe-results", "--runs-root", str(tmp_path / "runs")])
+
+    assert result.exit_code == 0, result.output
+    assert "QE top candidate: qwen-qe" in result.output
+    assert "QE champion:" not in result.output
+    assert "Action: RETEST_QE_PROFILE" in result.output
+
+
+def test_flag_recommendations_command_writes_operator_artifacts(tmp_path, monkeypatch):
+    monkeypatch.setattr("gguf_limit_bench.cli.detect_gpu_name", lambda: "NVIDIA GeForce RTX 4090")
+    model = tmp_path / "gemma-4-26B-A4B-it-Q4_K_M.gguf"
+    model.touch()
+    llama_server = tmp_path / "llama-server.exe"
+    llama_server.touch()
+
+    result = runner.invoke(
+        app,
+        [
+            "flag-recommendations",
+            "--model",
+            str(model),
+            "--llama-server",
+            str(llama_server),
+            "--output-dir",
+            str(tmp_path / "runs"),
+            "--root",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Flag recommendations written:" in result.output
+    assert "Standard: ctx 131072" in result.output
+    assert "Long agent: ctx 200000" in result.output
+    assert (tmp_path / "runs" / "flag-recommendations.md").exists()
+    payload = json.loads((tmp_path / "runs" / "flag-recommendations.json").read_text())
+    assert payload["profiles"][0]["command"][:3] == [
+        str(llama_server),
+        "--model",
+        str(model),
+    ]
+
+
+def test_deployment_readiness_command_prints_gate_result(tmp_path):
+    runs_root = tmp_path / "runs"
+    runs_root.mkdir()
+    (runs_root / "flag-recommendations.json").write_text(
+        json.dumps(
+            {
+                "model": "G:/AI/models/Winner.gguf",
+                "model_name": "Winner.gguf",
+                "lane_type": "chat_agent",
+                "profiles": [{"id": "standard", "label": "Standard", "context_size": 131072}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    run = runs_root / "winner-run"
+    run.mkdir()
+    (run / "best-settings.json").write_text(
+        json.dumps(
+            {
+                "model": "G:/AI/models/Winner.gguf",
+                "settings": {"context_size": 131072, "parallel": 1, "gpu_layers": 99},
+                "result": {
+                    "ok": True,
+                    "generation_tokens_per_second": 44.0,
+                    "prompt_tokens_per_second": 900.0,
+                    "failure": "none",
+                    "agent_bench_score": 0.81,
+                    "serving_ttft_ms": 500.0,
+                    "serving_tokens_per_second": 32.0,
+                },
+                "score": 0.81,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["deployment-readiness", "--runs-root", str(runs_root)])
+
+    assert result.exit_code == 0, result.output
+    assert "Deployment readiness: PROMOTE_DEPLOYMENT_PROFILE" in result.output
+    assert "Recommended profile: standard" in result.output
+    assert (runs_root / "deployment-readiness.md").exists()
+
+
+def test_hard_recommendations_command_prints_single_operator_summary(tmp_path):
+    runs_root = tmp_path / "runs"
+    runs_root.mkdir()
+    (runs_root / "flag-recommendations.json").write_text(
+        json.dumps(
+            {
+                "model": "G:/AI/models/Winner.gguf",
+                "model_name": "Winner.gguf",
+                "lane_type": "chat_agent",
+                "profiles": [{"id": "standard", "label": "Standard", "context_size": 131072}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    run = runs_root / "speed-only"
+    run.mkdir()
+    (run / "best-settings.json").write_text(
+        json.dumps(
+            {
+                "model": "G:/AI/models/Winner.gguf",
+                "settings": {"context_size": 131072, "parallel": 1, "gpu_layers": 99},
+                "result": {
+                    "ok": True,
+                    "generation_tokens_per_second": 42.0,
+                    "prompt_tokens_per_second": 900.0,
+                    "failure": "none",
+                    "serving_ttft_ms": 500.0,
+                    "serving_tokens_per_second": 36.0,
+                },
+                "score": 42.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["hard-recommendations", "--runs-root", str(runs_root)])
+
+    assert result.exit_code == 0, result.output
+    assert "Hard recommendations: RETEST" in result.output
+    assert "Operator verdict: NOT_USABLE_YET" in result.output
+    assert "No deployable recommendation exists." in result.output
+    assert "Scored candidates: 0/1" in result.output
+    assert "Performance prediction: LAB_ONLY_SPEED_PROOF (high risk)" in result.output
+    assert "Deployment expectation: do_not_deploy" in result.output
+    assert "Proven recommendations: 0" in result.output
+    assert "Settings candidates:" in result.output
+    assert "#1 standard | SYSTEMS_ONLY | needs_agent_score | ctx=131072" in result.output
+    assert "Proof commands: " in result.output
+    assert "Model gate: RETEST" in result.output
+    assert "Deployment gate: RETEST_DEPLOYMENT" in result.output
+    assert "Context gate: WAITING_FOR_DEPLOYMENT | required=131072" in result.output
+    assert (
+        "Resource gate: WAITING_FOR_DEPLOYMENT | "
+        "required=same-run resource telemetry for the promoted settings receipt"
+    ) in " ".join(result.output.split())
+    assert "Candidate readiness: not_recommendable (0/100)" in result.output
+    output_words = " ".join(result.output.split())
+    assert (
+        "Candidate performance: quality=unmeasured speed=interactive context=long_agentic"
+        in output_words
+    )
+    assert "Candidate rankings:" in result.output
+    assert "#1 Winner.gguf" in result.output
+    assert "gaps=agent_quality, benchmark_suite" in result.output
+    assert "Repeatability: single_run (1 run)" in result.output
+    assert "Proof command (model/model_plan):" in result.output
+    assert "Proof command (model/model_score):" in result.output
+    assert "Proof runbook:" in result.output
+    assert "1. [model/model_plan] pending -> benchmark-suite.plan.json" in output_words
+    payload = json.loads((runs_root / "hard-recommendations.json").read_text(encoding="utf-8"))
+    assert payload["proof_runbook"][1]["proves"] == (
+        f"{_path_arg(runs_root)}/<suite-run>/suite-verdict.json"
+    )
+    assert (
+        f"apb benchmark-suite --plan benchmark-suite.plan.json --runs-root {_path_arg(runs_root)}"
+    ) in result.output
+    assert "Proof command (refresh/refresh_hard_recommendations):" in result.output
+    assert (runs_root / "hard-recommendations.md").exists()
+
+
+def test_hard_recommendations_command_preserves_required_context_in_refresh_command(tmp_path):
+    runs_root = tmp_path / "runs"
+    runs_root.mkdir()
+    (runs_root / "flag-recommendations.json").write_text(
+        json.dumps(
+            {
+                "model": "G:/AI/models/Winner.gguf",
+                "model_name": "Winner.gguf",
+                "lane_type": "chat_agent",
+                "profiles": [
+                    {"id": "standard", "label": "Standard", "context_size": 131072},
+                    {"id": "long_agent", "label": "Long agent", "context_size": 200000},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    run = runs_root / "standard-proof"
+    run.mkdir()
+    (run / "best-settings.json").write_text(
+        json.dumps(
+            {
+                "model": "G:/AI/models/Winner.gguf",
+                "settings": {"context_size": 131072, "parallel": 1, "gpu_layers": 99},
+                "result": {
+                    "ok": True,
+                    "generation_tokens_per_second": 42.0,
+                    "prompt_tokens_per_second": 900.0,
+                    "failure": "none",
+                    "agent_bench_score": 0.82,
+                    "benchmark_suite_ok": True,
+                    "benchmark_suite_general_score": 0.82,
+                    "benchmark_suite_agentic_score": 0.82,
+                    "serving_ttft_ms": 420.0,
+                    "serving_tokens_per_second": 38.0,
+                },
+                "score": 0.82,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "hard-recommendations",
+            "--runs-root",
+            str(runs_root),
+            "--required-context",
+            "200000",
+            "--json-out",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    commands = {command["id"]: command["command"] for command in payload["proof_commands"]}
+    assert payload["context_gate"]["action"] == "RETEST_CONTEXT"
+    assert commands["refresh_hard_recommendations"].endswith("--required-context 200000")
+
+
+def test_hard_recommendations_command_accepts_target_model_scope(tmp_path):
+    runs_root = tmp_path / "runs"
+    runs_root.mkdir()
+    (runs_root / "flag-recommendations.json").write_text(
+        json.dumps(
+            {
+                "model": "G:/AI/models/Qwopus.gguf",
+                "model_name": "Qwopus.gguf",
+                "lane_type": "chat_agent",
+                "profiles": [{"id": "standard", "label": "Standard", "context_size": 131072}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    run = runs_root / "old-qwopus-speed"
+    run.mkdir()
+    (run / "best-settings.json").write_text(
+        json.dumps(
+            {
+                "model": "G:/AI/models/Qwopus.gguf",
+                "settings": {"context_size": 4096, "parallel": 1, "gpu_layers": 99},
+                "result": {
+                    "ok": True,
+                    "generation_tokens_per_second": 42.0,
+                    "prompt_tokens_per_second": 900.0,
+                    "failure": "none",
+                    "serving_ttft_ms": 500.0,
+                    "serving_tokens_per_second": 36.0,
+                },
+                "score": 42.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "hard-recommendations",
+            "--runs-root",
+            str(runs_root),
+            "--target-model",
+            "Gemma-4-26B",
+            "--target-model-path",
+            "G:/AI/models/Gemma-4-26B-A4B-Q8_0.gguf",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    normalized_output = result.output.replace("\\", "/")
+    assert "Target scope: Gemma-4-26B | NO_TARGET_EVIDENCE | matched 0, ignored 1" in result.output
+    assert "Scored candidates: 0/0" in result.output
+    assert (
+        'apb flag-recommendations --model "G:/AI/models/Gemma-4-26B-A4B-Q8_0.gguf" '
+        f"--output-dir {_path_arg(runs_root)}"
+    ) in normalized_output
+    payload = json.loads((runs_root / "hard-recommendations.json").read_text(encoding="utf-8"))
+    assert payload["target_scope"]["target_model"] == "Gemma-4-26B"
+    assert payload["target_scope"]["target_model_path"].replace("\\", "/") == (
+        "G:/AI/models/Gemma-4-26B-A4B-Q8_0.gguf"
+    )
+    assert payload["candidate_rankings"] == []
+
+
+def test_tui_command_forwards_target_scope_and_required_context(tmp_path, monkeypatch):
+    captured = {}
+
+    class FakeBenchTui:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            self.models_to_run = []
+            self.ran_inside_tui = False
+            self.run_mode = type(
+                "RunMode",
+                (),
+                {
+                    "budget_minutes": 5,
+                    "context_ladder": None,
+                    "evaluation": None,
+                },
+            )()
+
+        def run(self):
+            return None
+
+    monkeypatch.setattr("gguf_limit_bench.cli.BenchTui", FakeBenchTui)
+    monkeypatch.setattr("gguf_limit_bench.cli._run_tui_selection", lambda **kwargs: None)
+    model_root = tmp_path / "models"
+    model_root.mkdir()
+
+    result = runner.invoke(
+        app,
+        [
+            "tui",
+            "--root",
+            str(model_root),
+            "--runs-root",
+            str(tmp_path / "runs"),
+            "--target-model",
+            "Gemma-4-26B",
+            "--target-model-path",
+            "G:/AI/models/Gemma-4-26B-A4B-Q8_0.gguf",
+            "--required-context",
+            "200000",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["target_model"] == "Gemma-4-26B"
+    assert captured["target_model_path"].replace("\\", "/") == (
+        "G:/AI/models/Gemma-4-26B-A4B-Q8_0.gguf"
+    )
+    assert captured["required_context"] == 200000
+
+
+def test_deployment_proof_command_runs_selected_profile(tmp_path, monkeypatch):
+    calls = []
+    receipt_path = tmp_path / "runs" / "deployment-proof-receipt"
+    receipt_path.mkdir(parents=True)
+    (receipt_path / "best-settings.json").write_text(
+        json.dumps(
+            {
+                "model": "G:/AI/models/Gemma-4-26B-A4B-Q8_0.gguf",
+                "settings": {"profile_name": "long_agent", "context_size": 200000},
+            }
+        ),
+        encoding="utf-8",
+    )
+    refreshed = []
+
+    def fake_run_deployment_proof(**kwargs):
+        calls.append(kwargs)
+        return type("Receipt", (), {"path": receipt_path})()
+
+    def fake_write_deployment_readiness(runs_root):
+        refreshed.append(("readiness", runs_root))
+        path = runs_root / "deployment-readiness.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "action": "PROMOTE_DEPLOYMENT_PROFILE",
+                    "recommended_profile_id": "standard",
+                }
+            ),
+            encoding="utf-8",
+        )
+        return type(
+            "Outputs",
+            (),
+            {"json_path": path, "markdown_path": runs_root / "deployment-readiness.md"},
+        )()
+
+    def fake_write_hard_recommendations(runs_root, **kwargs):
+        refreshed.append(("hard", runs_root, kwargs))
+        path = runs_root / "hard-recommendations.json"
+        payload = {
+            "overall_action": "PROMOTE_READY_STACK",
+            "hard_recommendations": [{"type": "settings_profile"}],
+        }
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return type(
+            "Outputs",
+            (),
+            {
+                "json_path": path,
+                "markdown_path": runs_root / "hard-recommendations.md",
+                "payload": payload,
+            },
+        )()
+
+    monkeypatch.setattr("gguf_limit_bench.cli.run_deployment_proof", fake_run_deployment_proof)
+    monkeypatch.setattr(
+        "gguf_limit_bench.cli.write_deployment_readiness", fake_write_deployment_readiness
+    )
+    monkeypatch.setattr(
+        "gguf_limit_bench.cli.write_hard_recommendations", fake_write_hard_recommendations
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "deployment-proof",
+            "--runs-root",
+            str(tmp_path / "runs"),
+            "--profile",
+            "standard",
+            "--flag-recommendations",
+            str(tmp_path / "runs" / "flag-recommendations.json"),
+            "--benchmark-suite-plan",
+            str(tmp_path / "benchmark-suite.plan.json"),
+            "--budget-minutes",
+            "17",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls[0]["runs_root"] == tmp_path / "runs"
+    assert calls[0]["profile_id"] == "standard"
+    assert calls[0]["flag_recommendations_path"] == tmp_path / "runs" / "flag-recommendations.json"
+    assert calls[0]["benchmark_suite_plan"] == tmp_path / "benchmark-suite.plan.json"
+    assert calls[0]["budget_seconds"] == 17 * 60
+    assert calls[0]["simple_bench_max_tokens"] == 8192
+    assert "Deployment proof receipt:" in result.output
+    assert str(receipt_path) in result.output
+    assert refreshed == [
+        ("readiness", tmp_path / "runs"),
+        (
+            "hard",
+            tmp_path / "runs",
+            {
+                "target_model_path": "G:/AI/models/Gemma-4-26B-A4B-Q8_0.gguf",
+                "required_context": 200000,
+            },
+        ),
+    ]
+    assert "Deployment readiness: PROMOTE_DEPLOYMENT_PROFILE" in result.output
+    assert "Hard recommendations: PROMOTE_READY_STACK" in result.output
+    assert "Proven recommendations: 1" in result.output
 
 
 def test_autoresearch_command_writes_receipts(tmp_path, monkeypatch):
@@ -701,7 +1264,13 @@ def test_global_start_flag_opens_webui(monkeypatch):
     result = runner.invoke(app, ["--start"])
 
     assert result.exit_code == 0
-    assert opened_roots == [Path("_models")]
+    # Relative config paths are anchored to the folder holding _CONFIG.toml
+    # (or stay cwd-relative when no config file exists).
+    from gguf_limit_bench.config import find_config_path
+
+    found = find_config_path()
+    expected = Path("_models") if found is None else found.parent / "_models"
+    assert opened_roots == [expected]
 
 
 def test_bare_apb_launches_without_setup_when_already_installed(monkeypatch):
@@ -1067,7 +1636,7 @@ def test_setup_json_out_is_agent_friendly(tmp_path, monkeypatch):
     assert payload["checks"][0]["name"] == "llama-bench"
 
 
-def test_results_command_prints_latest_champion(tmp_path):
+def test_results_command_prints_unproven_result_as_top_candidate(tmp_path):
     run = tmp_path / "runs" / "20260526-test"
     run.mkdir(parents=True)
     (run / "best-settings.json").write_text(
@@ -1089,11 +1658,390 @@ def test_results_command_prints_latest_champion(tmp_path):
     result = runner.invoke(app, ["results", "--runs-root", str(tmp_path / "runs")])
 
     assert result.exit_code == 0
-    assert "Champion: Winner.gguf" in result.output
+    assert "Top candidate: Winner.gguf" in result.output
+    assert "Champion: Winner.gguf" not in result.output
     assert (tmp_path / "runs" / "leaderboard.md").exists()
     assert (tmp_path / "runs" / "champion.json").exists()
+    assert (tmp_path / "runs" / "verdict.json").exists()
+    assert (tmp_path / "runs" / "verdict.md").exists()
+    assert (tmp_path / "runs" / "hard-recommendations.json").exists()
+    assert (tmp_path / "runs" / "hard-recommendations.md").exists()
+    assert (tmp_path / "runs" / "report-audit.json").exists()
+    assert (tmp_path / "runs" / "report-audit.md").exists()
     assert (tmp_path / "runs" / "results.html").exists()
+    assert "Verdict: RETEST" in result.output
+    assert "Report audit: warning (1 warning(s))" in result.output
+    assert "Audit warning: missing_agent_quality in 20260526-test" in result.output
+    assert "Predicted quality: unmeasured" in result.output
+    assert "Recommendation class: needs_agent_benchmark" in result.output
+    assert "Candidate readiness: not_recommendable (0/100)" in result.output
+    assert "Candidate rankings:" in result.output
+    assert "#1 Winner.gguf" in result.output
+    assert "Repeatability: single_run (1 run)" in result.output
+    assert "Proof runbook:" in result.output
+    assert "1. [model/model_plan] pending -> benchmark-suite.plan.json" in " ".join(
+        result.output.split()
+    )
+    assert "Hard recommendations:" in result.output
     assert "HTML report" in result.output
+
+
+def test_results_command_target_scope_does_not_show_unrelated_top_candidate(tmp_path):
+    run = tmp_path / "runs" / "old-qwopus-speed"
+    run.mkdir(parents=True)
+    (run / "best-settings.json").write_text(
+        json.dumps(
+            {
+                "model": "G:/AI/models/Qwopus.gguf",
+                "settings": {"context_size": 4096, "parallel": 1, "gpu_layers": 99},
+                "result": {
+                    "generation_tokens_per_second": 42.0,
+                    "prompt_tokens_per_second": 900.0,
+                    "failure": "unknown",
+                },
+                "score": 51.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "results",
+            "--runs-root",
+            str(tmp_path / "runs"),
+            "--target-model",
+            "Gemma-4-26B",
+            "--target-model-path",
+            "G:/AI/models/Gemma-4-26B-A4B-Q8_0.gguf",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    normalized_output = result.output.replace("\\", "/")
+    assert "No benchmark receipts found for target model: Gemma-4-26B" in result.output
+    assert "Top candidate: Qwopus.gguf" not in result.output
+    assert "Target scope: Gemma-4-26B | NO_TARGET_EVIDENCE | matched 0, ignored 1" in result.output
+    assert (
+        'apb flag-recommendations --model "G:/AI/models/Gemma-4-26B-A4B-Q8_0.gguf" '
+        f"--output-dir {_path_arg(tmp_path / 'runs')}"
+    ) in normalized_output
+    payload = json.loads(
+        (tmp_path / "runs" / "hard-recommendations.json").read_text(encoding="utf-8")
+    )
+    assert payload["target_scope"]["status"] == "NO_TARGET_EVIDENCE"
+
+
+def test_results_command_prints_score_summary_before_verdict_for_suite_backed_result(tmp_path):
+    (tmp_path / "runs").mkdir()
+    (tmp_path / "runs" / "flag-recommendations.json").write_text(
+        json.dumps(
+            {
+                "model": "G:/AI/models/Winner.gguf",
+                "model_name": "Winner.gguf",
+                "profiles": [{"id": "standard", "label": "Standard", "context_size": 131072}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    run = tmp_path / "runs" / "20260526-suite-backed"
+    run.mkdir()
+    (run / "best-settings.json").write_text(
+        json.dumps(
+            {
+                "model": "G:/AI/models/Winner.gguf",
+                "settings": {"context_size": 131072, "parallel": 1, "gpu_layers": 99},
+                "result": {
+                    "ok": True,
+                    "generation_tokens_per_second": 42.0,
+                    "prompt_tokens_per_second": 900.0,
+                    "failure": "none",
+                    "agent_bench_score": 0.82,
+                    "benchmark_suite_ok": True,
+                    "benchmark_suite_general_score": 0.78,
+                    "benchmark_suite_agentic_score": 0.86,
+                    "serving_ttft_ms": 420.0,
+                    "serving_tokens_per_second": 38.0,
+                },
+                "score": 0.82,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["results", "--runs-root", str(tmp_path / "runs")])
+
+    assert result.exit_code == 0, result.output
+    assert result.output.index("Benchmark scores:") < result.output.index("Verdict: PROMOTE")
+    assert "Score contract: agent_bench_score" in result.output
+    assert "Agent bench score: 0.820000" in result.output
+    assert "General score: 0.780000" in result.output
+    assert "Agentic score: 0.860000" in result.output
+    assert "Generation speed: 42.00 tok/s" in result.output
+    assert "Serving speed: 38.00 tok/s" in result.output
+    assert "Settings candidates:" in result.output
+    assert "#1 standard | PROVEN | recommended | ctx=131072" in result.output
+
+
+def test_results_json_out_includes_verdict_and_audit_for_unproven_candidate(tmp_path):
+    run = tmp_path / "runs" / "20260526-speed-only"
+    run.mkdir(parents=True)
+    (run / "best-settings.json").write_text(
+        json.dumps(
+            {
+                "model": "G:/AI/models/Winner.gguf",
+                "settings": {"context_size": 262144, "parallel": 1, "gpu_layers": 99},
+                "result": {
+                    "generation_tokens_per_second": 42.0,
+                    "prompt_tokens_per_second": 900.0,
+                    "failure": "unknown",
+                },
+                "score": 51.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        ["results", "--runs-root", str(tmp_path / "runs"), "--json-out"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["result_label"] == "top_candidate"
+    assert payload["top_candidate"]["model_name"] == "Winner.gguf"
+    assert payload["verdict"]["action"] == "RETEST"
+    assert payload["verdict"]["prediction"]["recommendation"] == "needs_agent_benchmark"
+    assert payload["report_audit"]["status"] == "warning"
+    assert payload["report_audit"]["warnings"][0]["code"] == "missing_agent_quality"
+    assert payload["decision_packet"]["candidate_assessment"]["readiness"] == "not_recommendable"
+    assert payload["decision_packet"]["operator_verdict"]["status"] == "NOT_USABLE_YET"
+    assert payload["decision_packet"]["score_evidence"]["scored_candidate_count"] == 0
+    assert payload["decision_packet"]["performance_prediction"]["status"] == "LAB_ONLY_SPEED_PROOF"
+    assert (
+        payload["decision_packet"]["performance_prediction"]["deployment_expectation"]
+        == "do_not_deploy"
+    )
+    assert payload["decision_packet"]["candidate_rankings"][0]["model"] == "Winner.gguf"
+    assert payload["decision_packet"]["settings_candidates"] == []
+    assert payload["decision_packet"]["repeatability"]["confidence"] == "single_run"
+    assert payload["decision_packet"]["repeatability"]["run_count"] == 1
+    assert payload["decision_packet"]["context_gate"]["action"] == "WAITING_FOR_DEPLOYMENT"
+    assert payload["decision_packet"]["resource_gate"]["action"] == "WAITING_FOR_DEPLOYMENT"
+    assert payload["decision_packet"]["stability_gate"]["action"] == "WAITING_FOR_PROMOTED_STACK"
+    assert payload["decision_packet"]["proven_components"] == []
+    assert payload["decision_packet"]["proof_runbook"][0]["id"] == "model_plan"
+    assert payload["decision_packet"]["proof_runbook"][0]["proves"] == "benchmark-suite.plan.json"
+    assert payload["decision_packet"]["proof_commands"][0]["id"] == "model_plan"
+    assert payload["artifacts"]["hard_recommendations"].endswith("hard-recommendations.md")
+    assert (tmp_path / "runs" / "hard-recommendations.md").exists()
+
+
+def test_results_json_out_preserves_required_context_in_decision_packet(tmp_path):
+    runs_root = tmp_path / "runs"
+    runs_root.mkdir()
+    (runs_root / "flag-recommendations.json").write_text(
+        json.dumps(
+            {
+                "model": "G:/AI/models/Winner.gguf",
+                "model_name": "Winner.gguf",
+                "lane_type": "chat_agent",
+                "profiles": [
+                    {"id": "standard", "label": "Standard", "context_size": 131072},
+                    {"id": "long_agent", "label": "Long agent", "context_size": 200000},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    run = runs_root / "standard-proof"
+    run.mkdir()
+    (run / "best-settings.json").write_text(
+        json.dumps(
+            {
+                "model": "G:/AI/models/Winner.gguf",
+                "settings": {"context_size": 131072, "parallel": 1, "gpu_layers": 99},
+                "result": {
+                    "ok": True,
+                    "generation_tokens_per_second": 42.0,
+                    "prompt_tokens_per_second": 900.0,
+                    "failure": "none",
+                    "agent_bench_score": 0.82,
+                    "benchmark_suite_ok": True,
+                    "benchmark_suite_general_score": 0.82,
+                    "benchmark_suite_agentic_score": 0.82,
+                    "serving_ttft_ms": 420.0,
+                    "serving_tokens_per_second": 38.0,
+                },
+                "score": 0.82,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "results",
+            "--runs-root",
+            str(runs_root),
+            "--required-context",
+            "200000",
+            "--json-out",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    decision = payload["decision_packet"]
+    assert decision["context_gate"]["action"] == "RETEST_CONTEXT"
+    assert decision["context_gate"]["required_context"] == 200000
+    assert decision["context_gate"]["profile_id"] == "long_agent"
+    candidates = {item["profile_id"]: item for item in decision["settings_candidates"]}
+    assert candidates["standard"]["decision"] == "baseline_below_required_context"
+    assert candidates["long_agent"]["decision"] == "next_to_test"
+
+
+def test_results_json_out_uses_neutral_model_key_for_promoted_result(tmp_path):
+    run = tmp_path / "runs" / "20260526-promoted"
+    run.mkdir(parents=True)
+    (run / "best-settings.json").write_text(
+        json.dumps(
+            {
+                "model": "G:/AI/models/Winner.gguf",
+                "settings": {"context_size": 131072, "parallel": 1, "gpu_layers": 99},
+                "result": {
+                    "ok": True,
+                    "generation_tokens_per_second": 42.0,
+                    "prompt_tokens_per_second": 900.0,
+                    "failure": "none",
+                    "agent_bench_score": 0.82,
+                    "benchmark_suite_ok": True,
+                    "benchmark_suite_general_score": 0.8,
+                    "benchmark_suite_agentic_score": 0.84,
+                    "serving_ttft_ms": 420.0,
+                    "serving_tokens_per_second": 38.0,
+                },
+                "score": 0.82,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        ["results", "--runs-root", str(tmp_path / "runs"), "--json-out"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["result_label"] == "recommended_model"
+    assert payload["model"]["model_name"] == "Winner.gguf"
+    assert payload["top_candidate"]["model_name"] == "Winner.gguf"
+    assert payload["verdict"]["action"] == "PROMOTE"
+
+
+def test_export_profile_refuses_unproven_deployment_profile(tmp_path):
+    run = tmp_path / "runs" / "20260526-speed-only"
+    run.mkdir(parents=True)
+    (run / "best-settings.json").write_text(
+        json.dumps(
+            {
+                "model": "G:/AI/models/Winner.gguf",
+                "settings": {"context_size": 262144, "parallel": 1, "gpu_layers": 99},
+                "result": {
+                    "generation_tokens_per_second": 42.0,
+                    "prompt_tokens_per_second": 900.0,
+                    "failure": "unknown",
+                },
+                "score": 51.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "export-profile",
+            "--runs-root",
+            str(tmp_path / "runs"),
+            "--output-dir",
+            str(tmp_path / "champions"),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Deployment readiness:" in result.output
+    assert "Refusing to export unproven champion" in result.output
+    assert not (tmp_path / "champions" / "champion_hermes_pilot.ps1").exists()
+
+
+def test_export_profile_allow_unproven_keeps_manual_escape_hatch(tmp_path):
+    run = tmp_path / "runs" / "20260526-speed-only"
+    run.mkdir(parents=True)
+    (run / "best-settings.json").write_text(
+        json.dumps(
+            {
+                "model": "G:/AI/models/Winner.gguf",
+                "settings": {"context_size": 262144, "parallel": 1, "gpu_layers": 99},
+                "result": {
+                    "generation_tokens_per_second": 42.0,
+                    "prompt_tokens_per_second": 900.0,
+                    "failure": "unknown",
+                },
+                "score": 51.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "export-profile",
+            "--runs-root",
+            str(tmp_path / "runs"),
+            "--output-dir",
+            str(tmp_path / "champions"),
+            "--allow-unproven",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "WARNING: exporting an unproven champion" in result.output
+    assert (tmp_path / "champions" / "champion_hermes_pilot.ps1").exists()
+
+
+def test_results_command_prints_all_audit_warnings(tmp_path):
+    for run_id in ("20260526-speed-a", "20260526-speed-b"):
+        run = tmp_path / "runs" / run_id
+        run.mkdir(parents=True)
+        (run / "best-settings.json").write_text(
+            json.dumps(
+                {
+                    "model": f"G:/AI/models/{run_id}.gguf",
+                    "settings": {"context_size": 262144, "parallel": 1, "gpu_layers": 99},
+                    "result": {
+                        "generation_tokens_per_second": 42.0,
+                        "prompt_tokens_per_second": 900.0,
+                        "failure": "unknown",
+                    },
+                    "score": 51.0,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    result = runner.invoke(app, ["results", "--runs-root", str(tmp_path / "runs")])
+
+    assert result.exit_code == 0
+    assert "Report audit: warning (2 warning(s))" in result.output
+    assert "Audit warning: missing_agent_quality in 20260526-speed-a" in result.output
+    assert "Audit warning: missing_agent_quality in 20260526-speed-b" in result.output
+    assert "report-audit.md" in result.output
 
 
 def test_results_command_can_open_browser_report(tmp_path, monkeypatch):
@@ -1238,7 +2186,18 @@ def test_serve_probe_command_prints_real_serving_metrics(tmp_path, monkeypatch):
     model = tmp_path / "Qwen3-Test-Q4_K_M.gguf"
     model.write_bytes(b"fake")
 
-    result = runner.invoke(app, ["serve-probe", "--model", str(model), "--context-size", "8192"])
+    result = runner.invoke(
+        app,
+        [
+            "serve-probe",
+            "--model",
+            str(model),
+            "--context-size",
+            "8192",
+            "--runs-root",
+            str(tmp_path / "_runs"),
+        ],
+    )
 
     assert result.exit_code == 0
     assert calls[0]["model"] == model
@@ -1386,12 +2345,13 @@ def test_benchmark_suite_command_runs_plan_and_writes_ledgers(tmp_path):
     )
 
     assert result.exit_code == 0
+    assert "Verdict: PROMOTE" in result.output
     assert "agent_bench_score: 0.700000" in result.output
     assert (tmp_path / "runs" / "benchmark-suite.tsv").exists()
     assert (tmp_path / "runs" / "agentic-suite.tsv").exists()
 
 
-def test_benchmark_suite_template_writes_real_harness_plan(tmp_path):
+def test_benchmark_suite_template_defaults_to_local_librarian_plan(tmp_path):
     output = tmp_path / "benchmark-suite.plan.json"
 
     result = runner.invoke(
@@ -1411,6 +2371,49 @@ def test_benchmark_suite_template_writes_real_harness_plan(tmp_path):
 
     assert result.exit_code == 0
     assert "Benchmark-suite plan written" in result.output
+    assert payload["context"] == 131072
+    assert payload["settings"]["context_target"] == "required_context_131072"
+    assert payload["settings"]["score_contract"] == "agent_bench_score"
+    assert payload["settings"]["plan_kind"] == "local_librarian_template"
+    assert payload["settings"]["base_url"] == "http://127.0.0.1:8080"
+    assert "--jinja" in payload["settings"]["extra_server_args"]
+    assert payload["settings"]["answer_max_tokens"] == 8192
+    assert payload["tasks"][0]["id"] == "local_librarian_general"
+    assert payload["tasks"][0]["harness"] == "librarian-suite"
+    assert payload["tasks"][0]["commands"][0][9:11] == ["--base-url", "{base_url}"]
+    assert payload["tasks"][0]["commands"][0][15:17] == ["--settings-json", "{settings_json}"]
+    assert payload["tasks"][0]["commands"][0][:5] == [
+        "uv",
+        "run",
+        "--extra",
+        "dev",
+        "python",
+    ]
+    assert "gguf_limit_bench.librarian_suite" in payload["tasks"][0]["commands"][0]
+    assert "librarian-query" in payload["tasks"][1]["commands"][0]
+
+
+def test_benchmark_suite_template_can_write_external_harness_plan(tmp_path):
+    output = tmp_path / "benchmark-suite.plan.json"
+
+    result = runner.invoke(
+        app,
+        [
+            "benchmark-suite-template",
+            "--template-kind",
+            "external",
+            "--output",
+            str(output),
+            "--model",
+            "qwen-local",
+            "--base-url",
+            "http://127.0.0.1:8080/v1",
+        ],
+    )
+
+    payload = json.loads(output.read_text(encoding="utf-8"))
+
+    assert result.exit_code == 0
     assert payload["tasks"][0]["commands"][0][:5] == [
         "uvx",
         "--from",
@@ -1418,24 +2421,13 @@ def test_benchmark_suite_template_writes_real_harness_plan(tmp_path):
         "lm-eval",
         "run",
     ]
-    assert payload["tasks"][0]["commands"][0][5:7] == ["--model", "local-chat-completions"]
-    assert payload["tasks"][0]["commands"][1][4:8] == [
-        "python",
-        "-m",
-        "gguf_limit_bench.score_extract",
-        "--root",
-    ]
+    assert "base_url={base_url}/chat/completions" in payload["tasks"][0]["commands"][0][8]
     assert payload["tasks"][1]["commands"][0][4:7] == [
         "inspect",
         "eval",
         "benchmarks/inspect_tasks/json_repair.py",
     ]
-    assert payload["tasks"][1]["commands"][1][4:8] == [
-        "python",
-        "-m",
-        "gguf_limit_bench.inspect_score",
-        "--log-dir",
-    ]
+    assert "{base_url}" in payload["tasks"][1]["commands"][0]
 
 
 def test_benchmark_suite_plans_lists_bundled_plans():
@@ -1443,13 +2435,22 @@ def test_benchmark_suite_plans_lists_bundled_plans():
 
     assert result.exit_code == 0
     plans = json.loads(result.output)
-    normalized_plans = [path.replace("\\", "/") for path in plans]
+    normalized_plans = [plan["path"].replace("\\", "/") for plan in plans]
+    assert all("context" in plan for plan in plans)
     assert any(
         path.endswith("benchmarks/plans/local-openai-smoke.plan.json") for path in normalized_plans
     )
     assert any(
         path.endswith("benchmarks/plans/local-bfcl-smoke.plan.json") for path in normalized_plans
     )
+    gemma = next(
+        plan
+        for plan in plans
+        if plan["filename"] == "wiki-librarian-gemma4-26b-a4b-thinking.plan.json"
+    )
+    assert gemma["context"] == 131072
+    assert gemma["context_target"] == "required_context_131072"
+    assert gemma["score_contract"] == "agent_bench_score"
 
 
 def test_flight_plans_command_lists_beginner_contract():
@@ -1460,6 +2461,8 @@ def test_flight_plans_command_lists_beginner_contract():
     librarian = next(plan for plan in plans if plan["id"] == "librarian_benchmark")
     assert librarian["recommended"] is True
     assert librarian["mode_id"] == "librarian_bench"
+    assert librarian["evidence_class"] == "recommendation"
+    assert librarian["score_contract"] == "agent_bench_score"
     assert librarian["budget_minutes"] == 30
     assert librarian["suggested_benchmark_suite_plans"][0]["filename"].endswith(".plan.json")
 
@@ -1471,6 +2474,9 @@ def test_flight_plans_command_human_output_marks_recommended_plan():
     assert "pilotBENCHY Flight Plans" in result.output
     assert "Librarian benchmark" in result.output
     assert "Recommended" in result.output
+    assert "Score" in result.output
+    assert "agent_bench_score" in result.output
+    assert "speed_only" in result.output
     assert "yes" in result.output
 
 

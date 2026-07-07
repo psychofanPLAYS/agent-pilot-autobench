@@ -1,0 +1,99 @@
+{
+  "model": "G:\\AI\\models\\LM_Studio-gguf\\TrevorJS\\gemma-4-26B-A4B-it-uncensored-GGUF\\gemma-4-26B-A4B-it-uncensored-Q4_K_M.gguf",
+  "context": 200000,
+  "settings": {
+    "base_url": "http://127.0.0.1:8080",
+    "score_contract": "agent_bench_score",
+    "context_target": "required_context_200000",
+    "plan_kind": "local_librarian_template",
+    "extra_server_args": [
+      "--jinja"
+    ],
+    "answer_max_tokens": 8192,
+    "requires": "A live llama.cpp OpenAI-compatible endpoint plus the repo-local librarian-suite. No uv/uvx external harness command is required."
+  },
+  "tasks": [
+    {
+      "id": "local_librarian_general",
+      "phase": "general",
+      "harness": "librarian-suite",
+      "commands": [
+        [
+          "uv",
+          "run",
+          "--extra",
+          "dev",
+          "python",
+          "-m",
+          "gguf_limit_bench.librarian_suite",
+          "--model",
+          "{model}",
+          "--base-url",
+          "{base_url}",
+          "--out-dir",
+          "{task_dir}",
+          "--score-out",
+          "{task_dir}/score.json",
+          "--settings-json",
+          "{settings_json}",
+          "--sample-size",
+          "0",
+          "--repeats",
+          "3",
+          "--pack",
+          "librarian-write-entry",
+          "--pack",
+          "librarian-triage",
+          "--pack",
+          "librarian-dedupe"
+        ]
+      ],
+      "score_file": "{task_dir}/score.json",
+      "min_score": 0.01,
+      "timeout_seconds": 3600
+    },
+    {
+      "id": "local_librarian_agentic",
+      "phase": "agentic",
+      "harness": "librarian-suite",
+      "commands": [
+        [
+          "uv",
+          "run",
+          "--extra",
+          "dev",
+          "python",
+          "-m",
+          "gguf_limit_bench.librarian_suite",
+          "--model",
+          "{model}",
+          "--base-url",
+          "{base_url}",
+          "--out-dir",
+          "{task_dir}",
+          "--score-out",
+          "{task_dir}/score.json",
+          "--settings-json",
+          "{settings_json}",
+          "--sample-size",
+          "0",
+          "--repeats",
+          "3",
+          "--pack",
+          "librarian-gate",
+          "--pack",
+          "librarian-rerank",
+          "--pack",
+          "librarian-query",
+          "--pack",
+          "librarian-compress",
+          "--pack",
+          "librarian-contradiction"
+        ]
+      ],
+      "score_file": "{task_dir}/score.json",
+      "min_score": 0.01,
+      "timeout_seconds": 3600
+    }
+  ]
+}

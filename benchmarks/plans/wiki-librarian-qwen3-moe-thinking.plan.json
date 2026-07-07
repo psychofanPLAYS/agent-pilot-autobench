@@ -1,12 +1,13 @@
 {
   "model": "qwen3.6-35b-a3b",
-  "context": 8192,
+  "context": 131072,
   "settings": {
     "base_url": "http://127.0.0.1:8080",
     "score_contract": "agent_bench_score",
     "plan_kind": "wiki_librarian_qwen3_moe_thinking",
     "source_doc": "docs/feature-requests/wiki-librarian-bench/08-model-plan-qwen3-moe.md",
     "comparison_family": "wiki_librarian_current_models",
+    "context_target": "required_context_131072",
     "model_plan": {
       "hf_slug": "Qwen/Qwen3.6-35B-A3B",
       "architecture": "qwen3_5_moe",
@@ -29,7 +30,7 @@
         "MTP optional only for MTP GGUF plus llama.cpp b9180+"
       ]
     },
-    "requires": "A Qwen3.5/Qwen3.6 35B-A3B GGUF served by a local OpenAI-compatible llama.cpp endpoint on http://127.0.0.1:8080 with Froggeric v21.3, --jinja, enable_thinking=true, preserve_thinking=true, --reasoning on, and --reasoning-format deepseek."
+    "requires": "A Qwen3.5/Qwen3.6 35B-A3B GGUF served by a local OpenAI-compatible llama.cpp endpoint on http://127.0.0.1:8080 with Froggeric v21.3, --jinja, enable_thinking=true, preserve_thinking=true, --reasoning on, --reasoning-format deepseek, and at least 131072 context."
   },
   "tasks": [
     {
@@ -94,6 +95,8 @@
           "librarian-gate",
           "--pack",
           "librarian-rerank",
+          "--pack",
+          "librarian-query",
           "--pack",
           "librarian-compress",
           "--pack",

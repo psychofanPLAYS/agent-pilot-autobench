@@ -309,7 +309,9 @@ def test_autoresearch_loop_uses_agent_bench_score_when_suite_plan_is_provided(tm
     assert best["score"] == 0.9
     assert best["result"]["agent_bench_score"] == 0.9
     assert best["result"]["benchmark_suite_ok"] is True
-    assert suite_plan["model"] == "will-be-overridden"
+    # The recorded suite plan reflects the model that actually ran, not the
+    # placeholder from the plan file.
+    assert suite_plan["model"].endswith("Qwen3-Test-Q4_K_M.gguf")
     assert suite_plan["settings"]["gguf_model_path"].endswith("Qwen3-Test-Q4_K_M.gguf")
     assert "agent_bench_score" in attempts_text
     assert "\t0.400000\t0.400000\t0.400000\tpass\t" in attempts_text

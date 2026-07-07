@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 import json
 import math
@@ -11,6 +11,11 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from gguf_limit_bench.autoresearch import AttemptResult, AutoresearchSettings
+from gguf_limit_bench.benchmark_suite import (
+    BenchmarkSuitePlan,
+    BenchmarkSuiteRun,
+    run_benchmark_suite,
+)
 from gguf_limit_bench.hf_recommended_settings import sampling_payload_from_server_args
 from gguf_limit_bench.server_probe import (
     _free_port,
@@ -32,6 +37,7 @@ from gguf_limit_bench.simple_bench import (
     simple_bench_prompt,
 )
 from gguf_limit_bench.telemetry import classify_failure
+from gguf_limit_bench.telemetry import sample_telemetry
 
 
 @dataclass(frozen=True)
@@ -58,6 +64,8 @@ class LlamaServerSimpleBenchAttemptRunner:
         max_tokens: int = 4096,
         host: str = "127.0.0.1",
         port: int | None = None,
+        benchmark_suite_plan: BenchmarkSuitePlan | None = None,
+        runs_root: Path | None = None,
     ) -> None:
         self.llama_server = llama_server
         self.model = model
@@ -67,6 +75,8 @@ class LlamaServerSimpleBenchAttemptRunner:
         self.max_tokens = max_tokens
         self.host = host
         self.port = port
+        self.benchmark_suite_plan = benchmark_suite_plan
+        self.runs_root = runs_root
         self.receipt_path: Path | None = None
         self.questions = load_simple_bench_questions(benchmark_path)
         self.system_prompt = load_simple_bench_system_prompt(system_prompt_path)
@@ -120,12 +130,22 @@ class LlamaServerSimpleBenchAttemptRunner:
         stdout = ""
         try:
             ready_at = _wait_until_ready(base_url, process, timeout_seconds=self.timeout_seconds)
+            _append_receipt_event(
+                self.receipt_path,
+                "llama_server_ready",
+                {"base_url": base_url, "telemetry": sample_telemetry().to_dict()},
+            )
             sampling = sampling_payload_from_server_args(settings.extra_server_args)
             _warmup_server(
                 base_url,
                 self.system_prompt,
                 timeout_seconds=self.timeout_seconds,
                 sampling=sampling,
+            )
+            _append_receipt_event(
+                self.receipt_path,
+                "llama_server_warmup_finished",
+                {"base_url": base_url, "telemetry": sample_telemetry().to_dict()},
             )
             for index, question in enumerate(self.questions, start=1):
                 measurement = measure_simple_bench_completion(
@@ -163,7 +183,7 @@ class LlamaServerSimpleBenchAttemptRunner:
             batch = combine_simple_bench_results(question_results)
             server_ready_ms = (ready_at - started) * 1000.0
             returncode = process.poll()
-            return AttemptResult(
+            result = AttemptResult(
                 ok=batch.ok,
                 generation_tokens_per_second=batch.median_tps,
                 prompt_tokens_per_second=batch.median_prompt_tps,
@@ -186,6 +206,23 @@ class LlamaServerSimpleBenchAttemptRunner:
                 completed_questions=len(question_results),
                 attempted_questions=len(self.questions),
             )
+            _append_receipt_event(
+                self.receipt_path,
+                "simple_bench_finished",
+                {
+                    "base_url": base_url,
+                    "ok": batch.ok,
+                    "telemetry": sample_telemetry().to_dict(),
+                },
+            )
+            if batch.ok and self.benchmark_suite_plan is not None:
+                result = self._with_benchmark_suite(
+                    result=result,
+                    settings=settings,
+                    base_url=base_url,
+                    timeout_seconds=max(0.0, deadline - time.monotonic()),
+                )
+            return result
         except TimeoutError as exc:
             stdout, stderr = _flush_and_read_logs(
                 stdout_log=stdout_log,
@@ -244,6 +281,11 @@ class LlamaServerSimpleBenchAttemptRunner:
                 stderr=f"{stderr}\n{exc}",
             )
         finally:
+            _append_receipt_event(
+                self.receipt_path,
+                "llama_server_stopping",
+                {"base_url": base_url, "telemetry": sample_telemetry().to_dict()},
+            )
             _stop_process(process)
             stdout_log.close()
             stderr_log.close()
@@ -320,6 +362,74 @@ class LlamaServerSimpleBenchAttemptRunner:
             simple_bench_failure=normalized_failure,
             completed_questions=0,
             attempted_questions=len(self.questions),
+        )
+
+    def _with_benchmark_suite(
+        self,
+        *,
+        result: AttemptResult,
+        settings: AutoresearchSettings,
+        base_url: str,
+        timeout_seconds: float,
+    ) -> AttemptResult:
+        assert self.benchmark_suite_plan is not None
+        runs_root = self.runs_root or self.receipt_path or Path("_runs")
+        if timeout_seconds <= 0:
+            return replace(
+                result,
+                ok=False,
+                failure="benchmark_suite_failed",
+                benchmark_suite_ok=False,
+                benchmark_suite_failure="benchmark_suite_budget_exhausted",
+            )
+        suite_settings = {
+            **self.benchmark_suite_plan.settings,
+            **settings.to_dict(),
+            "gguf_model_path": str(self.model),
+            "score_contract": "agent_bench_score",
+            "base_url": base_url,
+        }
+        plan = BenchmarkSuitePlan(
+            model=str(self.model),
+            context=settings.context_size,
+            settings=suite_settings,
+            tasks=self.benchmark_suite_plan.tasks,
+        )
+        _append_receipt_event(
+            self.receipt_path,
+            "benchmark_suite_started_on_owned_server",
+            {"base_url": base_url, "telemetry": sample_telemetry().to_dict()},
+        )
+        suite_run = run_benchmark_suite(plan, runs_root, timeout_seconds=timeout_seconds)
+        _append_receipt_event(
+            self.receipt_path,
+            "benchmark_suite_finished_on_owned_server",
+            {
+                "base_url": base_url,
+                "ok": suite_run.ok,
+                "telemetry": sample_telemetry().to_dict(),
+            },
+        )
+        if not suite_run.ok:
+            return replace(
+                result,
+                ok=False,
+                failure="benchmark_suite_failed",
+                agent_bench_score=suite_run.agent_bench_score,
+                benchmark_suite_general_score=suite_run.general_score,
+                benchmark_suite_agentic_score=suite_run.agentic_score,
+                benchmark_suite_ok=False,
+                benchmark_suite_receipt=suite_run.receipt_path,
+                benchmark_suite_failure=_benchmark_suite_failure(suite_run),
+            )
+        return replace(
+            result,
+            agent_bench_score=suite_run.agent_bench_score,
+            benchmark_suite_general_score=suite_run.general_score,
+            benchmark_suite_agentic_score=suite_run.agentic_score,
+            benchmark_suite_ok=True,
+            benchmark_suite_receipt=suite_run.receipt_path,
+            benchmark_suite_failure=None,
         )
 
 
@@ -463,6 +573,15 @@ def _event_token_count(event: dict) -> int:
     return 0
 
 
+def _benchmark_suite_failure(suite_run: BenchmarkSuiteRun) -> str:
+    failures = [
+        f"{item.id}:{item.failure_class}"
+        for item in suite_run.results
+        if not item.ok or item.failure_class != "none"
+    ]
+    return ";".join(failures) if failures else "benchmark_suite_failed"
+
+
 def _remaining_timeout_seconds(deadline: float) -> int:
     remaining = deadline - time.monotonic()
     if remaining <= 0:
@@ -475,6 +594,18 @@ def _append_jsonl(path: Path, payload: dict) -> None:
         handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
 
 
+def _append_receipt_event(receipt_path: Path | None, event_type: str, data: dict) -> None:
+    if receipt_path is None:
+        return
+    receipt_path.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "time": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "type": event_type,
+        "data": data,
+    }
+    _append_jsonl(receipt_path / "events.jsonl", payload)
+
+
 def _write_short_logs(
     *,
     attempt_dir: Path,
@@ -485,8 +616,8 @@ def _write_short_logs(
     stderr_lines = _read_log_lines(attempt_dir / "server.stderr.log")
     combined = stdout_lines + stderr_lines
     warning_pattern = re.compile(
-        r"\b(?:warn(?:ing)?|error|failed|failure|invalid|unsupported|unknown argument|"
-        r"out of memory|oom|exception|abort)\b",
+        r"(?:\b(?:warn(?:ing)?|error|failed|failure|invalid|unsupported|unknown argument|"
+        r"out of memory|oom|exception|abort)\b|^\S+\s+[WE]\s+)",
         flags=re.IGNORECASE,
     )
     warning_lines = [line for line in combined if warning_pattern.search(line)][-80:]

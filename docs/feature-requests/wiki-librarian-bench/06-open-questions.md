@@ -46,8 +46,8 @@ options and trade-offs, but leave the choice to the owner.
 
 - Q1 (inject gate): built as a model-driven inject/skip job (`librarian-gate`),
   with distractor and stale cases. Confirm this matches the real pipeline.
-- Q2 (query understanding / HyDE): still open — not built. `librarian-rerank`
-  covers reranking only.
+- Q2 (query understanding / HyDE): built as `librarian-query`; `librarian-rerank`
+  remains the separate retrieval reranking job.
 - write_entry scoped to EXACT type + slug answers (not full-JSON emission) due to
   the EXACT scorer's normalization; full-frontmatter emission deferred to a job
   with a dedicated schema validator.

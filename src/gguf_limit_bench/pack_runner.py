@@ -64,6 +64,7 @@ def run_pack_questions(
     timeout_seconds: int = 600,
     repeats: int = 1,
     sampling: dict[str, object] | None = None,
+    deadline_monotonic: float | None = None,
 ) -> SimpleBenchBatchResult:
     """Run *questions* from *pack* and return a scored batch result.
 
@@ -91,12 +92,18 @@ def run_pack_questions(
         Chat sampling options copied into the llama.cpp request body.  This is
         intentionally explicit because reasoning models such as Qwen should not
         be benchmarked with hardcoded greedy decoding.
+    deadline_monotonic:
+        Optional ``time.monotonic()`` deadline. Questions not started before
+        the deadline are skipped, so a batch is a partial-but-honest result
+        instead of an unbounded one. ``None`` means no deadline.
     """
     results: list[SimpleBenchQuestionResult] = []
     total = len(questions)
     effective_repeats = max(1, repeats)
 
     for index, question in enumerate(questions, start=1):
+        if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
+            break
         emit(
             "question_started",
             {
@@ -393,6 +400,10 @@ def _sampling_payload(sampling: dict[str, object] | None) -> dict[str, object]:
         "min_p",
         "presence_penalty",
         "repeat_penalty",
+        "dry_multiplier",
+        "dry_base",
+        "dry_allowed_length",
+        "dry_penalty_last_n",
     }
     payload = {
         key: value for key, value in sampling.items() if key in allowed and value is not None

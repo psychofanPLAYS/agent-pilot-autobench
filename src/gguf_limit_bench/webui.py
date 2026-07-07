@@ -33,11 +33,17 @@ from gguf_limit_bench.gpu_profiles import (
     recommended_always_on,
     recommended_parallel,
 )
+from gguf_limit_bench.hard_recommendations import build_hard_recommendations
 from gguf_limit_bench.hf_recommended_settings import recommended_sampler_presets
 from gguf_limit_bench.librarian.registry import LIBRARIAN_PACK_IDS
 from gguf_limit_bench.modes import RUN_MODES
 from gguf_limit_bench.programs import MIN_SERIOUS_CONTEXT_SIZE
-from gguf_limit_bench.reports import write_leaderboard
+from gguf_limit_bench.reports import (
+    build_report_audit,
+    build_verdict,
+    score_summary_for_entry,
+    write_leaderboard,
+)
 from gguf_limit_bench import run_dir as run_dir_io
 from gguf_limit_bench.server_probe import kill_process_tree, process_group_kwargs
 from gguf_limit_bench.telemetry import sample_telemetry
@@ -54,6 +60,14 @@ GLOBAL_REPORTS = (
     ("Leaderboard", "leaderboard.md"),
     ("Model comparison", "model-comparison.md"),
     ("Model comparison JSON", "model-comparison.json"),
+    ("Hard recommendations", "hard-recommendations.md"),
+    ("Hard recommendations JSON", "hard-recommendations.json"),
+    ("QE format leaderboard", "qe-format-leaderboard.md"),
+    ("QE format leaderboard JSON", "qe-format-leaderboard.json"),
+    ("Flag recommendations", "flag-recommendations.md"),
+    ("Flag recommendations JSON", "flag-recommendations.json"),
+    ("Deployment readiness", "deployment-readiness.md"),
+    ("Deployment readiness JSON", "deployment-readiness.json"),
 )
 RUN_ARTIFACTS = (
     ("Browser report", "report.html"),
@@ -69,6 +83,8 @@ RUN_ARTIFACTS = (
     ("Suite events", "events.jsonl"),
     ("Librarian summary", "librarian-suite-summary.json"),
     ("Librarian report", "librarian-suite.md"),
+    ("QE format summary", "qe-format-summary.json"),
+    ("QE format report", "qe-format-summary.md"),
     ("Preflight", "preflight.json"),
     ("Results", "results.md"),
     ("Results JSON", "results.json"),
@@ -90,8 +106,8 @@ class WebRunOptions:
     show_thinking: bool = False
     stream_prompts: bool = True
     benchmark_suite_plan: Path | None = None
-    repeats: int = 1
-    sample_size: int = 5
+    repeats: int = 3
+    sample_size: int = 15
     sampler_policy: str = "hf_recommended"
 
 
@@ -126,11 +142,17 @@ class WebUiState:
         llama_bench: Path | None = None,
         llama_cli: Path | None = None,
         llama_perplexity: Path | None = None,
+        target_model: str | None = None,
+        target_model_path: str | None = None,
+        required_context: int | None = None,
     ) -> None:
         self.root = root
         self.runs_root = runs_root
         self.spawn_engine = spawn_engine or _default_spawn_engine
         self.project_root = project_root or Path.cwd()
+        self.target_model = target_model
+        self.target_model_path = target_model_path
+        self.required_context = required_context
         # Resolved llama.cpp paths the engine should prefer over its own config.
         # Carried through run-spec.json so the detached engine can find the real
         # binaries (a cockpit launch knows them; the engine's config may not).
@@ -150,16 +172,42 @@ class WebUiState:
     def models(self) -> list[ModelInfo]:
         return discover_models([self.root])
 
-    def state_payload(self) -> dict:
+    def state_payload(
+        self,
+        *,
+        target_model: str | None = None,
+        target_model_path: str | None = None,
+        required_context: int | None = None,
+    ) -> dict:
+        target_model = target_model or self.target_model
+        target_model_path = target_model_path or self.target_model_path
+        if required_context is None:
+            required_context = self.required_context
         models = self.models()
         telemetry = sample_telemetry().to_dict()
         leaderboard = write_leaderboard(self.runs_root)
+        hard_recommendations = build_hard_recommendations(
+            self.runs_root,
+            target_model=target_model,
+            target_model_path=target_model_path,
+            required_context=required_context,
+        )
+        target_scope = hard_recommendations.get("target_scope") or {}
+        no_target_evidence = (
+            bool(target_model) and target_scope.get("status") == "NO_TARGET_EVIDENCE"
+        )
+        verdict = build_verdict(leaderboard)
+        report_audit = build_report_audit(leaderboard)
         champion = None
-        if leaderboard.entries:
+        if leaderboard.entries and not no_target_evidence:
             champion = {
+                **score_summary_for_entry(leaderboard.champion),
                 "model": leaderboard.champion.model_name,
                 "score": leaderboard.champion.score,
             }
+        verdict_payload = (
+            hard_recommendations.get("model_gate") if no_target_evidence else asdict(verdict)
+        )
         self.reattach()
         with self._lock:
             run_payload = asdict(self.run)
@@ -186,6 +234,22 @@ class WebUiState:
             "telemetry": telemetry,
             "active_run": active_run_status(self.runs_root),
             "champion": champion,
+            "verdict": verdict_payload,
+            "report_audit": asdict(report_audit),
+            "target_scope": target_scope,
+            "operator_verdict": hard_recommendations.get("operator_verdict"),
+            "performance_prediction": hard_recommendations.get("performance_prediction"),
+            "score_evidence": hard_recommendations.get("score_evidence"),
+            "candidate_assessment": hard_recommendations.get("candidate_assessment"),
+            "candidate_rankings": hard_recommendations.get("candidate_rankings", []),
+            "settings_candidates": hard_recommendations.get("settings_candidates", []),
+            "repeatability": hard_recommendations.get("repeatability"),
+            "context_gate": hard_recommendations.get("context_gate"),
+            "resource_gate": hard_recommendations.get("resource_gate"),
+            "stability_gate": hard_recommendations.get("stability_gate"),
+            "proven_components": hard_recommendations.get("proven_components", []),
+            "proof_runbook": hard_recommendations.get("proof_runbook", []),
+            "proof_commands": hard_recommendations.get("proof_commands", []),
             "global_reports": global_report_payloads(self.runs_root),
             "receipts": recent_receipts(self.runs_root),
             "run": run_payload,
@@ -746,6 +810,9 @@ def serve_webui(
     llama_bench: Path | None = None,
     llama_cli: Path | None = None,
     llama_perplexity: Path | None = None,
+    target_model: str | None = None,
+    target_model_path: str | None = None,
+    required_context: int | None = None,
 ) -> str:
     resolved_port = port if port != 0 else _free_local_port(host)
     state = WebUiState(
@@ -755,6 +822,9 @@ def serve_webui(
         llama_bench=llama_bench,
         llama_cli=llama_cli,
         llama_perplexity=llama_perplexity,
+        target_model=target_model,
+        target_model_path=target_model_path,
+        required_context=required_context,
     )
     app = create_web_app(state)
     config = uvicorn.Config(app, host=host, port=resolved_port, log_level="warning")
@@ -871,6 +941,8 @@ def benchmark_suite_plan_payloads(project_root: Path) -> list[dict]:
         plan_kind = ""
         requires = ""
         score_contract = ""
+        context = 0
+        context_target = ""
         phases: list[str] = []
         harnesses: list[str] = []
         task_count = 0
@@ -885,6 +957,8 @@ def benchmark_suite_plan_payloads(project_root: Path) -> list[dict]:
             plan_kind = str(settings.get("plan_kind") or data.get("plan_kind") or "")
             requires = str(settings.get("requires") or data.get("requires") or "")
             score_contract = str(settings.get("score_contract") or "")
+            context = _int_option_value(data.get("context") or settings.get("context_size"))
+            context_target = str(settings.get("context_target") or "")
             tasks = data.get("tasks") if isinstance(data.get("tasks"), list) else []
             task_count = len(tasks)
             phases = sorted(
@@ -902,6 +976,8 @@ def benchmark_suite_plan_payloads(project_root: Path) -> list[dict]:
                 "description": description,
                 "plan_kind": plan_kind,
                 "requires": requires,
+                "context": context,
+                "context_target": context_target,
                 "score_contract": score_contract,
                 "task_count": task_count,
                 "phases": phases,
@@ -910,6 +986,13 @@ def benchmark_suite_plan_payloads(project_root: Path) -> list[dict]:
             }
         )
     return payloads
+
+
+def _int_option_value(value: object, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _plan_warning(data: dict, description: str, requires: str = "") -> str:
