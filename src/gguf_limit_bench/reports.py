@@ -194,8 +194,9 @@ def _load_agent_quality(receipt_dir: Path) -> tuple[float | None, dict[str, floa
     """Aggregate librarian/agent per-pack accuracy from a receipt directory.
 
     Reads ``results.json`` (champion_eval output) if present, otherwise falls back
-    to ``librarian-suite-summary.json``. Returns the mean accuracy over packs whose
-    ``status == "scored"``, a ``{pack_id: accuracy}`` map, and the scored-pack count.
+    to ``librarian-suite-summary.json``. The headline score uses the same contract
+    as ``librarian_suite``: scored-attempt accuracy multiplied by completion rate.
+    Per-pack scores remain pack accuracies for the matrix view.
     """
     payload: dict | None = None
     for name in ("results.json", "librarian-suite-summary.json"):
@@ -214,6 +215,9 @@ def _load_agent_quality(receipt_dir: Path) -> tuple[float | None, dict[str, floa
         return None, {}, 0
 
     pack_scores: dict[str, float] = {}
+    asked_total = 0
+    correct_total = 0
+    incomplete_total = 0
     for pack in payload.get("packs", []) or []:
         if not isinstance(pack, dict):
             continue
@@ -225,12 +229,24 @@ def _load_agent_quality(receipt_dir: Path) -> tuple[float | None, dict[str, floa
             continue
         try:
             pack_scores[str(pack_id)] = float(accuracy)
+            asked = int(pack.get("asked") or 0)
+            asked_total += asked
+            correct_total += int(pack.get("correct") or 0)
+            incomplete_total += int(pack.get("incomplete") or 0)
         except (TypeError, ValueError):
             continue
 
     if not pack_scores:
         return None, {}, 0
-    librarian_score = sum(pack_scores.values()) / len(pack_scores)
+    top_level_score = _float_or_none(payload.get("librarian_bench_score"))
+    if top_level_score is not None:
+        librarian_score = top_level_score
+    elif asked_total > 0:
+        accuracy = correct_total / asked_total
+        completion_rate = (asked_total - incomplete_total) / asked_total
+        librarian_score = accuracy * completion_rate
+    else:
+        librarian_score = sum(pack_scores.values()) / len(pack_scores)
     return librarian_score, pack_scores, len(pack_scores)
 
 
@@ -381,7 +397,7 @@ def write_leaderboard(runs_root: Path) -> Leaderboard:
     leaderboard = build_leaderboard(runs_root)
     if not leaderboard.entries:
         (runs_root / "leaderboard.md").write_text(
-            "# Agent Pilot Autobench Leaderboard\n\nNo runs found.\n",
+            "# pilotBENCHY Leaderboard\n\nNo runs found.\n",
             encoding="utf-8",
         )
         _write_empty_model_comparison(runs_root)
@@ -409,7 +425,7 @@ def write_leaderboard(runs_root: Path) -> Leaderboard:
 def _leaderboard_markdown(leaderboard: Leaderboard) -> str:
     champion = leaderboard.champion
     lines = [
-        "# Agent Pilot Autobench Leaderboard",
+        "# pilotBENCHY Leaderboard",
         "",
         "## Plain-English Takeaway",
         "",
@@ -457,7 +473,7 @@ def _leaderboard_markdown(leaderboard: Leaderboard) -> str:
 
 def _write_empty_model_comparison(runs_root: Path) -> None:
     (runs_root / "model-comparison.md").write_text(
-        "# Agent Pilot Model Comparison\n\nNo model runs found yet.\n",
+        "# pilotBENCHY Model Comparison\n\nNo model runs found yet.\n",
         encoding="utf-8",
     )
     (runs_root / "model-comparison.json").write_text("[]\n", encoding="utf-8")
@@ -495,9 +511,9 @@ def _short_pack_label(pack_id: str) -> str:
 def _model_comparison_markdown(comparison: ModelComparison) -> str:
     pack_ids = _ordered_pack_ids(comparison)
     lines = [
-        "# Agent Pilot Model Comparison",
+        "# pilotBENCHY Model Comparison",
         "",
-        "This is the model-level view. It groups repeated runs by model so Agent Pilot can "
+        "This is the model-level view. It groups repeated runs by model so pilotBENCHY can "
         "compare best-known settings per model instead of treating every receipt folder as a "
         "separate universe. Models are ranked by agent-quality score (librarian accuracy) "
         "first, then by speed evidence.",
@@ -533,7 +549,7 @@ def _empty_html() -> str:
             '<html lang="en">',
             "<head>",
             '  <meta charset="utf-8">',
-            "  <title>Agent Pilot Autobench Results</title>",
+            "  <title>pilotBENCHY Results</title>",
             "  <style>",
             _html_css(),
             "  </style>",
@@ -542,7 +558,7 @@ def _empty_html() -> str:
             '  <main class="shell">',
             '    <section class="hero">',
             '      <p class="eyebrow">No runs yet</p>',
-            "      <h1>Agent Pilot Autobench Results</h1>",
+            "      <h1>pilotBENCHY Results</h1>",
             "      <p>Run a benchmark first, then refresh this report.</p>",
             "    </section>",
             "  </main>",
@@ -809,7 +825,7 @@ def _leaderboard_html(leaderboard: Leaderboard) -> str:
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Agent Pilot Autobench Results</title>
+  <title>pilotBENCHY Results</title>
   <style>
 {_html_css()}
   </style>
@@ -819,7 +835,7 @@ def _leaderboard_html(leaderboard: Leaderboard) -> str:
   <main class="shell">
     <section class="hero">
       <p class="eyebrow">{escape(hero_eyebrow)}</p>
-      <h1>Agent Pilot Autobench Results</h1>
+      <h1>pilotBENCHY Results</h1>
       <p class="lede">{escape(hero_lede)}</p>
       <p class="verdict">{escape(verdict)}</p>
     </section>

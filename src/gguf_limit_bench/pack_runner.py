@@ -63,6 +63,7 @@ def run_pack_questions(
     base_url: str,
     timeout_seconds: int = 600,
     repeats: int = 1,
+    sampling: dict[str, object] | None = None,
 ) -> SimpleBenchBatchResult:
     """Run *questions* from *pack* and return a scored batch result.
 
@@ -83,6 +84,13 @@ def run_pack_questions(
         ``"http://127.0.0.1:8080"``.
     timeout_seconds:
         Per-request HTTP timeout.
+    repeats:
+        Number of attempts per selected question. Values above one are
+        aggregated by strict majority vote.
+    sampling:
+        Chat sampling options copied into the llama.cpp request body.  This is
+        intentionally explicit because reasoning models such as Qwen should not
+        be benchmarked with hardcoded greedy decoding.
     """
     results: list[SimpleBenchQuestionResult] = []
     total = len(questions)
@@ -107,6 +115,7 @@ def run_pack_questions(
                 base_url=base_url,
                 timeout_seconds=timeout_seconds,
                 q_id=question.question_id,
+                sampling=sampling,
             )
             for _ in range(effective_repeats)
         ]
@@ -183,6 +192,7 @@ def _run_one_question(
     base_url: str,
     timeout_seconds: int,
     q_id: str | None = None,
+    sampling: dict[str, object] | None,
 ) -> SimpleBenchQuestionResult:
     """Run a single question with at most one forced-final follow-up."""
     system_prompt = pack.system_prompt
@@ -196,6 +206,7 @@ def _run_one_question(
         max_tokens=answer_max_tokens,
         timeout_seconds=timeout_seconds,
         q_id=q_id,
+        sampling=sampling,
     )
 
     extracted = extract_answer(primary_text, answer_type)
@@ -209,6 +220,8 @@ def _run_one_question(
             user_content=followup_user,
             max_tokens=_FORCED_FINAL_MAX_TOKENS,
             timeout_seconds=timeout_seconds,
+            q_id=q_id,
+            sampling=sampling,
         )
         extracted = extract_answer(followup_text, answer_type)
 
@@ -268,6 +281,7 @@ def _chat(
     max_tokens: int,
     timeout_seconds: int,
     q_id: str | None = None,
+    sampling: dict[str, object] | None = None,
 ) -> tuple[str, float | None, float, float, int]:
     """Send a single chat completion request and return
     ``(response_text, ttft_ms, tps, prompt_tps, generated_tokens)``.
@@ -280,8 +294,8 @@ def _chat(
             {"role": "user", "content": user_content},
         ],
         "stream": True,
-        "temperature": 0,
     }
+    body.update(_sampling_payload(sampling))
     if max_tokens > 0:
         body["max_tokens"] = max_tokens
     else:
@@ -367,6 +381,25 @@ def _chat(
     tps = server_tps or (measured / gen_seconds)
     ttft_ms = (first_token_at - started) * 1000.0
     return response_text, ttft_ms, tps, server_prompt_tps or 0.0, measured
+
+
+def _sampling_payload(sampling: dict[str, object] | None) -> dict[str, object]:
+    if sampling is None:
+        return {"temperature": 1.0}
+    allowed = {
+        "temperature",
+        "top_p",
+        "top_k",
+        "min_p",
+        "presence_penalty",
+        "repeat_penalty",
+    }
+    payload = {
+        key: value for key, value in sampling.items() if key in allowed and value is not None
+    }
+    if "temperature" not in payload:
+        payload["temperature"] = 1.0
+    return payload
 
 
 def _event_token_count(event: dict) -> int:

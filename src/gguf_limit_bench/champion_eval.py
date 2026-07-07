@@ -61,7 +61,7 @@ def evaluate_champion_packs(
     state_db_path: Path | None = None,
     gpu_name: str = "",
     timeout_seconds: int = 600,
-    repeats: int = 1,
+    repeats: int = 3,
 ) -> None:
     """Evaluate *pack_ids* on the best champion settings and write results.json.
 
@@ -92,7 +92,13 @@ def evaluate_champion_packs(
     timeout_seconds:
         Server startup timeout forwarded to
         :func:`~gguf_limit_bench.server_session.llama_server_session`.
+    repeats:
+        How many times to run the selected question slice. The selection cursor
+        advances once per pack, so repeats measure variance without consuming
+        additional question-bank positions.
     """
+    if repeats < 1:
+        raise ValueError("repeats must be at least 1.")
     model_key = model.name
 
     # Open (or create) the state-DB connection.
@@ -134,6 +140,7 @@ def evaluate_champion_packs(
                         sample_size=sample_size,
                         gpu_name=gpu_name,
                         pack_dicts=pack_dicts,
+                        repeats=repeats,
                     )
             for pack_id in pack_ids:
                 pack_dict = _eval_one_pack(
@@ -158,6 +165,7 @@ def evaluate_champion_packs(
         sample_size=sample_size,
         gpu_name=gpu_name,
         pack_dicts=pack_dicts,
+        repeats=repeats,
     )
 
 
@@ -170,6 +178,7 @@ def _write_results(
     sample_size: int,
     gpu_name: str,
     pack_dicts: list[dict],
+    repeats: int,
 ) -> None:
     recommended_flags = list(recommended_always_on(gpu_name))
     payload = build_results_payload(
@@ -180,6 +189,10 @@ def _write_results(
         gpu=gpu_name,
         recommended_flags=recommended_flags,
         packs=pack_dicts,
+    )
+    payload["repeats"] = repeats
+    payload["score_contract"] = (
+        "agent_bench_score = accuracy * completion_rate over scored attempts"
     )
     write_results(run_dir, payload)
 
@@ -198,7 +211,7 @@ def _eval_one_pack(
     sample_size: int,
     selection: str,
     seed: int | None,
-    repeats: int = 1,
+    repeats: int,
 ) -> dict:
     """Run a single pack and return a pack dict suitable for build_results_payload."""
     try:
@@ -265,15 +278,27 @@ def _eval_one_pack(
     return {
         "pack_id": pack_id,
         "tier": pack.tier,
+        "repeats": repeats,
         "asked": len(chosen),
         "correct": batch.correct,
         "wrong": wrong,
         "incomplete": incomplete,
+        "completion_rate": batch.completion_rate,
         "accuracy": batch.accuracy,
         "median_tps": batch.median_tps,
         "median_ttft_ms": batch.median_ttft_ms,
         "questions": question_dicts,
     }
+
+
+def _median(values: list[float]) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[middle]
+    return (ordered[middle - 1] + ordered[middle]) / 2
 
 
 def _empty_pack_dict(pack_id: str) -> dict:

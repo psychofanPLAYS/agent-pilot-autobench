@@ -23,10 +23,10 @@ apb --start
 agent-autobench --start
 ```
 
-Plain `apb` opens the local browser cockpit. The browser is the primary workflow
-for model selection, benchmark-suite plan selection, live WebSocket run progress,
-telemetry, and receipt links. `apb tui` remains available as a fallback terminal
-cockpit.
+Plain `apb` opens the local pilotBENCHY web UI at `http://127.0.0.1:36939/`. The
+browser is the primary workflow for model selection, benchmark-suite plan
+selection, live WebSocket run progress, telemetry, and receipt links. `apb tui`
+remains available as a fallback terminal TUI.
 
 ## Checks
 
@@ -54,10 +54,13 @@ agent-autobench models recommendations "Qwen3-4B-Q4_K_M.gguf"
 agent-autobench models export "_db\github-sync"
 ```
 
-`scan` is local-only. `enrich` resolves Hugging Face repo IDs from LM Studio-style
-folders, pins model-card evidence by HF revision, caches README/config files on
+`scan` is local-only. `enrich` learns candidate Hugging Face repos from folder
+names, GGUF filenames, LM Studio-style owner/repo paths, and readable GGUF
+metadata, then searches/ranks HF matches before fetching the selected model
+card. It pins model-card evidence by HF revision, caches README/config files on
 disk, and extracts useful llama.cpp settings when the model card or Hub config
-contains them. The GitHub-sync seed is `_db\catalog\recommendations.json`.
+contains them. The GitHub-sync seed is `_db\catalog\recommendations.json`; the
+matching audit trail is `_db\catalog\hf-match-decisions.json`.
 
 Default paths are repo-relative and can be overridden in `_CONFIG.toml`:
 
@@ -242,7 +245,7 @@ List bundled plans:
 agent-autobench benchmark-suite-plans
 ```
 
-The browser cockpit also lists bundled benchmark-suite plans so a normal run can
+The pilotBENCHY web UI also lists bundled benchmark-suite plans so a normal run can
 start from the same source-controlled plan files without hand-typing the path.
 
 Run a smoke plan:

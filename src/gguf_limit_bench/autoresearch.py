@@ -299,7 +299,7 @@ class AutoresearchLoop:
         llama_server: Path | None = None,
         champion_pack_ids: tuple[str, ...] | None = None,
         champion_sample_size: int = 5,
-        champion_repeats: int = 1,
+        champion_repeats: int = 3,
         champion_selection: str = "sequential",
         champion_seed: int | None = None,
         champion_state_db_path: Path | None = None,

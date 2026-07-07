@@ -8,7 +8,7 @@ On Windows, first double-click:
 FIRST_RUN.bat
 ```
 
-That file sets up the app, installs the `apb` command, and opens the browser cockpit when the machine checks pass.
+That file sets up the app, installs the `apb` command, and opens the pilotBENCHY web UI when the machine checks pass.
 
 ## Terminal Path
 
@@ -24,12 +24,12 @@ After setup adds `_bin` to your user PATH, open a new terminal and run:
 apb --start
 ```
 
-Plain `apb` also opens the browser cockpit after setup. The browser is the
-primary workflow for model selection, benchmark-suite plan selection, live run
-progress, telemetry, and receipt links. Use `apb tui` only when you specifically
-want the older fallback terminal cockpit.
+Plain `apb` also opens the pilotBENCHY web UI at `http://127.0.0.1:36939/` after
+setup. The browser is the primary workflow for model selection,
+benchmark-suite plan selection, live run progress, telemetry, and receipt links.
+Use `apb tui` only when you specifically want the older fallback terminal TUI.
 
-In the browser cockpit, pick models, choose the test type, review the recommended
+In the pilotBENCHY web UI, pick models, choose the test type, review the recommended
 forced flags, and start the run. The page uses a local WebSocket connection to
 show live activity, telemetry, the current best model for this machine, and links
 to the receipts when the run finishes.
@@ -64,7 +64,7 @@ The app writes receipts and reports under:
 _runs\
 ```
 
-The browser cockpit links to `_runs\results.html`, `_runs\leaderboard.md`, and
+The pilotBENCHY web UI links to `_runs\results.html`, `_runs\leaderboard.md`, and
 recent per-run reports directly. You can still open `_runs\results.html` by hand
 for the cross-run browser report or `_runs\leaderboard.md` for the compact text
 version.

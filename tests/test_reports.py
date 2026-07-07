@@ -211,7 +211,7 @@ def test_results_html_is_actionable_and_beautiful_enough_to_open(tmp_path):
 
     html = (tmp_path / "results.html").read_text(encoding="utf-8")
     assert "<!doctype html>" in html
-    assert "Agent Pilot Autobench Results" in html
+    assert "pilotBENCHY Results" in html
     assert "Plain-English takeaway" in html
     assert "winner.gguf" in html
     assert "What to do next" in html
@@ -220,8 +220,8 @@ def test_results_html_is_actionable_and_beautiful_enough_to_open(tmp_path):
     assert "Evidence" in html
     assert "Model comparison" in html
     assert "_runs\\model-comparison.md" in html
-    # Must not carry the old branding.
-    assert "pilotBENCHY" not in html
+    # Must not carry the old Agent Pilot browser branding.
+    assert "Agent Pilot Autobench Results" not in html
     assert "Gemma vs Qwen" not in html
 
 
@@ -335,8 +335,8 @@ def test_write_leaderboard_writes_model_level_comparison_report(tmp_path):
 
     markdown = (tmp_path / "model-comparison.md").read_text(encoding="utf-8")
     payload = json.loads((tmp_path / "model-comparison.json").read_text(encoding="utf-8"))
-    assert "Agent Pilot Model Comparison" in markdown
-    assert "pilotBENCHY" not in markdown
+    assert "pilotBENCHY Model Comparison" in markdown
+    assert "Agent Pilot Model Comparison" not in markdown
     assert "winner.gguf" in markdown
     assert "per-model champion" in markdown or "Keep iterating" in markdown
     assert payload[0]["model_name"] == "winner.gguf"
@@ -406,7 +406,7 @@ def test_results_json_yields_agent_quality_and_pack_scores(tmp_path):
     leaderboard = build_leaderboard(tmp_path)
     entry = next(e for e in leaderboard.entries if e.run_id == "librarian-model")
 
-    # Mean over scored packs only (0.75 + 0.25) / 2 == 0.5; preflight_fail skipped.
+    # Canonical score is weighted over scored attempts, matching librarian_suite.
     assert entry.librarian_score == 0.5
     assert entry.scored_pack_count == 2
     assert entry.pack_scores == {"librarian-gate": 0.75, "librarian-dedupe": 0.25}
@@ -527,6 +527,40 @@ def test_librarian_suite_summary_is_used_when_results_json_missing(tmp_path):
     entry = next(e for e in build_leaderboard(tmp_path).entries if e.run_id == "suite-model")
     assert entry.librarian_score == 0.6
     assert entry.pack_scores == {"librarian-triage": 0.6}
+
+
+def test_agent_quality_uses_librarian_suite_weighted_score_not_pack_mean(tmp_path):
+    run = _write_run(tmp_path, "uneven-packs", 50.0, 40.0, context=32768)
+    (run / "results.json").write_text(
+        json.dumps(
+            {
+                "packs": [
+                    {
+                        "pack_id": "large-pack",
+                        "status": "scored",
+                        "asked": 9,
+                        "correct": 9,
+                        "incomplete": 0,
+                        "accuracy": 1.0,
+                    },
+                    {
+                        "pack_id": "tiny-pack",
+                        "status": "scored",
+                        "asked": 1,
+                        "correct": 0,
+                        "incomplete": 0,
+                        "accuracy": 0.0,
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    entry = next(e for e in build_leaderboard(tmp_path).entries if e.run_id == "uneven-packs")
+
+    assert entry.librarian_score == 0.9
+    assert entry.agent_bench_score == 0.9
 
 
 def test_leaderboard_excludes_non_generative_models(tmp_path):

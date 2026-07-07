@@ -45,21 +45,22 @@ nothing else to run.
 apb
 ```
 
-That's it. Plain `apb` opens the browser cockpit. The very first time you run it on
+That's it. Plain `apb` opens the pilotBENCHY web UI. The very first time you run it on
 a new machine it sets itself up automatically before opening; every run after
 that goes straight to the app. Power-user subcommands still exist — run
 `apb --help` to see them.
 
-## Cockpit Modes
+## pilotBENCHY Modes
 
-Plain `apb` (or double-clicking `START.bat`) opens the local browser cockpit.
+Plain `apb` (or double-clicking `START.bat`) opens the local pilotBENCHY web UI on
+`127.0.0.1:36939`.
 The browser is the primary workflow for model selection, benchmark-suite plan
 selection, live WebSocket run progress, telemetry, and receipt links. Pick
 model(s) with checkboxes, choose a mode from the menu, review the
 recommended/forced llama.cpp flags, then press **Start benchmark**. While a run is
-active, the cockpit shows the live activity feed, telemetry, current winner, and
+active, the web UI shows the live activity feed, telemetry, current winner, and
 receipt/report links so you do not have to dig through `_runs` by hand. The older
-terminal cockpit is still available with `apb tui` as a fallback.
+terminal TUI is still available with `apb tui` as a fallback.
 
 - **Quick check** — does it load, and how fast? No questions asked (fast scout).
 - **Find best settings** — walk the flag ladder, ask the questions, crown the best settings.
@@ -71,7 +72,7 @@ terminal cockpit is still available with `apb tui` as a fallback.
 
 Each mode maps to a time budget (measured in Andrej Karpathy's fixed 5-minute
 rounds), whether the SimpleBench questions are asked, and which ladders run. The
-cockpit shows the active mode, live status/telemetry, and the champion
+web UI shows the active mode, live status/telemetry, and the champion
 (best model and its best settings) when a run finishes.
 
 ## What Setup Creates
@@ -108,7 +109,7 @@ budget allows (a long or overnight run), it then keeps searching with a
 so each run starts smarter and converges toward the best settings.
 
 For a fast "does it load and roughly how fast" check that asks no questions, use
-`--speed-scout` (or the **Quick check** cockpit mode).
+`--speed-scout` (or the **Quick check** pilotBENCHY mode).
 
 ## Results
 
@@ -190,9 +191,9 @@ Important settings in `_CONFIG.toml`:
   are rejected
 - `perplexity_corpus = ""` until you choose a local quality-test corpus
 
-The cockpit now drives runs by **mode** (see Cockpit Modes above). The older
-`default_preset` still applies to non-cockpit code paths but the mode you pick in
-the browser cockpit or TUI takes precedence there.
+The pilotBENCHY web UI now drives runs by **mode** (see pilotBENCHY Modes above). The older
+`default_preset` still applies to non-web UI code paths but the mode you pick in
+the pilotBENCHY web UI or TUI takes precedence there.
 
 Keep your machine-specific paths out of the tracked `_CONFIG.toml` (it ships with
 repo-relative defaults). Set them with environment variables instead, which the
@@ -284,7 +285,7 @@ For context scaling evidence, add a fixed ladder:
 agent-autobench autoresearch --model "path\to\model.gguf" --context-ladder 4096 --context-ladder 8192 --context-ladder 16384 --context-ladder 32768
 ```
 
-The Context limits and Deep / overnight cockpit modes carry context-ladder
+The Context limits and Deep / overnight pilotBENCHY modes carry context-ladder
 targets; Quick check stays small so a first run does not unexpectedly become a
 long test.
 
@@ -378,4 +379,4 @@ the pinned source revision and checksum.
 ## Tiny Glossary
 
 - `apb`: short for Agent Pilot Autobench, the quick command alias.
-- Agent Pilot cockpit: the browser-first workflow for running benchmarks and comparing models.
+- pilotBENCHY web UI: the browser-first workflow for running benchmarks and comparing models.
