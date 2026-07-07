@@ -526,11 +526,13 @@ def _failed_profile_next_run(
     profile: dict[str, Any], benchmark_suite_preflight: dict[str, Any] | None = None
 ) -> str:
     profile_id = str(profile.get("id") or "the required profile")
-    evidence = profile.get("evidence") if isinstance(profile.get("evidence"), dict) else {}
+    raw_evidence = profile.get("evidence")
+    evidence = raw_evidence if isinstance(raw_evidence, dict) else {}
     failure = evidence.get("benchmark_suite_failure") or evidence.get("failure") or "failed proof"
     if (
         "harness_missing" in str(failure)
-        and (benchmark_suite_preflight or {}).get("status") == "PASS"
+        and benchmark_suite_preflight is not None
+        and benchmark_suite_preflight.get("status") == "PASS"
     ):
         return (
             f"Rerun `{profile_id}` now that benchmark-suite preflight passes; "
@@ -1063,19 +1065,22 @@ def _settings_candidate_next_action(
             f"Do not use profile `{profile_id}` until a newer scored receipt replaces the failure."
         )
     if status == "RUNTIME_WARNING":
-        evidence = profile.get("evidence") if isinstance(profile.get("evidence"), dict) else {}
+        raw_evidence = profile.get("evidence")
+        evidence = raw_evidence if isinstance(raw_evidence, dict) else {}
         warnings = evidence.get("runtime_warnings") if isinstance(evidence, dict) else {}
         critical = warnings.get("critical") if isinstance(warnings, dict) else None
         sample = f" ({critical[0]})" if isinstance(critical, list) and critical else ""
         return f"Fix runtime warnings for profile `{profile_id}`{sample} and rerun the proof."
     if status == "FAILED_PROOF":
-        evidence = profile.get("evidence") if isinstance(profile.get("evidence"), dict) else {}
+        raw_evidence = profile.get("evidence")
+        evidence = raw_evidence if isinstance(raw_evidence, dict) else {}
         failure = (
             evidence.get("benchmark_suite_failure") or evidence.get("failure") or "failed proof"
         )
         if (
             "harness_missing" in str(failure)
-            and (benchmark_suite_preflight or {}).get("status") == "PASS"
+            and benchmark_suite_preflight is not None
+            and benchmark_suite_preflight.get("status") == "PASS"
         ):
             return (
                 f"Rerun profile `{profile_id}` now that benchmark-suite preflight passes; "
@@ -1094,7 +1099,7 @@ def _settings_candidate_next_action(
     return f"Refresh deployment readiness for profile `{profile_id}`."
 
 
-def _settings_candidate_sort_key(candidate: dict[str, Any]) -> tuple[int, int, float, int]:
+def _settings_candidate_sort_key(candidate: dict[str, Any]) -> tuple[int, float, int, int]:
     decision_priority = {
         "recommended": 0,
         "fix_failed_proof": 1,
@@ -1114,7 +1119,7 @@ def _settings_candidate_sort_key(candidate: dict[str, Any]) -> tuple[int, int, f
         decision_priority.get(str(candidate.get("decision")), 99),
         score_sort,
         profile_priority.get(str(candidate.get("profile_id")), 99),
-        -int(candidate.get("context_size") or 0),
+        -_int_value(candidate.get("context_size")),
     )
 
 
@@ -1338,7 +1343,11 @@ def _repeatability_confidence(*, run_count: int, ranges: list[dict[str, float | 
         return "single_run"
     if run_count < 3:
         return "limited"
-    spreads = [float(item["spread_pct"]) for item in ranges if item.get("spread_pct") is not None]
+    spreads = [
+        spread_pct
+        for item in ranges
+        if (spread_pct := _float_value(item.get("spread_pct"))) is not None
+    ]
     if not spreads:
         return "limited"
     return "repeatable" if max(spreads) <= 0.15 else "variable"
@@ -1440,6 +1449,10 @@ def _candidate_evidence_gaps(entry) -> list[str]:
 
 
 def _int_value(value: object) -> int:
+    if isinstance(value, bool) or value is None:
+        return 0
+    if not isinstance(value, int | float | str | bytes | bytearray):
+        return 0
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -1449,8 +1462,8 @@ def _int_value(value: object) -> int:
 def _float_value(value: object) -> float | None:
     if isinstance(value, bool) or value is None:
         return None
-    if isinstance(value, int | float):
-        return float(value)
+    if not isinstance(value, int | float | str | bytes | bytearray):
+        return None
     try:
         return float(value)
     except (TypeError, ValueError):

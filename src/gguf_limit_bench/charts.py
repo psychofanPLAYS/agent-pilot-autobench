@@ -281,7 +281,11 @@ def efficiency_bars_config(models: list[dict]) -> dict | None:
         "data": {
             "labels": labels,
             "datasets": [
-                {"label": "Agent Index per GB VRAM", "data": values, "backgroundColor": PALETTE["gold"]}
+                {
+                    "label": "Agent Index per GB VRAM",
+                    "data": values,
+                    "backgroundColor": PALETTE["gold"],
+                }
             ],
         },
         "options": {
@@ -353,7 +357,9 @@ def context_scaling_config(rows: list[dict]) -> dict | None:
             {
                 "label": "Cold TTFT (ms)",
                 "data": [
-                    round(float(r["cold_ttft_ms"]), 0) if r.get("cold_ttft_ms") is not None else None
+                    round(float(r["cold_ttft_ms"]), 0)
+                    if r.get("cold_ttft_ms") is not None
+                    else None
                     for r in ordered
                 ],
                 "borderColor": PALETTE["gold"],
@@ -430,14 +436,19 @@ def pack_accuracy_bars_config(packs: list[dict]) -> dict | None:
     if not rows:
         return None
     labels = [
-        p["pack_id"][len("librarian-") :] if str(p["pack_id"]).startswith("librarian-") else p["pack_id"]
+        p["pack_id"][len("librarian-") :]
+        if str(p["pack_id"]).startswith("librarian-")
+        else p["pack_id"]
         for p in rows
     ]
     values = [round(float(p["accuracy"]) * 100, 1) for p in rows]
     colors = [_accuracy_color(float(p["accuracy"])) for p in rows]
     return {
         "type": "bar",
-        "data": {"labels": labels, "datasets": [{"label": "Accuracy %", "data": values, "backgroundColor": colors}]},
+        "data": {
+            "labels": labels,
+            "datasets": [{"label": "Accuracy %", "data": values, "backgroundColor": colors}],
+        },
         "options": {
             "responsive": True,
             "maintainAspectRatio": False,

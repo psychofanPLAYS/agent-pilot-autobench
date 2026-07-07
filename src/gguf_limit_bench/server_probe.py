@@ -16,6 +16,8 @@ from urllib.request import Request, urlopen
 from gguf_limit_bench.autoresearch import AutoresearchSettings
 from gguf_limit_bench.oom import is_oom_failure
 
+_CREATE_NEW_PROCESS_GROUP = int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200))
+
 
 @dataclass(frozen=True)
 class ServingProbePrompt:
@@ -482,8 +484,8 @@ def process_group_kwargs() -> dict:
     A llama-server launched this way can be killed as a tree without taking down
     the parent, and never lingers as an orphan after a hard kill of the engine.
     """
-    if os.name == "nt":
-        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    if _is_windows():
+        return {"creationflags": _CREATE_NEW_PROCESS_GROUP}
     return {"start_new_session": True}
 
 
@@ -496,7 +498,7 @@ def kill_process_tree(process: subprocess.Popen) -> None:
     """
     if process.poll() is not None:
         return
-    if os.name == "nt":
+    if _is_windows():
         subprocess.run(
             ["taskkill", "/PID", str(process.pid), "/T", "/F"],
             stdout=subprocess.DEVNULL,
@@ -509,13 +511,23 @@ def kill_process_tree(process: subprocess.Popen) -> None:
             process.kill()
         return
     try:
-        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+        killpg = getattr(os, "killpg", None)
+        getpgid = getattr(os, "getpgid", None)
+        if callable(killpg) and callable(getpgid):
+            killpg(getpgid(process.pid), signal.SIGTERM)
+        else:
+            process.terminate()
         process.wait(timeout=10)
     except (ProcessLookupError, PermissionError):
         pass
     except subprocess.TimeoutExpired:
         try:
-            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            killpg = getattr(os, "killpg", None)
+            getpgid = getattr(os, "getpgid", None)
+            if callable(killpg) and callable(getpgid):
+                killpg(getpgid(process.pid), getattr(signal, "SIGKILL", signal.SIGTERM))
+            else:
+                process.kill()
             process.wait(timeout=10)
         except (ProcessLookupError, subprocess.TimeoutExpired):
             pass
@@ -523,6 +535,10 @@ def kill_process_tree(process: subprocess.Popen) -> None:
 
 def _stop_process(process: subprocess.Popen) -> None:
     kill_process_tree(process)
+
+
+def _is_windows() -> bool:
+    return os.name == "nt"
 
 
 def _failed_probe(failure: str, detail: str, process: subprocess.Popen) -> ServingProbeResult:

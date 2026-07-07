@@ -95,7 +95,9 @@ def test_efficiency_bars_none_without_vram():
 
 def test_index_trend_needs_two_points():
     assert charts.index_trend_config([{"label": "r1", "index": 80.0}]) is None
-    cfg = charts.index_trend_config([{"label": "r1", "index": 80.0}, {"label": "r2", "index": 85.0}])
+    cfg = charts.index_trend_config(
+        [{"label": "r1", "index": 80.0}, {"label": "r2", "index": 85.0}]
+    )
     assert cfg["type"] == "line"
     _is_json(cfg)
 
@@ -129,7 +131,10 @@ def test_outcome_doughnut_none_when_empty():
 
 def test_pack_accuracy_bars():
     cfg = charts.pack_accuracy_bars_config(
-        [{"pack_id": "librarian-gate", "accuracy": 1.0}, {"pack_id": "librarian-triage", "accuracy": 0.5}]
+        [
+            {"pack_id": "librarian-gate", "accuracy": 1.0},
+            {"pack_id": "librarian-triage", "accuracy": 0.5},
+        ]
     )
     assert cfg["data"]["labels"] == ["gate", "triage"]
     assert cfg["data"]["datasets"][0]["data"] == [100.0, 50.0]

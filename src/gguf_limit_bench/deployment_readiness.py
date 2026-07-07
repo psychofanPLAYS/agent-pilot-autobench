@@ -309,9 +309,8 @@ def _next_run(profiles: list[dict[str, Any]]) -> str:
     for profile in sorted(profiles, key=lambda item: priority.get(str(item["id"]), 99)):
         if profile["status"] != "PROVEN":
             if profile["status"] == "FAILED_PROOF":
-                evidence = (
-                    profile.get("evidence") if isinstance(profile.get("evidence"), dict) else {}
-                )
+                raw_evidence = profile.get("evidence")
+                evidence = raw_evidence if isinstance(raw_evidence, dict) else {}
                 failure = (
                     evidence.get("benchmark_suite_failure")
                     or evidence.get("failure")
@@ -540,6 +539,10 @@ def _context_int(label: str) -> int:
 
 
 def _int(value: object) -> int:
+    if isinstance(value, bool) or value is None:
+        return 0
+    if not isinstance(value, int | float | str | bytes | bytearray):
+        return 0
     try:
         return int(value)
     except (TypeError, ValueError):

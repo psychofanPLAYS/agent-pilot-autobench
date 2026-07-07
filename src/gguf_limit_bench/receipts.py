@@ -83,7 +83,14 @@ class RunReceipt:
 
 def _safe_receipt_filename(filename: str) -> str:
     path = Path(filename)
-    reserved = {"CON", "PRN", "AUX", "NUL", *(f"COM{index}" for index in range(1, 10)), *(f"LPT{index}" for index in range(1, 10))}
+    reserved = {
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        *(f"COM{index}" for index in range(1, 10)),
+        *(f"LPT{index}" for index in range(1, 10)),
+    }
     if path.name != filename or filename in {"", ".", ".."} or path.stem.upper() in reserved:
         raise ValueError(f"Receipt filename must be a safe basename: {filename}")
     return filename

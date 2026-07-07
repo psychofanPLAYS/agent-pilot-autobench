@@ -31,6 +31,7 @@ def _pack_id_of(mapping: dict[str, Any]) -> str | None:
     value = mapping.get("id", mapping.get("pack_id"))
     return str(value) if value is not None else None
 
+
 try:
     from enum import StrEnum
 except ImportError:  # Python < 3.11
@@ -87,9 +88,7 @@ def available_packs() -> tuple[str, ...]:
     """Return IDs of all available question packs."""
     dynamic: list[str] = []
     if _PACKS_DIR.exists():
-        for path in sorted(
-            p for p in _PACKS_DIR.iterdir() if p.suffix.lower() in _PACK_SUFFIXES
-        ):
+        for path in sorted(p for p in _PACKS_DIR.iterdir() if p.suffix.lower() in _PACK_SUFFIXES):
             try:
                 pid = _pack_id_of(_read_pack_mapping(path))
                 if pid:

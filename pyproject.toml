@@ -38,6 +38,7 @@ dev = [
     "pytest>=8.0.0",
     "ruff>=0.15.19",
     "types-psutil>=7.0.0.20250601",
+    "types-PyYAML>=6.0.12",
 ]
 bench = [
     "inspect-ai>=0.3.242",

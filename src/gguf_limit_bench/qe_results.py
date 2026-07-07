@@ -229,6 +229,10 @@ def _resource_summary(resources: dict[str, Any]) -> dict[str, Any]:
 
 
 def _float(value: object) -> float:
+    if isinstance(value, bool) or value is None:
+        return 0.0
+    if not isinstance(value, int | float | str | bytes | bytearray):
+        return 0.0
     try:
         return float(value)
     except (TypeError, ValueError):
@@ -242,7 +246,9 @@ def _float_or_none(value: object) -> float | None:
 
 
 def _int_or_none(value: object) -> int | None:
-    if value is None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if not isinstance(value, int | float | str | bytes | bytearray):
         return None
     try:
         return int(value)

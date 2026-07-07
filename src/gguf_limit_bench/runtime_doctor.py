@@ -22,8 +22,7 @@ class RuntimeDoctorReceipt:
 def flag_supported(help_text: str, option: str) -> bool:
     """Return whether a llama.cpp help string advertises *option*."""
     return any(
-        line.lstrip().startswith(option) or f", {option}" in line
-        for line in help_text.splitlines()
+        line.lstrip().startswith(option) or f", {option}" in line for line in help_text.splitlines()
     )
 
 

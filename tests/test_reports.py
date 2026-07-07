@@ -902,9 +902,7 @@ def test_results_html_includes_interactive_charts(tmp_path):
 
 
 def test_results_html_renders_index_trend_across_runs(tmp_path):
-    for i, (name, acc) in enumerate(
-        [("20260621-a", 0.6), ("20260622-b", 0.9)], start=1
-    ):
+    for i, (name, acc) in enumerate([("20260621-a", 0.6), ("20260622-b", 0.9)], start=1):
         run = _write_run(tmp_path, name, 50.0 + i, 40.0 + i, context=8192)
         (run / "results.json").write_text(
             json.dumps(

@@ -1224,9 +1224,7 @@ def _leaderboard_html(leaderboard: Leaderboard) -> str:
     pack_ids = _ordered_pack_ids(model_comparison)
     dashboard_models = _dashboard_models(leaderboard, model_comparison)
     kpi_strip = _kpi_strip(dashboard_models, leaderboard)
-    charts_section = _charts_section(
-        dashboard_models, pack_ids, _index_history(leaderboard)
-    )
+    charts_section = _charts_section(dashboard_models, pack_ids, _index_history(leaderboard))
     chart_runtime = charts.chartjs_runtime() if charts_section else ""
     rows = "\n".join(
         _html_row(rank, entry) for rank, entry in enumerate(leaderboard.entries, start=1)

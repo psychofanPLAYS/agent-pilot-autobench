@@ -3,6 +3,11 @@ from pathlib import Path
 from gguf_limit_bench.config import load_config, with_cli_overrides
 
 
+def _anchored_if_relative(base: Path, value: str) -> Path:
+    path = Path(value)
+    return path if path.is_absolute() else base / path
+
+
 def test_default_config_uses_deep_preset_when_no_file_exists(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
@@ -33,12 +38,17 @@ parallel_max = 2
 
     config = load_config()
 
-    assert config.paths.model_roots == (Path("D:/models"), Path("E:/more-models"))
-    assert config.paths.llama_bench == Path("D:/llama/llama-bench.exe")
-    assert config.paths.llama_cli == Path("D:/llama/llama-cli.exe")
-    assert config.paths.llama_server == Path("D:/llama/llama-server.exe")
-    assert config.paths.llama_perplexity == Path("D:/llama/llama-perplexity.exe")
-    assert config.paths.runs_root == Path("D:/runs")
+    assert config.paths.model_roots == (
+        _anchored_if_relative(tmp_path, "D:/models"),
+        _anchored_if_relative(tmp_path, "E:/more-models"),
+    )
+    assert config.paths.llama_bench == _anchored_if_relative(tmp_path, "D:/llama/llama-bench.exe")
+    assert config.paths.llama_cli == _anchored_if_relative(tmp_path, "D:/llama/llama-cli.exe")
+    assert config.paths.llama_server == _anchored_if_relative(tmp_path, "D:/llama/llama-server.exe")
+    assert config.paths.llama_perplexity == _anchored_if_relative(
+        tmp_path, "D:/llama/llama-perplexity.exe"
+    )
+    assert config.paths.runs_root == _anchored_if_relative(tmp_path, "D:/runs")
     assert config.benchmark.default_preset == "normal"
     assert config.benchmark.parallel_max == 2
 

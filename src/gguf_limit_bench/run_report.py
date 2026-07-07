@@ -500,8 +500,7 @@ def _html(payload: dict) -> str:
 def _run_chart_card(title: str, description: str, chart_html: str, *, wide: bool = False) -> str:
     cls = "chart-card wide" if wide else "chart-card"
     return (
-        f'<div class="{cls}"><h3>{escape(title)}</h3>'
-        f"<p>{escape(description)}</p>{chart_html}</div>"
+        f'<div class="{cls}"><h3>{escape(title)}</h3><p>{escape(description)}</p>{chart_html}</div>'
     )
 
 
@@ -555,9 +554,11 @@ def _charts_block(payload: dict) -> tuple[str, str]:
         )
     if not blocks:
         return "", ""
-    section = '<section class="panel"><h2>Visual overview</h2><div class="chart-grid">' + (
-        "".join(blocks)
-    ) + "</div></section>"
+    section = (
+        '<section class="panel"><h2>Visual overview</h2><div class="chart-grid">'
+        + ("".join(blocks))
+        + "</div></section>"
+    )
     return section, charts.chartjs_runtime()
 
 

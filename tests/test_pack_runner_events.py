@@ -35,9 +35,7 @@ def test_run_pack_questions_emits_started_and_scored(monkeypatch):
     )
     seen: list = []
     with events.set_event_sink(lambda t, d: seen.append((t, d))):
-        pack_runner.run_pack_questions(
-            pack=_pack(), questions=[_question()], base_url="http://x"
-        )
+        pack_runner.run_pack_questions(pack=_pack(), questions=[_question()], base_url="http://x")
 
     started = [d for t, d in seen if t == "question_started"]
     scored = [d for t, d in seen if t == "question_scored"]
@@ -180,9 +178,18 @@ def _qr(correct, outcome, pred, ttft, tps):
     from gguf_limit_bench.simple_bench import SimpleBenchQuestionResult
 
     return SimpleBenchQuestionResult(
-        question_id="q", expected_answer="B", predicted_answer=pred, correct=correct,
-        ttft_ms=ttft, tokens_per_second=tps, generated_tokens=1, output_chars=1,
-        prompt_chars=1, response="", prompt_tokens_per_second=1.0, failure="none",
+        question_id="q",
+        expected_answer="B",
+        predicted_answer=pred,
+        correct=correct,
+        ttft_ms=ttft,
+        tokens_per_second=tps,
+        generated_tokens=1,
+        output_chars=1,
+        prompt_chars=1,
+        response="",
+        prompt_tokens_per_second=1.0,
+        failure="none",
         outcome=outcome,
     )
 
@@ -190,8 +197,11 @@ def _qr(correct, outcome, pred, ttft, tps):
 def test_aggregate_repeats_majority_correct():
     # 2 of 3 correct -> question counts as correct; timings medianed; mode predicted.
     agg = pack_runner._aggregate_repeats(
-        [_qr(True, "correct", "B", 10, 100), _qr(True, "correct", "B", 20, 110),
-         _qr(False, "wrong", "A", 30, 90)]
+        [
+            _qr(True, "correct", "B", 10, 100),
+            _qr(True, "correct", "B", 20, 110),
+            _qr(False, "wrong", "A", 30, 90),
+        ]
     )
     assert agg.correct is True
     assert agg.outcome == "correct"
@@ -202,15 +212,20 @@ def test_aggregate_repeats_majority_correct():
 def test_aggregate_repeats_minority_correct_not_passed():
     # 1 of 3 correct -> not correct; plurality of the non-correct outcomes wins.
     agg = pack_runner._aggregate_repeats(
-        [_qr(True, "correct", "B", 10, 100), _qr(False, "incomplete", None, 20, 110),
-         _qr(False, "incomplete", None, 30, 90)]
+        [
+            _qr(True, "correct", "B", 10, 100),
+            _qr(False, "incomplete", None, 20, 110),
+            _qr(False, "incomplete", None, 30, 90),
+        ]
     )
     assert agg.correct is False
     assert agg.outcome == "incomplete"
 
 
 def test_run_pack_questions_repeats_emits_repeat_metadata(monkeypatch):
-    monkeypatch.setattr(pack_runner, "_chat", lambda **kw: ("Final Answer: B", 12.0, 30.0, 100.0, 5))
+    monkeypatch.setattr(
+        pack_runner, "_chat", lambda **kw: ("Final Answer: B", 12.0, 30.0, 100.0, 5)
+    )
     seen: list = []
     with events.set_event_sink(lambda t, d: seen.append((t, d))):
         pack_runner.run_pack_questions(

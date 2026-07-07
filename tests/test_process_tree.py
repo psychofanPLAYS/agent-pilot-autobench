@@ -7,27 +7,23 @@ process group so the whole tree can be killed deterministically.
 
 from __future__ import annotations
 
-import subprocess
-
 from gguf_limit_bench import server_probe
 
 
 def test_process_group_kwargs_windows(monkeypatch):
-    monkeypatch.setattr(server_probe.os, "name", "nt")
+    monkeypatch.setattr(server_probe, "_is_windows", lambda: True)
     kwargs = server_probe.process_group_kwargs()
-    assert kwargs == {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    assert kwargs == {"creationflags": server_probe._CREATE_NEW_PROCESS_GROUP}
 
 
 def test_process_group_kwargs_posix(monkeypatch):
-    monkeypatch.setattr(server_probe.os, "name", "posix")
+    monkeypatch.setattr(server_probe, "_is_windows", lambda: False)
     assert server_probe.process_group_kwargs() == {"start_new_session": True}
 
 
 def test_kill_process_tree_noop_when_already_exited(monkeypatch):
     calls: list = []
-    monkeypatch.setattr(
-        server_probe.subprocess, "run", lambda *a, **k: calls.append((a, k))
-    )
+    monkeypatch.setattr(server_probe.subprocess, "run", lambda *a, **k: calls.append((a, k)))
 
     class Dead:
         pid = 111
@@ -40,11 +36,9 @@ def test_kill_process_tree_noop_when_already_exited(monkeypatch):
 
 
 def test_kill_process_tree_windows_uses_taskkill_tree(monkeypatch):
-    monkeypatch.setattr(server_probe.os, "name", "nt")
+    monkeypatch.setattr(server_probe, "_is_windows", lambda: True)
     calls: list = []
-    monkeypatch.setattr(
-        server_probe.subprocess, "run", lambda *a, **k: calls.append((a, k))
-    )
+    monkeypatch.setattr(server_probe.subprocess, "run", lambda *a, **k: calls.append((a, k)))
 
     class Live:
         pid = 4321

@@ -1182,7 +1182,7 @@ def qe_format(
     """Run QE fresh-session format checks against a live endpoint."""
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     out_dir = runs_root / f"{stamp}-qe-format-{_safe_receipt_slug(model)}"
-    sampling = {
+    sampling: dict[str, object] = {
         "temperature": temperature,
         "top_p": top_p,
         "min_p": min_p,
@@ -1199,10 +1199,13 @@ def qe_format(
         sampling=sampling,
     )
     console.print(f"QE format receipt: {out_dir}")
-    console.print(f"Score: {_format_optional_float(float(summary['score']))}")
-    console.print(f"Format rate: {_format_optional_float(float(summary['format_rate']))}")
+    console.print(f"Score: {_format_optional_float(_float_from_summary(summary, 'score'))}")
     console.print(
-        f"Direct-answer rate: {_format_optional_float(float(summary['direct_answer_rate']))}"
+        f"Format rate: {_format_optional_float(_float_from_summary(summary, 'format_rate'))}"
+    )
+    console.print(
+        "Direct-answer rate: "
+        f"{_format_optional_float(_float_from_summary(summary, 'direct_answer_rate'))}"
     )
     console.print(f"Attempts: {summary['attempts']}")
 
@@ -1399,15 +1402,13 @@ def _deployment_proof_target(receipt_path: Path) -> dict[str, Any]:
         payload = json.loads((receipt_path / "best-settings.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
-    settings = payload.get("settings") if isinstance(payload.get("settings"), dict) else {}
+    raw_settings = payload.get("settings")
+    settings = raw_settings if isinstance(raw_settings, dict) else {}
     target: dict[str, Any] = {}
     model = str(payload.get("model") or "")
     if model:
         target["model"] = model
-    try:
-        context_size = int(settings.get("context_size"))
-    except (TypeError, ValueError):
-        context_size = 0
+    context_size = _int_from_object(settings.get("context_size"))
     if context_size > 0:
         target["context_size"] = context_size
     return target
@@ -2651,9 +2652,7 @@ def engine(
             enable_mtp=has_mtp,
             evaluation=mode.evaluation,
             forced_server_args=forced,
-            champion_pack_ids=(
-                tuple(LIBRARIAN_PACK_IDS) if mode_id == "librarian_bench" else None
-            ),
+            champion_pack_ids=(tuple(LIBRARIAN_PACK_IDS) if mode_id == "librarian_bench" else None),
             champion_sample_size=int(options.get("sample_size") or 5),
             champion_repeats=int(options.get("repeats") or 3),
             sampler_policy=sampler_policy,
@@ -2670,12 +2669,8 @@ def engine(
 
 @app.command("engine-replay")
 def engine_replay_cmd(
-    run_dir: Annotated[
-        Path, typer.Option("--run-dir", help="Run directory to replay into.")
-    ],
-    source: Annotated[
-        Path, typer.Option("--source", help="Recorded live.jsonl to replay.")
-    ],
+    run_dir: Annotated[Path, typer.Option("--run-dir", help="Run directory to replay into.")],
+    source: Annotated[Path, typer.Option("--source", help="Recorded live.jsonl to replay.")],
     delay: float = typer.Option(0.1, "--delay", help="Seconds between replayed events."),
 ) -> None:
     """Replay a recorded live.jsonl into a run dir (drives the cockpit, no GPU)."""
@@ -3535,6 +3530,17 @@ def _float_from_summary(score_summary: dict[str, object], key: str) -> float | N
     if isinstance(value, int | float):
         return float(value)
     return None
+
+
+def _int_from_object(value: object) -> int:
+    if isinstance(value, bool) or value is None:
+        return 0
+    if not isinstance(value, int | float | str | bytes | bytearray):
+        return 0
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _operator_verdict_payload(payload: dict) -> dict:

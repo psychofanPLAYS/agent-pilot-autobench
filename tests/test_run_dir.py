@@ -12,7 +12,11 @@ from gguf_limit_bench import run_dir
 
 
 def test_spec_roundtrip(tmp_path):
-    spec = {"models": ["a.gguf", "b.gguf"], "mode": "librarian_bench", "options": {"budget_minutes": 5}}
+    spec = {
+        "models": ["a.gguf", "b.gguf"],
+        "mode": "librarian_bench",
+        "options": {"budget_minutes": 5},
+    }
     run_dir.write_spec(tmp_path, spec)
     assert run_dir.read_spec(tmp_path) == spec
 

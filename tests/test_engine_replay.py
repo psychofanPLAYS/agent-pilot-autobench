@@ -9,9 +9,7 @@ from gguf_limit_bench import engine_replay, run_dir
 
 
 def _write_source(path, rows):
-    path.write_text(
-        "\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8"
-    )
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
 
 
 def test_replay_copies_events_and_completes(tmp_path):
@@ -20,7 +18,11 @@ def test_replay_copies_events_and_completes(tmp_path):
         src,
         [
             {"time": "t", "type": "model_started", "data": {"model": "m", "index": 1, "total": 1}},
-            {"time": "t", "type": "question_started", "data": {"q_id": "q1", "index": 1, "total": 2, "prompt": "P"}},
+            {
+                "time": "t",
+                "type": "question_started",
+                "data": {"q_id": "q1", "index": 1, "total": 2, "prompt": "P"},
+            },
             {"time": "t", "type": "question_scored", "data": {"q_id": "q1", "correct": True}},
         ],
     )
@@ -39,14 +41,24 @@ def test_replay_updates_status_from_events(tmp_path):
     _write_source(
         src,
         [
-            {"time": "t", "type": "model_started", "data": {"model": "Qwen", "index": 1, "total": 3}},
-            {"time": "t", "type": "question_started", "data": {"q_id": "q1", "index": 2, "total": 5, "prompt": "P"}},
+            {
+                "time": "t",
+                "type": "model_started",
+                "data": {"model": "Qwen", "index": 1, "total": 3},
+            },
+            {
+                "time": "t",
+                "type": "question_started",
+                "data": {"q_id": "q1", "index": 2, "total": 5, "prompt": "P"},
+            },
         ],
     )
     rd = tmp_path / "run"
     rd.mkdir()
     captured = []
-    engine_replay.replay(rd, src, delay=0.0, on_step=lambda: captured.append(run_dir.read_status(rd)))
+    engine_replay.replay(
+        rd, src, delay=0.0, on_step=lambda: captured.append(run_dir.read_status(rd))
+    )
 
     # after model_started the status reflects the model; after question_started the index
     assert any(s.get("model") == "Qwen" for s in captured)

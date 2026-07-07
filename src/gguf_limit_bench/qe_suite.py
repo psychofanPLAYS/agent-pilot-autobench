@@ -147,8 +147,8 @@ def _summary_payload(
     attempts: list[dict[str, object]],
 ) -> dict[str, object]:
     summary = summarize_qe_assessments(assessments)
-    attempts_count = int(summary["attempts"])
-    direct_answer_count = int(summary["direct_answer_count"])
+    attempts_count = _int_value(summary.get("attempts"))
+    direct_answer_count = _int_value(summary.get("direct_answer_count"))
     return {
         "model": model,
         "base_url": base_url,
@@ -169,22 +169,31 @@ def _summary_payload(
         "score_contract": "qe_format_score = mean deterministic LEX/HYDE format score",
         "median_tps": _median(
             [
-                float(attempt["tokens_per_second"])
+                tokens_per_second
                 for attempt in attempts
-                if float(attempt["tokens_per_second"]) > 0.0
+                if (tokens_per_second := _float_value(attempt.get("tokens_per_second"))) > 0.0
             ]
         )
         or 0.0,
         "median_prompt_tps": _median(
             [
-                float(attempt["prompt_tokens_per_second"])
+                prompt_tokens_per_second
                 for attempt in attempts
-                if float(attempt["prompt_tokens_per_second"]) > 0.0
+                if (
+                    prompt_tokens_per_second := _float_value(
+                        attempt.get("prompt_tokens_per_second")
+                    )
+                )
+                > 0.0
             ]
         )
         or 0.0,
         "median_ttft_ms": _median(
-            [float(attempt["ttft_ms"]) for attempt in attempts if attempt["ttft_ms"] is not None]
+            [
+                ttft_ms
+                for attempt in attempts
+                if (ttft_ms := _float_or_none(attempt.get("ttft_ms"))) is not None
+            ]
         ),
     }
 
@@ -204,6 +213,8 @@ def _write_receipts(
 
 
 def _summary_markdown(summary: dict[str, object]) -> str:
+    issue_counts = summary.get("issue_counts")
+    issues = issue_counts if isinstance(issue_counts, dict) else {}
     return "\n".join(
         [
             f"# QE Format Suite: {summary['model']}",
@@ -219,10 +230,7 @@ def _summary_markdown(summary: dict[str, object]) -> str:
             "",
             "## Issues",
             "",
-            *[
-                f"- `{issue}`: `{count}`"
-                for issue, count in sorted(dict(summary["issue_counts"]).items())
-            ],
+            *[f"- `{issue}`: `{count}`" for issue, count in sorted(issues.items())],
             "",
         ]
     )
@@ -239,7 +247,36 @@ def _median(values: list[float]) -> float | None:
 
 
 def _fmt_float(value: object) -> str:
-    return f"{float(value):.6f}"
+    return f"{_float_value(value):.6f}"
+
+
+def _float_value(value: object, default: float = 0.0) -> float:
+    if isinstance(value, bool) or value is None:
+        return default
+    if not isinstance(value, int | float | str | bytes | bytearray):
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _float_or_none(value: object) -> float | None:
+    if value is None:
+        return None
+    parsed = _float_value(value, default=float("nan"))
+    return None if parsed != parsed else parsed
+
+
+def _int_value(value: object, default: int = 0) -> int:
+    if isinstance(value, bool) or value is None:
+        return default
+    if not isinstance(value, int | float | str | bytes | bytearray):
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _telemetry_dict(snapshot: object) -> dict[str, object]:

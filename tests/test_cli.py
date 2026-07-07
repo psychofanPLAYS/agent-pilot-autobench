@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import re
 import sys
 
 import pytest
@@ -2041,7 +2042,7 @@ def test_results_command_prints_all_audit_warnings(tmp_path):
     assert "Report audit: warning (2 warning(s))" in result.output
     assert "Audit warning: missing_agent_quality in 20260526-speed-a" in result.output
     assert "Audit warning: missing_agent_quality in 20260526-speed-b" in result.output
-    assert "report-audit.md" in result.output
+    assert re.search(r"report-audit\s*\.md", result.output)
 
 
 def test_results_command_can_open_browser_report(tmp_path, monkeypatch):

@@ -14,6 +14,7 @@ from gguf_limit_bench import webui
 from gguf_limit_bench.webui import (
     WebUiState,
     _handler_for,
+    _model_payload,
     _tail_live_records,
     build_run_options,
     create_web_app,
@@ -47,11 +48,15 @@ def test_tail_live_records_preserves_type_and_data(tmp_path):
     run_directory = tmp_path / "run"
     run_directory.mkdir()
     run_dir.append_event(run_directory, "question_started", {"q_id": "q1", "prompt": "hi"})
-    run_dir.append_event(run_directory, "question_progress", {"q_id": "q1", "thinking": "...", "answer": ""})
+    run_dir.append_event(
+        run_directory, "question_progress", {"q_id": "q1", "thinking": "...", "answer": ""}
+    )
     # a malformed line must be skipped, not crash the tail
     with (run_directory / run_dir.LIVE_FILE).open("a", encoding="utf-8") as handle:
         handle.write("not json\n")
-    run_dir.append_event(run_directory, "question_scored", {"q_id": "q1", "correct": True, "score": 1.0})
+    run_dir.append_event(
+        run_directory, "question_scored", {"q_id": "q1", "correct": True, "score": 1.0}
+    )
 
     records = _tail_live_records(run_directory)
 
@@ -104,6 +109,24 @@ def test_webui_state_lists_models_modes_and_librarian_packs(tmp_path):
     assert "receipts" in payload
     qwen = next(model for model in payload["models"] if model["family"] == "qwen")
     assert any(preset["name"] == "thinking_general" for preset in qwen["sampler_presets"])
+
+
+def test_model_payload_marks_tiny_fixture_files_as_unestimated(tmp_path):
+    model = ModelInfo(
+        path=tmp_path / "Gemma-2-9B-Instruct-Q5_K_M.gguf",
+        name="Gemma-2-9B-Instruct-Q5_K_M.gguf",
+        family="gemma",
+        parameters="9B",
+        quant="Q5_K_M",
+        size_bytes=34,
+    )
+
+    payload = _model_payload(model)
+
+    assert payload["context_label"] == "unknown"
+    assert payload["size_warning"] is True
+    assert payload["size_display"] == "tiny file"
+    assert payload["file_label"] == "Gemma-2-9B-Instruct-Q5_K_M.gguf"
 
 
 def test_librarian_web_selection_accepts_any_models():

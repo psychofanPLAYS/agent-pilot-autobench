@@ -47,6 +47,7 @@ def _read_json(path: Path) -> dict:
 
 # --- run spec ---------------------------------------------------------------
 
+
 def write_spec(run_dir: Path, spec: dict) -> None:
     _write_atomic(Path(run_dir) / SPEC_FILE, json.dumps(spec, ensure_ascii=True, indent=2))
 
@@ -56,6 +57,7 @@ def read_spec(run_dir: Path) -> dict:
 
 
 # --- status / heartbeat -----------------------------------------------------
+
 
 def write_status(
     run_dir: Path,
@@ -100,6 +102,7 @@ def engine_is_alive(status: dict, *, now: datetime, stale_seconds: float = 10.0)
 
 # --- control (stop / abort) -------------------------------------------------
 
+
 def write_control(run_dir: Path, action: str, *, now: datetime | None = None) -> None:
     if action not in VALID_ACTIONS:
         raise ValueError(f"Unknown control action: {action!r}")
@@ -115,6 +118,7 @@ def read_control(run_dir: Path) -> dict:
 
 
 # --- single-writer lock -----------------------------------------------------
+
 
 def acquire_lock(run_dir: Path, pid: int) -> bool:
     """Create an exclusive engine lock. Returns False if one already exists."""
@@ -139,7 +143,10 @@ def release_lock(run_dir: Path) -> None:
 
 # --- live event stream ------------------------------------------------------
 
-def append_event(run_dir: Path, event_type: str, data: dict, *, now: datetime | None = None) -> None:
+
+def append_event(
+    run_dir: Path, event_type: str, data: dict, *, now: datetime | None = None
+) -> None:
     """Append one ``{time,type,data}`` record to ``live.jsonl`` (engine side)."""
     record = {
         "time": _now(now).isoformat(timespec="seconds"),

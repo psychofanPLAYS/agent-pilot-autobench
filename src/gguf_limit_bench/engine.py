@@ -17,7 +17,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import threading
-from typing import Callable, Protocol
+from typing import Callable, Protocol, TypedDict
 
 from gguf_limit_bench import events, run_dir
 
@@ -28,6 +28,14 @@ class EventSink(Protocol):
 
 # run_model(model, options, emit) -> receipt path
 RunModel = Callable[[str, dict, EventSink], object]
+
+
+class _HeartbeatState(TypedDict):
+    phase: str
+    model: str | None
+    model_index: int | None
+    model_total: int | None
+
 
 _STOP_ACTIONS = ("stop", "abort")
 
@@ -64,22 +72,50 @@ def run_engine(
 
     tally = {"answered": 0, "correct": 0}
     # Latest status fields; the heartbeat thread re-stamps alive_at from these.
-    hb_state = {"phase": "running", "model": None, "model_index": None,
-                "model_total": len(models)}
+    hb_state: _HeartbeatState = {
+        "phase": "running",
+        "model": None,
+        "model_index": None,
+        "model_total": len(models),
+    }
     hb_lock = threading.Lock()
     hb_stop = threading.Event()
 
-    def write_status(**changes: object) -> None:
+    def write_status(
+        *,
+        phase: str | None = None,
+        model: str | None = None,
+        model_index: int | None = None,
+    ) -> None:
         with hb_lock:
-            hb_state.update(changes)
-            snapshot = dict(hb_state)
-        run_dir.write_status(run_dir_path, pid=pid, **snapshot)
+            if phase is not None:
+                hb_state["phase"] = phase
+            if model is not None:
+                hb_state["model"] = model
+            if model_index is not None:
+                hb_state["model_index"] = model_index
+            snapshot = hb_state.copy()
+        run_dir.write_status(
+            run_dir_path,
+            pid=pid,
+            phase=snapshot["phase"],
+            model=snapshot["model"],
+            model_index=snapshot["model_index"],
+            model_total=snapshot["model_total"],
+        )
 
     def _heartbeat() -> None:
         while not hb_stop.wait(heartbeat_seconds):
             with hb_lock:
-                snapshot = dict(hb_state)
-            run_dir.write_status(run_dir_path, pid=pid, **snapshot)
+                snapshot = hb_state.copy()
+            run_dir.write_status(
+                run_dir_path,
+                pid=pid,
+                phase=snapshot["phase"],
+                model=snapshot["model"],
+                model_index=snapshot["model_index"],
+                model_total=snapshot["model_total"],
+            )
 
     def emit(event_type: str, data: dict) -> None:
         run_dir.append_event(run_dir_path, event_type, data)
@@ -101,30 +137,30 @@ def run_engine(
     heartbeat.start()
     stopped = False
     try:
-      with events.set_event_sink(emit):
-        for index, model in enumerate(models, start=1):
-            label = _model_label(model)
-            if run_dir.read_control(run_dir_path)["action"] in _STOP_ACTIONS:
-                emit("run_stopped", {"reason": "control", "before_model": label})
-                stopped = True
-                break
-            # Running score is per-model (each model earns its own Agent Index),
-            # so reset the tally as each model starts.
-            tally["answered"] = 0
-            tally["correct"] = 0
-            write_status(phase="running", model=label, model_index=index)
-            emit("model_started", {"model": label, "index": index, "total": len(models)})
-            try:
-                run_model(model, options, emit)
-            except BaseException as exc:  # noqa: BLE001 - record then re-raise
-                emit("model_failed", {"model": label, "error": str(exc)})
-                write_status(phase="failed", model=label, model_index=index)
-                raise
-            emit("model_finished", {"model": label, "index": index})
+        with events.set_event_sink(emit):
+            for index, model in enumerate(models, start=1):
+                label = _model_label(model)
+                if run_dir.read_control(run_dir_path)["action"] in _STOP_ACTIONS:
+                    emit("run_stopped", {"reason": "control", "before_model": label})
+                    stopped = True
+                    break
+                # Running score is per-model (each model earns its own Agent Index),
+                # so reset the tally as each model starts.
+                tally["answered"] = 0
+                tally["correct"] = 0
+                write_status(phase="running", model=label, model_index=index)
+                emit("model_started", {"model": label, "index": index, "total": len(models)})
+                try:
+                    run_model(model, options, emit)
+                except BaseException as exc:  # noqa: BLE001 - record then re-raise
+                    emit("model_failed", {"model": label, "error": str(exc)})
+                    write_status(phase="failed", model=label, model_index=index)
+                    raise
+                emit("model_finished", {"model": label, "index": index})
 
-        final_phase = "stopped" if stopped else "complete"
-        write_status(phase=final_phase)
-        emit("run_finished", {"phase": final_phase})
+            final_phase = "stopped" if stopped else "complete"
+            write_status(phase=final_phase)
+            emit("run_finished", {"phase": final_phase})
     finally:
         hb_stop.set()
         heartbeat.join(timeout=2.0)

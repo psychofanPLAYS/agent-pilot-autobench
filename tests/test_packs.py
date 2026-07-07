@@ -119,10 +119,14 @@ def test_simple_bench_is_yaml_backed_with_inline_system_prompt():
 @pytest.mark.parametrize(
     "body, message",
     [
-        ("id: x\nanswer_type: exact\nquestions:\n  - id: q\n    prompt: p\n    answer: a\n",
-         "system_prompt"),
-        ("id: x\nsystem_prompt: s\nquestions:\n  - id: q\n    prompt: p\n    answer: a\n",
-         "answer_type"),
+        (
+            "id: x\nanswer_type: exact\nquestions:\n  - id: q\n    prompt: p\n    answer: a\n",
+            "system_prompt",
+        ),
+        (
+            "id: x\nsystem_prompt: s\nquestions:\n  - id: q\n    prompt: p\n    answer: a\n",
+            "answer_type",
+        ),
         ("id: x\nanswer_type: exact\nsystem_prompt: s\n", "no `questions`"),
     ],
 )

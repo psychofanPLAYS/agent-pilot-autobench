@@ -240,9 +240,8 @@ def _run_one_question(
         # this, correct answers were scored "incomplete" (0) just for skipping the
         # marker. MC keeps the marker requirement — that matches the official
         # SimpleBench scorer and MC has its own multi-pattern extraction.
-        if (
-            answer_type is AnswerType.EXACT
-            and exact_answer_in_text(primary_text, question.answer, question.accept)
+        if answer_type is AnswerType.EXACT and exact_answer_in_text(
+            primary_text, question.answer, question.accept
         ):
             outcome = "correct"
             correct = True

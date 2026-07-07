@@ -391,9 +391,7 @@ def _spec_payload(
 ) -> dict:
     plan = options.benchmark_suite_plan
     return {
-        "models": [
-            {"path": str(model.path), "has_mtp": bool(model.has_mtp)} for model in selected
-        ],
+        "models": [{"path": str(model.path), "has_mtp": bool(model.has_mtp)} for model in selected],
         "mode": mode_id,
         "options": {
             "budget_minutes": options.budget_minutes,
@@ -520,9 +518,7 @@ def build_run_options(
     )
     gpu_name = detect_gpu_name()
     default_forced_args = recommended_always_on(gpu_name)
-    forced_args = _string_tuple_option(
-        payload, "forced_server_args", default=default_forced_args
-    )
+    forced_args = _string_tuple_option(payload, "forced_server_args", default=default_forced_args)
     validate_extra_server_args(forced_args)
     allowed = set(default_forced_args)
     allowed.update(flag for flag, _description in OPTIONAL_FORCED_FLAGS)
@@ -542,9 +538,7 @@ def build_run_options(
         label="Sample size",
         suffix=" questions per pack",
     )
-    repeats = _int_option(
-        payload, "repeats", default=3, minimum=1, maximum=20, label="Repeats"
-    )
+    repeats = _int_option(payload, "repeats", default=3, minimum=1, maximum=20, label="Repeats")
     sampler_policy = _sampler_policy_from_payload(payload)
     return WebRunOptions(
         mode_id=mode_id,
@@ -953,17 +947,17 @@ def benchmark_suite_plan_payloads(project_root: Path) -> list[dict]:
         if isinstance(data, dict):
             name = str(data.get("name") or data.get("title") or path.name)
             description = str(data.get("description") or "")
-            settings = data.get("settings") if isinstance(data.get("settings"), dict) else {}
+            raw_settings = data.get("settings")
+            settings = raw_settings if isinstance(raw_settings, dict) else {}
             plan_kind = str(settings.get("plan_kind") or data.get("plan_kind") or "")
             requires = str(settings.get("requires") or data.get("requires") or "")
             score_contract = str(settings.get("score_contract") or "")
             context = _int_option_value(data.get("context") or settings.get("context_size"))
             context_target = str(settings.get("context_target") or "")
-            tasks = data.get("tasks") if isinstance(data.get("tasks"), list) else []
+            raw_tasks = data.get("tasks")
+            tasks = raw_tasks if isinstance(raw_tasks, list) else []
             task_count = len(tasks)
-            phases = sorted(
-                {str(task.get("phase")) for task in tasks if isinstance(task, dict)}
-            )
+            phases = sorted({str(task.get("phase")) for task in tasks if isinstance(task, dict)})
             harnesses = sorted(
                 {str(task.get("harness")) for task in tasks if isinstance(task, dict)}
             )
@@ -989,6 +983,10 @@ def benchmark_suite_plan_payloads(project_root: Path) -> list[dict]:
 
 
 def _int_option_value(value: object, default: int = 0) -> int:
+    if isinstance(value, bool) or value is None:
+        return default
+    if not isinstance(value, int | float | str | bytes | bytearray):
+        return default
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -1131,13 +1129,22 @@ def resolve_run_artifact(runs_root: Path, encoded_relative_path: str) -> Path | 
 
 
 def _model_payload(model: ModelInfo) -> dict:
+    tiny_file = 0 < model.size_bytes < 1024 * 1024
+    size_label = "tiny file" if tiny_file else _size_label(model.size_gb)
+    size_display = f"{size_label} GB" if size_label not in {"unknown", "tiny file"} else size_label
     return {
         "path": str(model.path),
         "name": model.name,
         "family": model.family,
         "parameters": model.parameters,
         "quant": model.quant,
-        "size_label": _size_label(model.size_gb),
+        "context_label": "unknown",
+        "size_bytes": model.size_bytes,
+        "size_gb": model.size_gb,
+        "size_label": size_label,
+        "size_display": size_display,
+        "file_label": model.path.name,
+        "size_warning": tiny_file,
         "is_moe": model.is_moe,
         "has_mtp": model.has_mtp,
         "has_vision": model.has_vision,
@@ -1156,7 +1163,7 @@ def _mode_payload(mode) -> dict:
 
 def _size_label(size_gb: float) -> str:
     if size_gb <= 0:
-        return "0"
+        return "unknown"
     if size_gb < 0.01:
         return "<0.01"
     return f"{size_gb:.2f}"
@@ -1231,17 +1238,17 @@ INDEX_HTML = r"""<!doctype html>
   <style>
     :root {
       color-scheme: dark;
-      --bg: #0b0f14;
-      --rail: #090d12;
-      --panel: #121820;
-      --panel-2: #0e141b;
-      --panel-3: #0a0e14;
-      --line: #26313d;
+      --bg: #0b1015;
+      --rail: #090e13;
+      --panel: #141a21;
+      --panel-2: #10161d;
+      --panel-3: #0c1117;
+      --line: #2a343f;
       --line-soft: rgba(255,255,255,.06);
       --text: #e8edf3;
       --muted: #9aa8b7;
       --faint: #657282;
-      --teal: #54d2bd;
+      --teal: #20c4cf;
       --teal-dim: #2c6c63;
       --amber: #f4b860;
       --amber-dim: #7a5a2c;
@@ -1266,30 +1273,64 @@ INDEX_HTML = r"""<!doctype html>
       --good: #a8c47a;
     }
     * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
     body {
       margin: 0;
       background:
-        linear-gradient(180deg, rgba(84,210,189,.035), transparent 280px),
+        radial-gradient(circle at 42% 0%, rgba(32,196,207,.10), transparent 34%),
+        linear-gradient(180deg, rgba(255,255,255,.025), transparent 260px),
         var(--bg);
       color: var(--text);
       font: 14px/1.45 Inter, ui-sans-serif, system-ui, Segoe UI, Arial, sans-serif;
     }
-    .shell { display: grid; grid-template-columns: 236px minmax(0, 1fr); min-height: 100vh; }
+    .shell { display: grid; grid-template-columns: 252px minmax(0, 1fr); min-height: 100vh; }
     aside {
       border-right: 1px solid var(--line);
-      background: var(--rail);
-      padding: 24px 18px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.035), transparent 180px),
+        var(--rail);
+      padding: 22px 16px;
       position: sticky;
       top: 0;
       height: 100vh;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
     }
-    .brand { font-size: 22px; font-weight: 800; letter-spacing: 0; margin-bottom: 2px; }
-    .brand-sub { color: var(--muted); font-size: 12px; margin-bottom: 24px; }
+    .brand { font-size: 26px; font-weight: 850; letter-spacing: 0; margin-bottom: 2px; display:flex; align-items:center; gap:8px; }
+    .brand-mark {
+      width: 27px; height: 27px; border-radius: 50%;
+      border: 2px solid var(--teal); color: var(--teal);
+      display: inline-grid; place-items: center; font-size: 15px; box-shadow: 0 0 24px rgba(32,196,207,.22);
+    }
+    .brand-sub { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+    .version-row { display:flex; gap:10px; align-items:center; margin-top:12px; }
+    .pill {
+      display:inline-flex; align-items:center; gap:6px; border-radius:999px;
+      padding:3px 9px; border:1px solid var(--line); color:var(--muted);
+      background:rgba(255,255,255,.035); font-size:12px; font-weight:700;
+    }
+    .pill.local { color:var(--good); border-color:rgba(121,209,138,.22); background:rgba(121,209,138,.08); }
+    .nav { display:grid; gap:4px; }
+    .navlink {
+      display:flex; align-items:center; gap:11px;
+      padding:10px 12px; border-radius:6px; color:var(--muted);
+      text-decoration:none; font-weight:700;
+    }
+    .navlink.active { color:var(--teal); background:rgba(255,255,255,.11); }
+    .navico { width:18px; text-align:center; color:inherit; }
     .navitem {
       display: flex; justify-content: space-between; gap: 12px;
       padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,.05); color: var(--muted);
     }
     .navitem b { color: var(--text); font-weight: 700; }
+    .status-block { border-top:1px solid var(--line); padding-top:12px; margin-top:2px; }
+    .status-title { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.05em; margin-bottom:8px; }
+    .status-row { display:grid; grid-template-columns: 1fr auto 10px; gap:8px; align-items:center; color:var(--muted); font-size:12px; padding:4px 0; }
+    .status-row strong { color:var(--text); font-weight:600; text-align:right; }
+    .ok-dot { width:7px; height:7px; border-radius:50%; background:var(--good); box-shadow:0 0 12px rgba(121,209,138,.45); }
+    .system-check { margin:10px 0 0; width:100%; background:var(--panel-2); color:var(--text); border:1px solid var(--line); }
+    .rail-foot { margin-top:auto; border-top:1px solid var(--line); padding-top:12px; display:flex; justify-content:space-between; color:var(--muted); font-size:12px; }
     .rail-note {
       margin-top: 18px;
       border: 1px solid var(--line);
@@ -1300,21 +1341,29 @@ INDEX_HTML = r"""<!doctype html>
       font-size: 12px;
     }
     .rail-note strong { display: block; color: var(--text); margin-bottom: 4px; }
-    main { width: min(100%, 1920px); margin: 0 auto; padding: clamp(18px, 2vw, 44px); }
-    header { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
+    main { width: min(100%, 1920px); margin: 0 auto; padding: 4px 8px 10px; overflow-x:hidden; }
+    header { display: none; }
     h1 { margin: 0; font-size: clamp(32px, 2.4vw, 50px); line-height: 0.96; letter-spacing: 0; }
     .sub { margin-top: 7px; color: var(--muted); max-width: 840px; overflow-wrap: anywhere; }
-    .grid { display: grid; grid-template-columns: minmax(500px, 1.18fr) minmax(360px, .82fr); gap: clamp(16px, 1.4vw, 30px); align-items: start; }
+    .grid { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(360px, .96fr); gap: 8px; align-items: stretch; }
     .grid > *, .side, .panel { min-width: 0; }
-    .grid > .panel:first-child { align-self: start; position: sticky; top: 16px; }
+    .grid > .panel:first-child { align-self: stretch; }
     .panel {
-      background: linear-gradient(180deg, rgba(255,255,255,.018), transparent 90px), var(--panel);
+      background: linear-gradient(180deg, rgba(255,255,255,.026), transparent 96px), var(--panel);
       border: 1px solid var(--line);
       border-radius: 6px;
       overflow: hidden;
-      box-shadow: var(--shadow);
+      box-shadow: 0 16px 60px rgba(0,0,0,.20);
     }
-    .panel h2 { margin: 0; padding: 14px 16px; font-size: 15px; border-bottom: 1px solid var(--line); }
+    .panel h2 { margin: 0; padding: 12px 16px; font-size: 15px; border-bottom: 1px solid var(--line); }
+    .library-head { display:grid; grid-template-columns: auto auto 1fr auto auto; gap:10px; align-items:center; padding:10px 14px; border-bottom:1px solid var(--line); }
+    .library-title { font-size:16px; font-weight:800; }
+    .library-count { color:var(--muted); font-size:12px; }
+    .searchbox {
+      justify-self:end; width:min(360px,100%); display:flex; align-items:center; gap:8px;
+      border:1px solid var(--line); border-radius:5px; background:var(--panel-3); padding:6px 10px; color:var(--muted);
+    }
+    .searchbox input { width:100%; border:0; outline:0; background:transparent; color:var(--text); font:inherit; padding:0; }
     .section-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .count-chip {
       border: 1px solid var(--line);
@@ -1325,49 +1374,63 @@ INDEX_HTML = r"""<!doctype html>
       font-size: 12px;
       white-space: nowrap;
     }
+    .model-table-wrap { overflow:auto; height:390px; }
     table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-    th, td { text-align: left; padding: 11px 12px; border-bottom: 1px solid rgba(255,255,255,.06); overflow-wrap: anywhere; }
+    th, td { text-align: left; padding: 7px 12px; border-bottom: 1px solid rgba(255,255,255,.075); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     th { color: var(--muted); font-size: 12px; font-weight: 700; }
     td { vertical-align: middle; }
-    td:nth-child(2) { max-width: 360px; overflow-wrap: anywhere; }
     th:nth-child(1), td:nth-child(1) { width: 50px; }
-    th:nth-child(3), td:nth-child(3) { width: 84px; }
-    th:nth-child(4), td:nth-child(4) { width: 78px; }
-    th:nth-child(5), td:nth-child(5) { width: 88px; }
-    th:nth-child(6), td:nth-child(6) { width: 68px; }
-    th:nth-child(7), td:nth-child(7) { width: 70px; }
+    th:nth-child(3), td:nth-child(3) { width: 86px; text-align:right; }
+    th:nth-child(4), td:nth-child(4) { width: 92px; }
+    th:nth-child(5), td:nth-child(5) { width: 86px; }
+    th:nth-child(6), td:nth-child(6) { width: 92px; text-align:right; }
+    th:nth-child(7), td:nth-child(7) { width: 142px; }
     tr { cursor: pointer; }
     tr:hover td { background: rgba(84,210,189,.06); }
     tr.selected td {
-      background: rgba(84,210,189,.10);
+      background: linear-gradient(90deg, rgba(32,196,207,.18), rgba(32,196,207,.07));
       box-shadow: inset 3px 0 0 var(--teal);
     }
-    input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--teal); }
+    input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--teal); }
     .chip { display: inline-block; border: 1px solid var(--line); border-radius: 4px; padding: 2px 6px; color: var(--muted); }
+    .chip.warn { color: var(--amber); border-color: var(--amber-dim); background: rgba(244,184,96,.06); }
+    .size-compact { display:none; }
     .qwen { color: var(--teal); }
     .gemma { color: var(--amber); }
-    .side { display: grid; gap: 16px; }
+    .side { display: grid; gap: 8px; }
     .body { padding: 14px 16px; }
     select, button {
       width: 100%; border-radius: 6px; border: 1px solid var(--line);
-      background: var(--panel-2); color: var(--text); padding: 10px 12px;
+      background: var(--panel-2); color: var(--text); padding: 8px 10px;
       font: inherit;
     }
     button {
       margin-top: 12px; background: var(--teal); color: #07100e; font-weight: 800;
       cursor: pointer; border-color: transparent;
+      transition: transform .14s ease, background-color .14s ease, border-color .14s ease, box-shadow .14s ease, color .14s ease;
+    }
+    button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 8px 18px rgba(0,0,0,.18); }
+    button:active:not(:disabled) { transform: translateY(0); box-shadow: inset 0 1px 0 rgba(0,0,0,.28); }
+    button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visible, select:focus-visible {
+      outline: 2px solid rgba(32,196,207,.72);
+      outline-offset: 2px;
     }
     #start {
-      min-height: 52px;
-      font-size: 16px;
-      box-shadow: 0 14px 34px rgba(84, 210, 189, .18);
+      min-height: 50px;
+      margin: 0;
+      border-radius: 0;
+      font-size: 20px;
+      box-shadow: 0 16px 38px rgba(32,196,207,.18);
     }
+    #start::before { content:"▶"; margin-right:12px; }
     .launch-zone {
-      margin-top: 14px;
-      padding: 14px;
+      order: 3;
+      margin-top: 0;
+      padding: 0;
       border: 1px solid var(--teal-dim);
       border-radius: 8px;
-      background: linear-gradient(180deg, rgba(84,210,189,.09), rgba(84,210,189,.025));
+      background: linear-gradient(180deg, rgba(32,196,207,.10), rgba(32,196,207,.035));
+      overflow:hidden;
     }
     .launch-readiness {
       display: grid;
@@ -1376,7 +1439,8 @@ INDEX_HTML = r"""<!doctype html>
       align-items: start;
       color: var(--muted);
       font-size: 12px;
-      margin-bottom: 10px;
+      padding: 8px 12px;
+      border-bottom: 1px solid rgba(255,255,255,.08);
     }
     .launch-readiness strong { color: var(--text); font-size: 13px; }
     .launch-readiness .ready-pill {
@@ -1389,15 +1453,19 @@ INDEX_HTML = r"""<!doctype html>
       white-space: nowrap;
     }
     #guard {
-      min-height: 22px;
-      margin: 10px 0 0;
-      padding-top: 10px;
+      min-height: 0;
+      margin: 0;
+      padding: 7px 12px 9px;
       border-top: 1px solid rgba(255,255,255,.07);
+      max-width: none;
+      text-align: center;
+      font-size: 11px;
     }
     .ghost-button {
       width: auto; margin: 0; padding: 8px 10px; background: var(--panel-2);
       border-color: var(--line); color: var(--text); font-weight: 700;
     }
+    .ghost-button:hover:not(:disabled) { border-color: var(--teal-dim); background: rgba(32,196,207,.08); }
     .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .field { margin-top: 12px; }
     .field label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 6px; }
@@ -1411,7 +1479,9 @@ INDEX_HTML = r"""<!doctype html>
     }
     .checkline strong { display: block; color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
     .checkline small { display: block; margin-top: 2px; }
-    .plan-cards { display: grid; gap: 10px; margin-top: 8px; }
+    .plan-cards { display: grid; gap: 6px; margin-top: 4px; position:relative; }
+    .plan-toolbar { display:flex; justify-content:flex-end; margin-bottom:6px; }
+    .plan-toolbar .ghost-button { padding:6px 10px; font-size:12px; }
     .plan-card {
       width: 100%;
       margin: 0;
@@ -1420,20 +1490,119 @@ INDEX_HTML = r"""<!doctype html>
       border-radius: 8px;
       background: var(--panel-2);
       color: var(--text);
-      padding: 12px;
+      padding: 7px 9px;
       box-shadow: none;
+      transition: transform .14s ease, background-color .14s ease, border-color .14s ease, box-shadow .14s ease;
     }
-    .plan-card:hover { border-color: var(--teal-dim); background: rgba(84,210,189,.05); }
+    .plan-card:hover { border-color: var(--teal-dim); background: rgba(84,210,189,.05); transform: translateY(-1px); }
+    .plan-card:active { transform: translateY(0); }
     .plan-card.selected {
       border-color: var(--teal);
       background: rgba(84,210,189,.10);
       box-shadow: inset 3px 0 0 var(--teal);
     }
-    .plan-card strong { display: block; font-size: 14px; margin-bottom: 4px; }
-    .plan-card span { display: block; color: var(--muted); font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
-    .plan-card small { display: block; color: var(--amber); margin-top: 7px; }
+    .plan-current { cursor: default; }
+    .plan-current:hover { transform:none; }
+    .plan-card strong { display: block; font-size: 13px; margin-bottom: 3px; }
+    .plan-card span {
+      display: -webkit-box;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.25;
+      overflow: hidden;
+      overflow-wrap: anywhere;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+    .plan-card small { display: block; color: var(--amber); margin-top: 5px; }
+    .plan-menu {
+      display:none;
+      position:absolute;
+      left:0;
+      right:0;
+      top:calc(100% + 8px);
+      z-index:20;
+      gap:8px;
+      padding:8px;
+      border:1px solid var(--line);
+      border-radius:8px;
+      background:var(--panel);
+      box-shadow:0 18px 48px rgba(0,0,0,.36);
+      max-height:360px;
+      overflow:auto;
+    }
+    .plan-cards.open .plan-menu { display:grid; }
+    .builder-stack { display:grid; gap:6px; padding:8px; }
+    .builder-card {
+      border:1px solid var(--line);
+      border-radius:8px;
+      background:linear-gradient(180deg, rgba(255,255,255,.025), rgba(255,255,255,.01));
+      overflow:hidden;
+    }
+    .builder-card-head {
+      display:flex; align-items:center; justify-content:space-between; gap:12px;
+      padding:7px 10px; border-bottom:1px solid var(--line-soft); font-weight:800; font-size:13px;
+    }
+    .builder-card-body { padding:7px 10px; color:var(--muted); }
+    .builder-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .builder-grid b { display:block; color:var(--text); margin-top:3px; }
+    .selected-preview {
+      display:grid;
+      gap:5px;
+      margin-top:8px;
+    }
+    .selected-preview span {
+      min-width:0;
+      border:1px solid var(--line-soft);
+      border-radius:5px;
+      background:rgba(255,255,255,.025);
+      color:var(--text);
+      padding:5px 7px;
+      font-size:11px;
+      line-height:1.25;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+    .selected-preview .empty { color:var(--muted); }
+    .selected-preview .more { color:var(--teal); border-color:rgba(32,196,207,.22); }
+    .builder-badge {
+      min-width:24px; height:24px; border-radius:50%; display:inline-grid; place-items:center;
+      background:rgba(32,196,207,.18); color:var(--teal); font-weight:900;
+    }
+    .engine-grid { display:grid; grid-template-columns:1fr 1fr; gap:7px 18px; font-size:12px; }
+    .engine-grid span { color:var(--muted); }
+    .engine-grid b { color:var(--text); font-weight:600; }
+    #engine-card { order:4; }
+    #engine-card .builder-card-head { border-bottom:0; }
+    #engine-card .builder-card-body { display:none; }
+    .builder-proof {
+      display:none;
+      order:5;
+      grid-template-columns:repeat(4,minmax(0,1fr));
+      gap:6px;
+    }
+    .builder-proof span {
+      min-width:0;
+      border:1px solid var(--line);
+      border-radius:6px;
+      background:rgba(255,255,255,.025);
+      padding:7px 8px;
+      color:var(--muted);
+      font-size:11px;
+      line-height:1.25;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+    .builder-proof b { color:var(--teal); margin-right:5px; }
+    #run-builder .run-summary { display:none; }
+    #run-builder .builder-stack > details.controls,
+    #run-builder #stop-after-current { display:none; }
+    .side > details.panel.controls,
+    .side > .panel:not(#run-builder) { display:none; }
     details.controls {
-      margin-top: 14px;
+      margin-top: 0;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: var(--panel-2);
@@ -1441,7 +1610,7 @@ INDEX_HTML = r"""<!doctype html>
     }
     details.controls > summary {
       cursor: pointer;
-      padding: 12px 14px;
+      padding: 9px 12px;
       font-weight: 800;
       list-style: none;
       display: flex;
@@ -1450,7 +1619,7 @@ INDEX_HTML = r"""<!doctype html>
     }
     details.controls > summary::after { content: "open"; color: var(--muted); font-size: 12px; }
     details.controls[open] > summary::after { content: "close"; }
-    details.controls .inside { padding: 0 14px 14px; }
+    details.controls .inside { padding: 0 12px 12px; }
     .run-summary {
       margin: 14px 0;
       padding: 14px;
@@ -1489,6 +1658,85 @@ INDEX_HTML = r"""<!doctype html>
     .flow-step.active { border-color: var(--teal); box-shadow: 0 0 0 1px rgba(84,210,189,.14); }
     .flow-step b { display: block; margin-bottom: 4px; }
     .flow-step small { color: var(--muted); }
+    .selection-strip {
+      margin-top:8px;
+      border:1px solid var(--line);
+      border-radius:6px;
+      background:var(--panel);
+      overflow:hidden;
+    }
+    .selected-row {
+      min-height:44px;
+      display:grid;
+      grid-template-columns:auto auto minmax(130px,auto) minmax(160px,1fr) auto;
+      gap:14px;
+      align-items:center;
+      padding:8px 16px;
+      border-bottom:1px solid var(--line);
+      color:var(--muted);
+    }
+    #strip-clear { justify-self:start; min-width:74px; }
+    .selected-row b { color:var(--teal); font-size:18px; margin-right:4px; }
+    .sizebar { height:12px; border-radius:999px; border:1px solid var(--line-soft); background:var(--panel-3); overflow:hidden; }
+    .sizebar i { display:block; height:100%; width:0%; background:linear-gradient(90deg, var(--teal), #168a94); }
+    .run-flow {
+      display:grid;
+      grid-template-columns: minmax(120px,.8fr) repeat(4,minmax(0,1fr));
+      gap:18px;
+      align-items:center;
+      padding:14px 22px;
+    }
+    .flow-label { font-weight:800; letter-spacing:.04em; }
+    .flow-mini { display:grid; grid-template-columns:34px 1fr; gap:10px; align-items:center; min-width:0; }
+    .flow-mini .num { width:28px; height:28px; border-radius:50%; display:grid; place-items:center; background:var(--teal); color:#061012; font-weight:900; box-shadow:0 0 22px rgba(32,196,207,.22); }
+    .flow-mini b { display:block; font-size:12px; }
+    .flow-mini small { color:var(--muted); display:block; font-size:11px; }
+    .analytics-grid {
+      display:grid;
+      grid-template-columns:minmax(280px,.9fr) minmax(360px,1.15fr) minmax(300px,.95fr);
+      gap:8px;
+      margin-top:8px;
+    }
+    .analytics-panel { padding:12px; }
+    .analytics-title { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; font-weight:800; }
+    .analytics-title span { color:var(--muted); font-size:12px; font-weight:700; }
+    .scope-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+    .scope-cell {
+      border:1px solid var(--line);
+      border-radius:6px;
+      background:rgba(255,255,255,.025);
+      padding:10px;
+      min-width:0;
+    }
+    .scope-cell span { display:block; color:var(--muted); font-size:11px; }
+    .scope-cell b { display:block; margin-top:4px; font-size:20px; color:var(--text); }
+    .heatmap { display:grid; gap:6px; overflow:auto; }
+    .heat-row { display:grid; grid-template-columns: minmax(92px,.8fr) repeat(var(--model-cols, 2), minmax(56px,1fr)); gap:5px; align-items:center; min-width:0; }
+    .heat-label { color:var(--muted); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .heat-cell {
+      height:24px;
+      border:1px solid rgba(32,196,207,.18);
+      border-radius:4px;
+      background:rgba(32,196,207,.08);
+      color:var(--teal);
+      display:grid;
+      place-items:center;
+      font-size:10px;
+      font-weight:800;
+    }
+    .heat-cell.dim { background:rgba(255,255,255,.025); color:var(--muted); border-color:var(--line-soft); }
+    .timeline { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:7px; }
+    .timeline-stage {
+      border:1px solid var(--line);
+      border-radius:6px;
+      background:rgba(255,255,255,.025);
+      padding:9px;
+      min-height:76px;
+    }
+    .timeline-stage b { display:block; font-size:12px; }
+    .timeline-stage span { display:block; color:var(--muted); font-size:11px; margin-top:4px; }
+    .timeline-stage.active { border-color:var(--teal); background:rgba(32,196,207,.10); box-shadow:inset 3px 0 0 var(--teal); }
+    .timeline-stage.done { border-color:rgba(121,209,138,.35); }
     .seam-diagram {
       display: grid;
       grid-template-columns: 1fr auto 1fr auto 1fr;
@@ -1527,25 +1775,158 @@ INDEX_HTML = r"""<!doctype html>
     button:disabled { opacity: .5; cursor: not-allowed; }
     .pack { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; color: var(--muted); }
     .pack small { display: block; color: var(--muted); }
-    .telemetry { display: grid; grid-template-columns: repeat(4, minmax(160px, 1fr)); gap: 10px; margin-top: 18px; }
-    .metric { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
+    .bottom-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(360px,.95fr); gap:8px; margin-top:8px; }
+    .telemetry { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 0; margin-top: 0; }
+    .metric { background: transparent; border-right: 1px solid var(--line); padding: 14px; min-height:105px; }
+    .metric:last-child { border-right:0; }
     .metric .label { color: var(--muted); font-size: 12px; }
     .metric .value { font-size: 18px; font-weight: 800; margin-top: 4px; }
-    .status { margin-top: 16px; padding: 14px 16px; }
-    .reports { margin-top: 16px; }
-    .links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-    .links a, .receipt-card a {
+    .metric::after {
+      content:""; display:block; height:26px; margin-top:10px; opacity:.8;
+      background:
+        linear-gradient(90deg, transparent 0 7%, rgba(32,196,207,.7) 7% 9%, transparent 9% 17%, rgba(32,196,207,.45) 17% 19%, transparent 19% 28%, rgba(32,196,207,.8) 28% 30%, transparent 30% 39%, rgba(32,196,207,.35) 39% 41%, transparent 41% 50%, rgba(32,196,207,.65) 50% 52%, transparent 52% 61%, rgba(32,196,207,.25) 61% 63%, transparent 63% 71%, rgba(32,196,207,.55) 71% 73%, transparent 73% 82%, rgba(32,196,207,.38) 82% 84%, transparent 84% 100%);
+      border-bottom:1px solid rgba(32,196,207,.42);
+    }
+    .status { margin-top: 8px; padding: 14px 16px; }
+    .reports { margin-top: 0; }
+    .reports-head {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      min-width:0;
+    }
+    .report-count {
+      color:var(--muted);
+      font-size:11px;
+      font-weight:800;
+      white-space:nowrap;
+    }
+    .links {
+      display:flex;
+      flex-wrap:wrap;
+      gap:0;
+      margin-top:10px;
+      overflow:hidden;
+      border:1px solid var(--line);
+      border-radius:6px;
+      background:rgba(0,0,0,.12);
+      width:max-content;
+      max-width:100%;
+    }
+    .links a, .receipt-actions a, .receipt-more a, .link-count, .artifact-toggle {
       color: var(--text); text-decoration: none; border: 1px solid var(--line);
-      border-radius: 6px; padding: 7px 9px; background: var(--panel-2);
+      border-radius: 6px; padding: 6px 8px; background: var(--panel-2);
+      transition: transform .14s ease, background-color .14s ease, border-color .14s ease;
     }
-    .receipt-list { display: grid; gap: 10px; margin-top: 12px; }
-    .receipt-card {
-      display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px;
-      border: 1px solid var(--line); border-radius: 6px; padding: 10px; background: var(--panel-2);
+    .links a {
+      border:0;
+      border-right:1px solid var(--line);
+      border-radius:0;
+      background:transparent;
+      font-size:12px;
+      font-weight:800;
+      white-space:nowrap;
     }
-    .receipt-card strong { display: block; overflow-wrap: anywhere; }
-    .receipt-meta { color: var(--muted); font-size: 12px; margin-top: 3px; }
-    .receipt-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; align-content: start; }
+    .links a:last-of-type { border-right:0; }
+    .links a:hover { color:var(--teal); background:rgba(32,196,207,.08); }
+    .receipt-actions a:hover, .receipt-more a:hover, .artifact-toggle:hover { transform: translateY(-1px); border-color:var(--teal-dim); background:rgba(32,196,207,.08); }
+    .link-count {
+      color:var(--muted);
+      border:0;
+      border-left:1px solid var(--line);
+      border-radius:0;
+      background:rgba(255,255,255,.025);
+      font-size:12px;
+      font-weight:800;
+      white-space:nowrap;
+    }
+    .receipt-list { display: grid; gap: 0; margin-top: 12px; }
+    .receipt-metrics {
+      display:grid;
+      grid-template-columns:repeat(4,minmax(0,1fr));
+      gap:8px;
+      margin:10px 0 8px;
+    }
+    .receipt-metric {
+      border:1px solid var(--line);
+      border-radius:6px;
+      background:rgba(255,255,255,.025);
+      padding:8px 10px;
+      min-width:0;
+    }
+    .receipt-metric span { display:block; color:var(--muted); font-size:11px; }
+    .receipt-metric b { display:block; color:var(--text); font-size:18px; margin-top:2px; }
+    .receipt-table { border:1px solid var(--line); border-radius:6px; overflow:hidden; background:rgba(0,0,0,.10); }
+    .receipt-row {
+      display:grid;
+      grid-template-columns:minmax(0,1fr) 86px 64px;
+      gap:8px;
+      align-items:center;
+      min-width:0;
+      border-bottom:1px solid var(--line-soft);
+      padding:8px 10px;
+    }
+    .receipt-row:last-child { border-bottom:0; }
+    .receipt-head {
+      color:var(--muted);
+      font-size:11px;
+      text-transform:uppercase;
+      letter-spacing:.04em;
+      background:rgba(255,255,255,.025);
+    }
+    .receipt-head span:nth-child(4) { display:none; }
+    .receipt-main { min-width:0; }
+    .receipt-main strong {
+      display:block;
+      min-width:0;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+    .receipt-meta { color: var(--muted); font-size: 11px; margin-top: 3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .receipt-status { color:var(--good); font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .receipt-status.failed, .receipt-status.error { color:var(--bad); }
+    .receipt-status.partial { color:var(--amber); }
+    .receipt-score { font-weight:900; color:var(--teal); }
+    .receipt-actions {
+      display:flex;
+      flex-wrap:wrap;
+      grid-column:1 / -1;
+      justify-content:flex-start;
+      gap:6px;
+      min-width:0;
+      padding-top:2px;
+    }
+    .receipt-actions a, .receipt-more a {
+      max-width:124px;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+      font-size:11px;
+      line-height:1.2;
+    }
+    .artifact-toggle {
+      width:auto;
+      margin:0;
+      border:1px solid var(--line);
+      padding:6px 8px;
+      color:var(--muted);
+      background:rgba(255,255,255,.025);
+      font-size:11px;
+      line-height:1.2;
+      cursor:pointer;
+      font-weight:800;
+    }
+    .artifact-toggle[aria-expanded="true"] { color:var(--teal); border-color:var(--teal-dim); background:rgba(32,196,207,.08); }
+    .receipt-more {
+      grid-column:1 / -1;
+      display:none;
+      flex-wrap:wrap;
+      gap:6px;
+      padding-top:2px;
+    }
+    .receipt-row.expanded .receipt-more { display:flex; }
     .event-feed {
       display: grid; gap: 6px; margin-top: 10px; max-height: 240px; overflow: auto;
       border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); padding: 10px;
@@ -1566,8 +1947,27 @@ INDEX_HTML = r"""<!doctype html>
     @media (max-width: 980px) {
       .shell { grid-template-columns: 1fr; }
       aside { display: none; }
+      header {
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:12px;
+        margin:0 0 8px;
+        padding:8px 10px;
+        border:1px solid var(--line);
+        border-radius:6px;
+        background:linear-gradient(180deg, rgba(255,255,255,.035), transparent 120px), var(--panel);
+      }
+      header h1 { font-size:21px; line-height:1; }
+      header .sub { display:none; }
+      header .ghost-button { width:auto; min-width:92px; margin:0; }
       .grid { grid-template-columns: 1fr; }
-      .grid > .panel:first-child { position: static; }
+      .side { order:2; }
+      .grid > .panel:first-child { order:1; }
+      .library-head { grid-template-columns:1fr auto; }
+      .searchbox { grid-column:1/-1; justify-self:stretch; width:100%; }
+      .model-table-wrap table { min-width: 820px; }
+      .builder-proof { display:grid; }
       .telemetry { grid-template-columns: repeat(2, 1fr); }
       .flow-diagram { grid-template-columns: 1fr 1fr; }
       .flow-step::after { display: none; }
@@ -1575,10 +1975,90 @@ INDEX_HTML = r"""<!doctype html>
       .seam-arrow { text-align: center; transform: rotate(90deg); }
       .status-legend { grid-template-columns: 1fr 1fr; }
       .summary-grid { grid-template-columns: 1fr; }
+      .selected-row { grid-template-columns:1fr; gap:8px; }
+      #strip-clear { justify-self:stretch; width:100%; }
+      .plan-menu { position:static; margin-top:8px; }
+      .run-flow { grid-template-columns:1fr; }
+      .analytics-grid { grid-template-columns:1fr; }
+      .bottom-grid { grid-template-columns:1fr; }
+      .receipt-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .receipt-row { grid-template-columns:minmax(0,1fr) 86px 64px; gap:6px; }
+      .receipt-head { display:none; }
+      .receipt-actions { justify-content:flex-start; }
+    }
+    @media (min-width: 981px) and (max-width: 1366px) {
+      .shell { grid-template-columns: 220px minmax(0, 1fr); }
+      aside { padding: 18px 14px; gap: 13px; }
+      .brand { font-size: 22px; }
+      .brand-mark { width: 24px; height: 24px; font-size: 13px; }
+      .brand-sub { font-size: 12px; }
+      .navlink { padding: 9px 10px; gap: 9px; }
+      .status-row { grid-template-columns: 1fr auto 8px; font-size: 11px; gap: 6px; }
+      th:nth-child(1), td:nth-child(1) { width: 42px; }
+      th:nth-child(3), td:nth-child(3) { width: 76px; }
+      th:nth-child(4), td:nth-child(4) { width: 82px; }
+      th:nth-child(5), td:nth-child(5) { width: 92px; }
+      th:nth-child(6), td:nth-child(6) { width: 104px; }
+      th:nth-child(7), td:nth-child(7) { display:none; }
+      .selection-strip { margin-top:3px; }
+      .selected-row {
+        min-height:32px;
+        padding:4px 14px;
+        gap:10px;
+      }
+      .selected-row b { font-size:16px; }
+      .sizebar { height:10px; }
+      .run-flow {
+        gap:10px;
+        padding:5px 18px;
+      }
+      .flow-mini {
+        grid-template-columns:26px 1fr;
+        gap:7px;
+      }
+      .flow-mini .num {
+        width:22px;
+        height:22px;
+        font-size:12px;
+      }
+      .flow-mini b { font-size:11px; }
+      .flow-mini small { display:none; }
+      .bottom-grid { grid-template-columns:1fr; }
+      .reports { order:-1; }
+      .receipt-row { grid-template-columns:minmax(0,1fr) 118px 76px; }
+    }
+    @media (max-width: 640px) {
+      main { padding:4px 8px 10px; }
+      .library-head { grid-template-columns:1fr auto; }
+      .library-count { justify-self:end; }
+      .library-head .ghost-button { min-width:0; }
+      .reports-head { align-items:flex-start; flex-direction:column; gap:4px; }
+      .links { width:100%; }
+      .links a, .link-count { flex:1 1 auto; text-align:center; }
+      .model-table-wrap { height:auto; max-height:420px; }
+      .model-table-wrap table { min-width:0; table-layout:fixed; }
+      th, td { padding:8px 8px; }
+      th:nth-child(1), td:nth-child(1) { width:38px; }
+      th:nth-child(2), td:nth-child(2) { width:auto; }
+      th:nth-child(3), td:nth-child(3),
+      th:nth-child(5), td:nth-child(5),
+      th:nth-child(7), td:nth-child(7) { display:none; }
+      th:nth-child(4), td:nth-child(4) { width:76px; }
+      th:nth-child(6), td:nth-child(6) { width:74px; }
+      .chip { max-width:66px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .chip.warn { max-width:54px; }
+      .size-full { display:none; }
+      .size-compact { display:inline; }
+      #start { font-size:18px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+      button:hover:not(:disabled), .plan-card:hover { transform:none; }
     }
     @media (min-width: 1700px) {
-      .shell { grid-template-columns: 268px minmax(0, 1fr); }
-      .grid { grid-template-columns: minmax(820px, 1.35fr) minmax(520px, .75fr); }
+      .shell { grid-template-columns: 252px minmax(0, 1fr); }
+      .grid { grid-template-columns: minmax(920px, 1.75fr) minmax(520px, .95fr); }
+      .bottom-grid { grid-template-columns:minmax(520px,1fr) minmax(520px,.95fr); }
       body { font-size: 15px; }
       .panel h2 { font-size: 16px; }
     }
@@ -1687,16 +2167,33 @@ INDEX_HTML = r"""<!doctype html>
 <body>
   <div class="shell">
     <aside>
-      <div class="brand">pilotBENCHY</div>
-      <div class="brand-sub">local benchmark cockpit</div>
-      <div class="navitem"><span>Control</span><b>local</b></div>
-      <div class="navitem"><span>Models</span><b id="nav-models">0</b></div>
-      <div class="navitem"><span>Receipts</span><b>_runs</b></div>
-      <div class="navitem"><span>Server</span><b>127.0.0.1</b></div>
-      <div class="rail-note">
-        <strong>Thin cockpit</strong>
-        The browser starts a detached engine, then reads the run folder. Refreshes do not own the benchmark.
+      <div>
+        <div class="brand"><span class="brand-mark">PB</span><span><span style="color:var(--teal)">pilot</span>BENCHY</span></div>
+        <div class="brand-sub">Local-first GGUF/llama.cpp benchmark cockpit</div>
+        <div class="version-row"><span class="pill">v0.9.4</span><span class="pill local">Local</span></div>
       </div>
+      <nav class="nav" aria-label="Cockpit navigation">
+        <a class="navlink active" href="#"><span class="navico">◉</span>Cockpit</a>
+        <a class="navlink" href="#recent-receipts"><span class="navico">☷</span>Runs</a>
+        <a class="navlink" href="#recent-receipts"><span class="navico">▣</span>Receipts</a>
+        <a class="navlink" href="#model-library"><span class="navico">⬡</span>Models</a>
+        <a class="navlink" href="#run-builder"><span class="navico">□</span>Plans</a>
+        <a class="navlink" href="#engine-card"><span class="navico">✧</span>Engines</a>
+        <a class="navlink" href="#advanced-controls"><span class="navico">⚙</span>Settings</a>
+        <a class="navlink" href="#run-flow"><span class="navico">ⓘ</span>About</a>
+      </nav>
+      <div class="status-block">
+        <div class="status-title">System status</div>
+        <div class="status-row"><span>Backend</span><strong>llama.cpp</strong><i class="ok-dot"></i></div>
+        <div class="status-row"><span>Engine</span><strong>Detached</strong><i class="ok-dot"></i></div>
+        <div class="status-row"><span>_models</span><strong id="rail-model-root">local</strong><i class="ok-dot"></i></div>
+        <div class="status-row"><span>Runs</span><strong>_runs</strong><i class="ok-dot"></i></div>
+        <div class="status-row"><span>RAM</span><strong id="rail-ram">-</strong><i class="ok-dot"></i></div>
+        <div class="status-row"><span>CPU</span><strong id="rail-cpu">-</strong><i class="ok-dot"></i></div>
+        <div class="status-row"><span>GPU</span><strong id="rail-gpu">-</strong><i class="ok-dot"></i></div>
+        <button class="system-check ghost-button" type="button">↻ Check systems</button>
+      </div>
+      <div class="rail-foot"><span class="ok">● Systems nominal</span><span id="rail-clock">local</span></div>
     </aside>
     <main>
       <header>
@@ -1709,35 +2206,72 @@ INDEX_HTML = r"""<!doctype html>
       <div id="cockpit" hidden></div>
       <div id="preflight">
       <section class="grid">
-        <div class="panel">
-          <h2 class="section-title"><span>Model selection</span><span id="selected-count" class="count-chip">0 selected</span></h2>
-          <div class="body toolbar">
-            <button id="select-all" class="ghost-button" type="button">Select all</button>
-            <button id="clear-selection" class="ghost-button" type="button">Clear</button>
-            <button id="sort-models" class="ghost-button" type="button">Sort: family</button>
+        <div class="panel" id="model-library">
+          <div class="library-head">
+            <div class="library-title">Model library</div>
+            <div id="library-count" class="library-count">0 models</div>
+            <label class="searchbox"><span>⌕</span><input id="model-search" type="search" placeholder="Search models..." /></label>
+            <button id="select-all" class="ghost-button" type="button">Select visible</button>
+            <button id="sort-models" class="ghost-button" type="button" aria-label="Cycle model sort">Sort: family</button>
           </div>
-          <table>
-            <thead><tr><th></th><th>Model</th><th>Family</th><th>Params</th><th>Quant</th><th>GB</th><th>Flags</th></tr></thead>
-            <tbody id="models"></tbody>
-          </table>
+          <div class="model-table-wrap">
+            <table>
+              <thead><tr><th></th><th>Model ↓</th><th>Params</th><th>Quant</th><th>Context</th><th>Size</th><th>File</th></tr></thead>
+              <tbody id="models"></tbody>
+            </table>
+          </div>
+          <div class="body toolbar" style="justify-content:space-between;border-top:1px solid var(--line);">
+            <span class="sub">Rows per page: 10</span>
+            <span class="sub" id="library-page">1-10 of 0</span>
+            <button id="clear-selection" class="ghost-button" type="button">Clear</button>
+          </div>
         </div>
         <div class="side">
-          <div class="panel">
-          <h2>Run builder</h2>
-              <div class="body">
-                <div class="field">
-                  <label>Benchmark plan</label>
-                  <select id="flight-plan" hidden aria-hidden="true"></select>
-                  <div id="plan-cards" class="plan-cards"></div>
+          <div class="panel" id="run-builder">
+          <h2 class="section-title"><span>Run builder</span><span class="count-chip">Local draft</span></h2>
+              <div class="builder-stack">
+                <div class="builder-card">
+                  <div class="builder-card-head"><span>Selected models</span><span id="selected-count" class="builder-badge">0</span></div>
+                  <div class="builder-card-body">
+                    <div class="builder-grid">
+                      <span>Total size<b id="selected-size">-</b></span>
+                      <span>Est. VRAM<b id="selected-vram">-</b></span>
+                    </div>
+                    <div id="selected-model-preview" class="selected-preview"></div>
+                  </div>
+                </div>
+                <div class="builder-card">
+                  <div class="builder-card-head"><span>Benchmark plan</span><span id="plan-count" class="count-chip">cards</span></div>
+                  <div class="builder-card-body">
+                    <select id="flight-plan" hidden aria-hidden="true"></select>
+                    <div id="plan-cards" class="plan-cards"></div>
+                  </div>
                 </div>
                 <div id="run-summary" class="run-summary"></div>
-                <div class="flow-diagram" aria-label="Run pipeline">
+                <div class="builder-card" id="engine-card">
+                  <div class="builder-card-head"><span>Engine (detached)</span><span class="ok">● Ready</span></div>
+                  <div class="builder-card-body engine-grid">
+                    <span>Backend</span><b>llama.cpp</b>
+                    <span>Context</span><b>Auto</b>
+                    <span>Threads</span><b>Auto</b>
+                    <span>Batch size</span><b>Auto</b>
+                    <span>GPU offload</span><b>Auto</b>
+                    <span>Mode</span><b>Thin client</b>
+                  </div>
+                </div>
+                <div class="builder-proof" aria-label="Run proof checkpoints">
+                  <span><b>1</b>Models</span>
+                  <span><b>2</b>Plan</span>
+                  <span><b>3</b>Engine</span>
+                  <span><b>4</b>Receipts</span>
+                </div>
+                <div class="flow-diagram" aria-label="Run pipeline" hidden>
                   <div class="flow-step"><b>1. Select</b><small>Choose one or more GGUF models.</small></div>
                   <div class="flow-step"><b>2. Plan</b><small>Pick a benchmark contract.</small></div>
                   <div class="flow-step"><b>3. Engine</b><small>Detached runner writes receipts.</small></div>
                   <div class="flow-step"><b>4. Report</b><small>Review evidence, scores, and artifacts.</small></div>
                 </div>
-                <div class="seam-diagram" aria-label="Detached engine architecture">
+                <div class="seam-diagram" aria-label="Detached engine architecture" hidden>
                   <div class="seam-node"><b>Browser</b><small>Chooses models and sends the run order.</small></div>
                   <div class="seam-arrow">→</div>
                   <div class="seam-node"><b>Run folder</b><small>run-spec, status, live events, receipts.</small></div>
@@ -1833,26 +2367,58 @@ INDEX_HTML = r"""<!doctype html>
           </div>
         </div>
       </section>
-      <section class="telemetry">
-        <div class="metric"><div class="label">CPU</div><div class="value" id="cpu">-</div></div>
-        <div class="metric"><div class="label">RAM</div><div class="value" id="ram">-</div></div>
-        <div class="metric"><div class="label">GPU</div><div class="value" id="gpu">-</div></div>
-        <div class="metric"><div class="label">VRAM</div><div class="value" id="vram">-</div></div>
+      <section class="selection-strip" id="run-flow">
+        <div class="selected-row">
+          <span><b id="strip-selected">0</b>models selected</span>
+          <button id="strip-clear" class="ghost-button" type="button">Clear</button>
+          <span>Selected size: <b id="strip-size">-</b></span>
+          <div class="sizebar"><i id="strip-sizebar"></i></div>
+          <span>Free disk: local</span>
+        </div>
+        <div class="run-flow" aria-label="Run flow">
+          <div class="flow-label">RUN FLOW</div>
+          <div class="flow-mini"><span class="num">1</span><span><b>Select models</b><small>Pick GGUF models from your library</small></span></div>
+          <div class="flow-mini"><span class="num">2</span><span><b>Choose plan</b><small>Select benchmark cards and settings</small></span></div>
+          <div class="flow-mini"><span class="num">3</span><span><b>Detached engine</b><small>pilotBENCHY runs in the background</small></span></div>
+          <div class="flow-mini"><span class="num">4</span><span><b>Receipts</b><small>Results, metrics, and artifacts saved</small></span></div>
+        </div>
+      </section>
+      <section class="analytics-grid" id="benchmark-analytics" aria-label="Benchmark analytics">
+        <section class="panel analytics-panel">
+          <div class="analytics-title">Plan scope <span id="scope-plan">preset</span></div>
+          <div class="scope-grid" id="scope-metrics"></div>
+        </section>
+        <section class="panel analytics-panel">
+          <div class="analytics-title">Task heatmap <span>packs x models</span></div>
+          <div class="heatmap" id="task-heatmap"></div>
+        </section>
+        <section class="panel analytics-panel">
+          <div class="analytics-title">Run timeline <span id="timeline-phase">ready</span></div>
+          <div class="timeline" id="stage-timeline"></div>
+        </section>
+      </section>
+      <section class="bottom-grid">
+        <section class="panel">
+          <h2 class="section-title"><span>Live telemetry</span><span class="count-chip">All good</span></h2>
+          <div class="telemetry">
+            <div class="metric"><div class="label">CPU</div><div class="value" id="cpu">-</div></div>
+            <div class="metric"><div class="label">RAM</div><div class="value" id="ram">-</div></div>
+            <div class="metric"><div class="label">GPU</div><div class="value" id="gpu">-</div></div>
+            <div class="metric"><div class="label">VRAM</div><div class="value" id="vram">-</div></div>
+          </div>
+        </section>
+        <section class="panel status reports" id="recent-receipts">
+          <div class="reports-head">
+            <strong>Recent receipts</strong>
+            <span id="receipt-count" class="report-count">0 receipts</span>
+          </div>
+          <div id="global-reports" class="links"></div>
+          <div id="receipts" class="receipt-list"></div>
+        </section>
       </section>
       <section class="panel status">
         <strong>Run status</strong>
         <div id="run-status" class="sub">Loading...</div>
-        <div class="status-legend">
-          <div class="legend-item"><b>Ready</b><small>Pick models and plan.</small></div>
-          <div class="legend-item"><b>Running</b><small>Detached engine owns eval.</small></div>
-          <div class="legend-item"><b>Stopped</b><small>Finishes current item first.</small></div>
-          <div class="legend-item"><b>Receipt</b><small>Evidence saved under _runs.</small></div>
-        </div>
-      </section>
-      <section class="panel status reports">
-        <strong>Receipts and reports</strong>
-        <div id="global-reports" class="links"></div>
-        <div id="receipts" class="receipt-list"></div>
       </section>
       </div><!-- /preflight -->
     </main>
@@ -1866,6 +2432,7 @@ INDEX_HTML = r"""<!doctype html>
     let fallbackNotice = "";
     let selectionInitialized = false;
     let startPending = false;
+    let modelSearch = "";
 
     function escapeHtml(value) {
       return String(value ?? "")
@@ -1882,8 +2449,15 @@ INDEX_HTML = r"""<!doctype html>
 
     function sortedModels(models) {
       const mode = sortModes[sortIndex];
-      return [...models].sort((a, b) => {
-        if (mode === "size") return Number(b.size_label || 0) - Number(a.size_label || 0);
+      const query = modelSearch.trim().toLowerCase();
+      return [...models].filter(model => {
+        if (!query) return true;
+        return [model.name, model.family, model.parameters, model.quant, model.path]
+          .join(" ")
+          .toLowerCase()
+          .includes(query);
+      }).sort((a, b) => {
+        if (mode === "size") return modelSizeGb(b) - modelSizeGb(a);
         return String(a[mode] || a.name).localeCompare(String(b[mode] || b.name));
       });
     }
@@ -1891,25 +2465,33 @@ INDEX_HTML = r"""<!doctype html>
     function render(state) {
       appState = state;
       if (!selectionInitialized && state.models.length) {
-        state.models.slice(0, Math.min(2, state.models.length)).forEach(model => selected.add(model.path));
         selectionInitialized = true;
       }
-      document.querySelector("#nav-models").textContent = state.models.length;
+      const visibleModels = sortedModels(state.models);
+      const libraryCount = document.querySelector("#library-count");
+      const libraryPage = document.querySelector("#library-page");
+      if (libraryCount) libraryCount.textContent = `${state.models.length} model${state.models.length === 1 ? "" : "s"}`;
+      if (libraryPage) libraryPage.textContent = state.models.length
+        ? `1-${Math.min(visibleModels.length, 10)} of ${visibleModels.length}`
+        : "0 of 0";
       const tbody = document.querySelector("#models");
       tbody.innerHTML = "";
-      for (const model of sortedModels(state.models)) {
+      if (!visibleModels.length) {
+        tbody.innerHTML = `<tr><td colspan="7" class="sub" style="padding:28px;">No GGUF models found here. Scan or point pilotBENCHY at a model folder.</td></tr>`;
+      }
+      for (const model of visibleModels) {
         const tr = document.createElement("tr");
         const checked = selected.has(model.path) ? "checked" : "";
         tr.dataset.path = model.path;
         if (selected.has(model.path)) tr.classList.add("selected");
         tr.innerHTML = `
           <td><input type="checkbox" data-path="${escapeHtml(model.path)}" ${checked}></td>
-          <td>${escapeHtml(model.name)}</td>
-          <td class="${familyClass(model.family)}">${escapeHtml(model.family)}</td>
+          <td title="${escapeHtml(model.path)}">${escapeHtml(model.name)} <span class="${familyClass(model.family)}">●</span></td>
           <td>${escapeHtml(model.parameters)}</td>
           <td><span class="chip">${escapeHtml(model.quant)}</span></td>
-          <td>${escapeHtml(model.size_label)}</td>
-          <td>${model.has_mtp ? "MTP " : ""}${model.has_vision ? "vision" : ""}</td>`;
+          <td>${escapeHtml(model.context_label || "unknown")}</td>
+          <td><span class="chip ${model.size_warning ? "warn" : ""}" title="${escapeHtml(model.size_warning ? "Suspiciously small GGUF file; not a real model payload." : model.size_bytes + " bytes")}">${modelSizeDisplay(model)}</span></td>
+          <td title="${escapeHtml(model.path)}">${escapeHtml(model.file_label || model.name)}</td>`;
         tbody.appendChild(tr);
       }
       tbody.querySelectorAll("input").forEach(input => {
@@ -1939,6 +2521,8 @@ INDEX_HTML = r"""<!doctype html>
         }
       }
       renderFlightPlans(state.flight_plans || [], state.default_flight_plan);
+      const planCount = document.querySelector("#plan-count");
+      if (planCount) planCount.textContent = `${(state.flight_plans || []).length} cards`;
       const selectedMode = state.modes.find(item => item.id === mode.value);
       if (selectedMode && mode.dataset.defaultedFor !== mode.value) {
         document.querySelector("#budget").value = selectedMode.budget_minutes;
@@ -1954,6 +2538,10 @@ INDEX_HTML = r"""<!doctype html>
       document.querySelector("#ram").textContent = `${Math.round(t.ram_used_percent)}%`;
       document.querySelector("#gpu").textContent = t.gpu_util_percent == null ? "n/a" : `${t.gpu_util_percent}%`;
       document.querySelector("#vram").textContent = t.gpu_used_mb == null ? "n/a" : `${t.gpu_used_mb}/${t.gpu_total_mb} MB`;
+      document.querySelector("#rail-cpu").textContent = `${Math.round(t.cpu_used_percent)}%`;
+      document.querySelector("#rail-ram").textContent = `${Math.round(t.ram_used_percent)}%`;
+      document.querySelector("#rail-gpu").textContent = t.gpu_util_percent == null ? "n/a" : `${t.gpu_util_percent}%`;
+      document.querySelector("#rail-clock").textContent = new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
       const run = state.run;
       const active = state.active_run ? ` | ${state.active_run}` : "";
       document.querySelector("#run-status").innerHTML =
@@ -1961,6 +2549,7 @@ INDEX_HTML = r"""<!doctype html>
       renderWinner(state);
       renderEvents(run.events || []);
       renderReceipts(state);
+      renderBenchmarkGraphics(state);
       updateGuard();
 
       // pre-flight -> in-flight transform: once the engine is running (or a run dir
@@ -2129,6 +2718,14 @@ INDEX_HTML = r"""<!doctype html>
         +'</div></div>';
     }
 
+    function setPlanDrawerOpen(open) {
+      const cards = document.querySelector("#plan-cards");
+      if (!cards) return;
+      cards.classList.toggle("open", Boolean(open));
+      const toggle = cards.querySelector("#change-plan");
+      if (toggle) toggle.setAttribute("aria-expanded", String(Boolean(open)));
+    }
+
     function renderFlightPlans(plans, defaultFlightPlanId) {
       const select = document.querySelector("#flight-plan");
       if (!select.children.length) {
@@ -2148,29 +2745,65 @@ INDEX_HTML = r"""<!doctype html>
       const cards = document.querySelector("#plan-cards");
       if (cards) {
         const selectedId = select.value;
+        const planItems = [
+          {
+            id: "",
+            label: "Advanced controls",
+            description: "Choose mode, budget, repeats, sampler policy, and optional suite manually.",
+            budget: "For experiments"
+          },
+          ...plans.map(plan => ({
+            id: plan.id,
+            label: plan.label,
+            description: plan.description || plan.evidence_goal || "Ready-made benchmark contract.",
+            budget: `${plan.budget_minutes} min/model`
+          }))
+        ];
+        const currentPlan = planItems.find(item => item.id === selectedId) || planItems[0];
+        const currentPlanCard = `
+          <div class="plan-card selected plan-current" aria-live="polite">
+            <strong>${escapeHtml(currentPlan.label)}</strong>
+            <span>${escapeHtml(currentPlan.description)}</span>
+            <small>${escapeHtml(currentPlan.budget)}</small>
+          </div>`;
+        const planButton = (item, extraClass = "") => `
+          <button type="button" class="plan-card ${item.id === selectedId ? "selected" : ""} ${extraClass}" data-plan-id="${escapeHtml(item.id)}">
+            <strong>${escapeHtml(item.label)}</strong>
+            <span>${escapeHtml(item.description)}</span>
+            <small>${escapeHtml(item.budget)}</small>
+          </button>`;
         cards.innerHTML = [
-          `<button type="button" class="plan-card ${selectedId ? "" : "selected"}" data-plan-id="">
-            <strong>Advanced controls</strong>
-            <span>Choose mode, budget, repeats, sampler policy, and optional suite manually.</span>
-            <small>For experiments</small>
-          </button>`,
-          ...plans.map(plan => `
-            <button type="button" class="plan-card ${selectedId === plan.id ? "selected" : ""}" data-plan-id="${escapeHtml(plan.id)}">
-              <strong>${escapeHtml(plan.label)}</strong>
-              <span>${escapeHtml(plan.description || plan.evidence_goal || "Ready-made benchmark contract.")}</span>
-              <small>${escapeHtml(plan.budget_minutes)} min/model</small>
-            </button>`)
+          `<div class="plan-toolbar"><button id="change-plan" class="ghost-button" type="button" aria-expanded="false" aria-controls="plan-menu">Change plan</button></div>`,
+          currentPlanCard,
+          `<div id="plan-menu" class="plan-menu" role="listbox" aria-label="Benchmark plans">
+            ${planItems.map(item => planButton(item, "plan-option")).join("")}
+          </div>`
         ].join("");
-        cards.querySelectorAll(".plan-card").forEach(card => {
-          card.addEventListener("click", () => {
+        cards.querySelectorAll(".plan-menu .plan-card").forEach(card => {
+          card.addEventListener("pointerdown", event => {
+            event.stopPropagation();
+          });
+          card.addEventListener("click", event => {
+            event.preventDefault();
+            event.stopPropagation();
             select.value = card.dataset.planId || "";
             const plan = selectedFlightPlan();
             if (plan) applyFlightPlan(plan);
             else document.querySelector("#start").textContent = "Start benchmark";
             renderFlightPlans(plans, defaultFlightPlanId);
+            setPlanDrawerOpen(false);
             updateGuard();
           });
         });
+        const change = cards.querySelector("#change-plan");
+        if (change) {
+          change.addEventListener("pointerdown", event => event.stopPropagation());
+          change.addEventListener("click", event => {
+            event.preventDefault();
+            event.stopPropagation();
+            setPlanDrawerOpen(!cards.classList.contains("open"));
+          });
+        }
       }
       const selectedPlan = selectedFlightPlan();
       if (selectedPlan && !select.dataset.appliedDefault) {
@@ -2260,24 +2893,200 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function renderReceipts(state) {
+      const receiptCount = document.querySelector("#receipt-count");
+      if (receiptCount) {
+        receiptCount.textContent = `${state.receipts.length} receipt${state.receipts.length === 1 ? "" : "s"}`;
+      }
       const globalReports = document.querySelector("#global-reports");
-      globalReports.innerHTML = state.global_reports.length
-        ? state.global_reports.map(report => `<a href="${escapeHtml(report.url)}" target="_blank" rel="noreferrer">${escapeHtml(report.label)}</a>`).join("")
-        : `<span class="sub">Reports appear here after the first run.</span>`;
+      if (state.global_reports.length) {
+        const primaryReports = primaryGlobalReports(state.global_reports);
+        const remainingReports = Math.max(0, state.global_reports.length - primaryReports.length);
+        globalReports.innerHTML = primaryReports
+          .map(report => `<a href="${escapeHtml(report.url)}" target="_blank" rel="noreferrer" title="${escapeHtml(report.label)}">${escapeHtml(report.label)}</a>`)
+          .join("") + (remainingReports ? `<span class="link-count" title="${escapeHtml(state.global_reports.map(report => report.label).join(", "))}">+${remainingReports} reports</span>` : "");
+      } else {
+        globalReports.innerHTML = `<span class="sub">Reports appear here after the first run.</span>`;
+      }
 
       const receipts = document.querySelector("#receipts");
-      receipts.innerHTML = state.receipts.length
-        ? state.receipts.map(receipt => `
-            <div class="receipt-card">
-              <div>
-                <strong>${escapeHtml(receipt.model)}</strong>
-                <div class="receipt-meta">${escapeHtml(receipt.run_id)} | ${escapeHtml(receipt.status)} | ${escapeHtml(receipt.modified)}</div>
-              </div>
-              <div class="receipt-actions">
-                ${receipt.artifacts.map(artifact => `<a href="${escapeHtml(artifact.url)}" target="_blank" rel="noreferrer">${escapeHtml(artifact.label)}</a>`).join("")}
-              </div>
-            </div>`).join("")
-        : `<div class="sub">No receipt folders found yet.</div>`;
+      if (!state.receipts.length) {
+        receipts.innerHTML = `<div class="sub">No receipt folders found yet.</div>`;
+        return;
+      }
+      const scores = state.receipts.map(receipt => Number(receipt.score)).filter(value => Number.isFinite(value));
+      const statusCounts = state.receipts.reduce((counts, receipt) => {
+        const key = String(receipt.status || "receipt").toLowerCase();
+        if (key.includes("fail") || key.includes("error")) counts.failed += 1;
+        else if (key.includes("partial") || key.includes("stop")) counts.partial += 1;
+        else counts.completed += 1;
+        return counts;
+      }, {completed: 0, partial: 0, failed: 0});
+      const bestScore = scores.length ? Math.max(...scores).toFixed(3) : "-";
+      const metricsHtml = `
+        <div class="receipt-metrics" aria-label="Receipt metrics">
+          <div class="receipt-metric"><span>Receipts</span><b>${state.receipts.length}</b></div>
+          <div class="receipt-metric"><span>Completed</span><b>${statusCounts.completed}</b></div>
+          <div class="receipt-metric"><span>Partial / failed</span><b>${statusCounts.partial + statusCounts.failed}</b></div>
+          <div class="receipt-metric"><span>Best score</span><b>${escapeHtml(bestScore)}</b></div>
+        </div>`;
+      const tableHtml = `
+        <div class="receipt-table">
+          <div class="receipt-row receipt-head"><span>Run</span><span>Status</span><span>Score</span><span>Artifacts</span></div>
+          ${state.receipts.map((receipt, index) => {
+            const status = String(receipt.status || "receipt");
+            const statusClass = status.toLowerCase().includes("fail") || status.toLowerCase().includes("error")
+              ? "failed"
+              : status.toLowerCase().includes("partial") || status.toLowerCase().includes("stop")
+                ? "partial"
+                : "";
+            const score = Number(receipt.score);
+            const scoreLabel = Number.isFinite(score) ? score.toFixed(3) : "-";
+            const displayStatus = receiptStatusLabel(status);
+            const primaryArtifacts = primaryReceiptArtifacts(receipt.artifacts);
+            const overflowArtifacts = receipt.artifacts.filter(artifact => !primaryArtifacts.includes(artifact));
+            const remainingArtifacts = overflowArtifacts.length;
+            return `
+              <div class="receipt-row" data-receipt-row="${index}">
+                <div class="receipt-main">
+                  <strong title="${escapeHtml(receipt.model)}">${escapeHtml(receipt.model)}</strong>
+                  <div class="receipt-meta" title="${escapeHtml(receipt.run_id)}">${escapeHtml(receipt.run_id)} | ${escapeHtml(receipt.modified)}</div>
+                </div>
+                <div class="receipt-status ${statusClass}" title="${escapeHtml(status)}">${escapeHtml(displayStatus)}</div>
+                <div class="receipt-score">${escapeHtml(scoreLabel)}</div>
+                <div class="receipt-actions">
+                  ${primaryArtifacts.map(artifact => `<a href="${escapeHtml(artifact.url)}" target="_blank" rel="noreferrer" title="${escapeHtml(artifact.label)}">${escapeHtml(shortArtifactLabel(artifact.label))}</a>`).join("")}
+                  ${remainingArtifacts ? `<button type="button" class="artifact-toggle" aria-expanded="false" data-artifact-toggle title="${escapeHtml(overflowArtifacts.map(artifact => artifact.label).join(", "))}">+${remainingArtifacts}</button>` : ""}
+                </div>
+                ${remainingArtifacts ? `<div class="receipt-more">${overflowArtifacts.map(artifact => `<a href="${escapeHtml(artifact.url)}" target="_blank" rel="noreferrer" title="${escapeHtml(artifact.label)}">${escapeHtml(shortArtifactLabel(artifact.label))}</a>`).join("")}</div>` : ""}
+              </div>`;
+          }).join("")}
+        </div>`;
+      receipts.innerHTML = metricsHtml + tableHtml;
+      receipts.querySelectorAll("[data-artifact-toggle]").forEach(button => {
+        button.addEventListener("click", event => {
+          event.preventDefault();
+          const row = button.closest(".receipt-row");
+          if (!row) return;
+          const expanded = !row.classList.contains("expanded");
+          row.classList.toggle("expanded", expanded);
+          button.setAttribute("aria-expanded", String(expanded));
+          button.textContent = expanded ? "Hide" : button.dataset.count || button.textContent;
+        });
+        button.dataset.count = button.textContent || "";
+      });
+    }
+
+    function primaryReceiptArtifacts(artifacts) {
+      const priority = ["Browser report", "Summary", "Best settings"];
+      const selectedArtifacts = [];
+      for (const label of priority) {
+        const match = artifacts.find(artifact => artifact.label === label);
+        if (match) selectedArtifacts.push(match);
+      }
+      for (const artifact of artifacts) {
+        if (selectedArtifacts.length >= 3) break;
+        if (!selectedArtifacts.includes(artifact)) selectedArtifacts.push(artifact);
+      }
+      return selectedArtifacts;
+    }
+
+    function primaryGlobalReports(reports) {
+      const priority = ["Results dashboard", "Leaderboard", "Model comparison"];
+      const selectedReports = [];
+      for (const label of priority) {
+        const match = reports.find(report => report.label === label);
+        if (match) selectedReports.push(match);
+      }
+      for (const report of reports) {
+        if (selectedReports.length >= 3) break;
+        if (!selectedReports.includes(report)) selectedReports.push(report);
+      }
+      return selectedReports;
+    }
+
+    function receiptStatusLabel(status) {
+      const text = String(status || "receipt");
+      const key = text.toLowerCase();
+      if (key.includes("fail") || key.includes("error")) return "failed";
+      if (key.includes("partial") || key.includes("stop")) return "partial";
+      if (key.includes("context")) return "context";
+      if (key.includes("complete") || key.includes("pass") || key.includes("score")) return "complete";
+      return text.length > 12 ? text.slice(0, 11) + "…" : text;
+    }
+
+    function renderBenchmarkGraphics(state) {
+      const selectedModels = state.models.filter(model => selected.has(model.path));
+      const shownModels = (selectedModels.length ? selectedModels : state.models).slice(0, 3);
+      const packs = (state.librarian_packs || []).slice(0, 5);
+      const sampleSize = Number(document.querySelector("#sample-size")?.value || 0);
+      const repeats = Number(document.querySelector("#repeats")?.value || 0);
+      const plan = selectedFlightPlan();
+      const run = state.run || {};
+      const phase = run.phase || "ready";
+      const receiptCount = (state.receipts || []).length;
+      const questionCount = packs.length && sampleSize && repeats ? packs.length * sampleSize * repeats : 0;
+
+      const scopePlan = document.querySelector("#scope-plan");
+      if (scopePlan) scopePlan.textContent = plan ? plan.label : "manual";
+      const scopeMetrics = document.querySelector("#scope-metrics");
+      if (scopeMetrics) {
+        scopeMetrics.innerHTML = [
+          ["Models", selectedModels.length || state.models.length || 0],
+          ["Questions / model", questionCount || "-"],
+          ["Repeats", repeats || "-"],
+          ["Receipts", receiptCount],
+        ].map(([label, value]) => `<div class="scope-cell"><span>${escapeHtml(label)}</span><b>${escapeHtml(value)}</b></div>`).join("");
+      }
+
+      const heatmap = document.querySelector("#task-heatmap");
+      if (heatmap) {
+        const modelHeaders = shownModels.map(model => `<span class="heat-label" title="${escapeHtml(model.name)}">${escapeHtml(model.name.replace(/\.gguf$/i, ""))}</span>`).join("");
+        const rows = packs.length
+          ? packs.map(pack => {
+              const cells = shownModels.length
+                ? shownModels.map(() => `<span class="heat-cell">ready</span>`).join("")
+                : `<span class="heat-cell dim">no model</span>`;
+              return `<div class="heat-row"><span class="heat-label" title="${escapeHtml(pack)}">${escapeHtml(pack.replace(/^librarian-/, ""))}</span>${cells}</div>`;
+            }).join("")
+          : `<div class="sub">Benchmark packs appear after configuration loads.</div>`;
+        heatmap.style.setProperty("--model-cols", String(Math.max(1, shownModels.length)));
+        heatmap.innerHTML = shownModels.length
+          ? `<div class="heat-row"><span class="heat-label">pack</span>${modelHeaders}</div>${rows}`
+          : rows;
+      }
+
+      const stages = [
+        ["ready", "Preflight", "models, disk, backend"],
+        ["running", "Evaluate", "questions and scorers"],
+        ["recorded", "Receipts", "artifacts saved"],
+        ["complete", "Promote", "best for machine"],
+      ];
+      const activeIndex = phase === "running" ? 1 : phase === "complete" ? 3 : phase === "failed" ? 2 : 0;
+      const timelinePhase = document.querySelector("#timeline-phase");
+      if (timelinePhase) timelinePhase.textContent = phase;
+      const stageTimeline = document.querySelector("#stage-timeline");
+      if (stageTimeline) {
+        stageTimeline.innerHTML = stages.map((stage, index) => {
+          const cls = index < activeIndex ? "done" : index === activeIndex ? "active" : "";
+          return `<div class="timeline-stage ${cls}"><b>${escapeHtml(stage[1])}</b><span>${escapeHtml(stage[2])}</span></div>`;
+        }).join("");
+      }
+    }
+
+    function shortArtifactLabel(label) {
+      const text = String(label || "");
+      const map = {
+        "Browser report": "Browser",
+        "Itemized report": "Items",
+        "Resolved plan": "Plan",
+        "Best settings": "Best",
+        "Machine report": "Machine",
+        "Suite events": "Events",
+        "Summary": "Summary",
+        "Command": "Cmd",
+        "Status": "Status"
+      };
+      return map[text] || text.replace(/\breport\b/i, "").trim() || text;
     }
 
     function packDescription(pack) {
@@ -2309,7 +3118,7 @@ INDEX_HTML = r"""<!doctype html>
         } else if (appState.models.length === 1) {
           guard.textContent = "One model found. Start will use it automatically.";
         } else {
-          guard.textContent = "Click Select all, or choose one or more models before starting.";
+          guard.textContent = "Click Select visible, or choose one or more models before starting.";
         }
       } else {
         const flightPlanText = flightPlan ? ` Flight plan: ${flightPlan.label}.` : "";
@@ -2320,6 +3129,7 @@ INDEX_HTML = r"""<!doctype html>
         guard.textContent = `${models.length} model(s) ready.${flightPlanText}${planText} ${samplerPolicyText()}${compareHint}`;
       }
       updateSelectedCount(models.length);
+      updateSelectedModelStats(models);
       updateRunSummary(models);
       updateFlowState(models.length, Boolean(flightPlan || plan || mode));
       updateLaunchState(models, flightPlan);
@@ -2328,7 +3138,53 @@ INDEX_HTML = r"""<!doctype html>
     function updateSelectedCount(count) {
       const chip = document.querySelector("#selected-count");
       if (!chip) return;
-      chip.textContent = `${count} selected`;
+      chip.textContent = String(count);
+    }
+
+    function modelSizeGb(model) {
+      if (model.size_warning) return 0;
+      const value = Number(model.size_gb);
+      return Number.isFinite(value) ? value : 0;
+    }
+
+    function modelSizeDisplay(model) {
+      const label = escapeHtml(model.size_display || "unknown");
+      if (!model.size_warning) return label;
+      return `<span class="size-full">${label}</span><span class="size-compact">tiny</span>`;
+    }
+
+    function conciseModelName(name) {
+      return String(name || "")
+        .replace(/\.gguf$/i, "")
+        .replace(/-Instruct/gi, "")
+        .replace(/-Chat/gi, "");
+    }
+
+    function updateSelectedModelStats(models) {
+      const totalSize = models.reduce((sum, model) => sum + modelSizeGb(model), 0);
+      const hasTinyFiles = models.some(model => model.size_warning);
+      const vram = totalSize ? totalSize * 1.17 : 0;
+      const sizeLabel = totalSize ? `${totalSize.toFixed(2)} GB` : (hasTinyFiles ? "tiny file" : "-");
+      const vramLabel = vram ? `~${vram.toFixed(1)} GB` : (hasTinyFiles ? "not estimated" : "-");
+      const fill = Math.max(4, Math.min(100, totalSize ? totalSize * 1.8 : 0));
+      const setText = (selector, text) => {
+        const el = document.querySelector(selector);
+        if (el) el.textContent = text;
+      };
+      setText("#selected-size", sizeLabel);
+      setText("#selected-vram", vramLabel);
+      setText("#strip-selected", String(models.length));
+      setText("#strip-size", sizeLabel);
+      const bar = document.querySelector("#strip-sizebar");
+      if (bar) bar.style.width = `${fill}%`;
+      const preview = document.querySelector("#selected-model-preview");
+      if (preview) {
+        const chips = models.slice(0, 2).map(model =>
+          `<span title="${escapeHtml(model.name)}">${escapeHtml(conciseModelName(model.name))}</span>`
+        );
+        if (models.length > 2) chips.push(`<span class="more">+${models.length - 2} more selected</span>`);
+        preview.innerHTML = chips.length ? chips.join("") : `<span class="empty">Select models from the library.</span>`;
+      }
     }
 
     function updateFlowState(modelCount, hasPlan) {
@@ -2380,7 +3236,7 @@ INDEX_HTML = r"""<!doctype html>
       const hasModels = appState.models.length > 0;
       const selectedCount = models.length;
       const planName = flightPlan?.label || "advanced settings";
-      start.disabled = startPending || running || !hasModels;
+      start.disabled = startPending || running || !hasModels || selectedCount === 0;
       if (!hasModels) {
         title.textContent = "No models found";
         detail.textContent = "Point pilotBENCHY at a folder containing GGUF files.";
@@ -2398,9 +3254,9 @@ INDEX_HTML = r"""<!doctype html>
         start.textContent = "Starting...";
       } else if (selectedCount === 0) {
         title.textContent = "Ready after model selection";
-        detail.textContent = "Choose one or more models, or click Start to use the first detected models.";
+        detail.textContent = "Choose the exact GGUF model(s) to benchmark.";
         pill.textContent = "needs model";
-        start.textContent = flightPlan?.start_label || "Start benchmark";
+        start.textContent = "Select model first";
       } else {
         title.textContent = `${selectedCount} model${selectedCount === 1 ? "" : "s"} ready`;
         detail.textContent = `${planName}; receipts will be saved under _runs.`;
@@ -2417,16 +3273,8 @@ INDEX_HTML = r"""<!doctype html>
         guard.textContent = "No GGUF models found in the configured model folder.";
         return null;
       }
-      if (appState.models.length === 1) {
-        selected.add(appState.models[0].path);
-        render(appState);
-        return [appState.models[0].path];
-      }
-      const defaultModels = appState.models.slice(0, Math.min(2, appState.models.length));
-      defaultModels.forEach(model => selected.add(model.path));
-      render(appState);
-      guard.textContent = `No manual selection was set, so Start will use the first ${defaultModels.length} detected model(s).`;
-      return defaultModels.map(model => model.path);
+      guard.textContent = "Select one or more GGUF models before starting a run.";
+      return null;
     }
 
     function connectSocket() {
@@ -2521,19 +3369,51 @@ INDEX_HTML = r"""<!doctype html>
       document.body.classList.toggle("sepia");
       document.querySelector("#theme").textContent = document.body.classList.contains("sepia") ? "Codex dark" : "Sepia dark";
     });
+    document.querySelectorAll(".system-check").forEach(button => {
+      button.addEventListener("click", async () => {
+        const original = button.textContent;
+        button.disabled = true;
+        button.textContent = "Checking...";
+        await loadStateViaHttp();
+        const now = new Date();
+        const clock = document.querySelector("#rail-clock");
+        if (clock) clock.textContent = now.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+        button.textContent = "Checked";
+        window.setTimeout(() => {
+          button.textContent = original || "↻ Check systems";
+          button.disabled = false;
+        }, 900);
+      });
+    });
     document.querySelector("#select-all").addEventListener("click", () => {
       if (!appState) return;
-      appState.models.forEach(model => selected.add(model.path));
+      sortedModels(appState.models).forEach(model => selected.add(model.path));
       render(appState);
     });
     document.querySelector("#clear-selection").addEventListener("click", () => {
       selected.clear();
       render(appState);
     });
+    document.querySelector("#strip-clear").addEventListener("click", () => {
+      selected.clear();
+      render(appState);
+    });
+    document.querySelector("#model-search").addEventListener("input", event => {
+      modelSearch = event.target.value || "";
+      if (appState) render(appState);
+    });
     document.querySelector("#sort-models").addEventListener("click", () => {
       sortIndex = (sortIndex + 1) % sortModes.length;
       document.querySelector("#sort-models").textContent = `Sort: ${sortModes[sortIndex]}`;
       render(appState);
+    });
+    document.addEventListener("pointerdown", event => {
+      const cards = document.querySelector("#plan-cards");
+      if (!cards || cards.contains(event.target)) return;
+      setPlanDrawerOpen(false);
+    });
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape") setPlanDrawerOpen(false);
     });
     document.querySelector("#mode").addEventListener("change", () => {
       clearFlightPlanForAdvancedMode();
