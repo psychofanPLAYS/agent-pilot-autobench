@@ -50,29 +50,27 @@ a new machine it sets itself up automatically before opening; every run after
 that goes straight to the app. Power-user subcommands still exist — run
 `apb --help` to see them.
 
-## pilotBENCHY Modes
+## pilotBENCHY Flight Plans
 
 Plain `apb` (or double-clicking `START.bat`) opens the local pilotBENCHY web UI on
 `127.0.0.1:36939`.
 The browser is the primary workflow for model selection, benchmark-suite plan
 selection, live WebSocket run progress, telemetry, and receipt links. Pick
-model(s) with checkboxes, choose a mode from the menu, review the
-recommended/forced llama.cpp flags, then press **Start benchmark**. While a run is
+model(s) with checkboxes, choose a Flight Plan, review the recommended llama.cpp
+flags, then press the start button. While a run is
 active, the web UI shows the live activity feed, telemetry, current winner, and
 receipt/report links so you do not have to dig through `_runs` by hand. The older
 terminal TUI is still available with `apb tui` as a fallback.
 
-- **Quick check** — does it load, and how fast? No questions asked (fast scout).
-- **Find best settings** — walk the flag ladder, ask the questions, crown the best settings.
-- **Librarian bot test** — score any local model(s) as memory/RAG agent workers, head-to-head.
-- **How flags affect speed** — see how each llama.cpp flag changes tok/s and TTFT.
-- **Context limits** — how much context fits, and how long context affects tok/s.
-- **Deep / overnight** — everything, big budget; keeps searching and converging.
-- **Custom** — you choose the time.
+- **Quick check** - fast proof that the model loads and produces a speed receipt.
+- **Find best settings** - prove fit, speed, quality, and useful flags.
+- **Librarian benchmark** - score any local model(s) as memory/RAG agent workers, head-to-head.
+- **Overnight campaign** - long unattended run across fit, speed, quality, flags, and context.
 
-Each mode maps to a time budget (measured in Andrej Karpathy's fixed 5-minute
-rounds), whether the SimpleBench questions are asked, and which ladders run. The
-web UI shows the active mode, live status/telemetry, and the champion
+Each Flight Plan maps to the lower-level mode, time budget, evidence goal, and
+benchmark workflow. The old mode selector remains as an advanced control, but the
+normal path is: choose model(s), choose Flight Plan, start. The web UI shows the
+active plan, live status/telemetry, and the champion
 (best model and its best settings) when a run finishes.
 
 ## What Setup Creates
@@ -132,6 +130,9 @@ Each receipt also includes:
 - `itemized-report.md`: readable attempt-by-attempt report
 - `report.html`: browser report for the run
 - `report.json`: machine-readable itemized report, including metric coverage
+- `resolved-plan.json`: replay-safe run plan with exact command `argv` arrays
+- `command.txt`: human-readable command copy from the resolved plan
+- `status.json`: latest run status for dashboards and agents
 - `context-profile.md`, `context-profile.tsv`, `context-profile.json`: fixed context ladder profile when enabled
 
 The fallback TUI remembers the last selected models and shows truncated previous-run summaries so the current session can be compared against earlier evidence without opening every receipt.
@@ -149,6 +150,8 @@ agent-autobench doctor
 agent-autobench results
 agent-autobench results --open-browser
 agent-autobench results --serve
+agent-autobench flight-plans
+agent-autobench export-plan --run "_runs\20260629-example"
 agent-autobench benchmark-suite-plans
 agent-autobench benchmark-suite --plan benchmarks\plans\local-openai-smoke.plan.json
 agent-autobench autoresearch --model "path\to\model.gguf" --llama-server "path\to\llama-server.exe" --budget-minutes 20

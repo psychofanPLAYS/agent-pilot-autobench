@@ -20,6 +20,12 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 import uvicorn
 
 from gguf_limit_bench.discovery import ModelInfo, discover_models
+from gguf_limit_bench.flight_plans import (
+    DEFAULT_FLIGHT_PLAN_ID,
+    default_flight_plan,
+    flight_plan_by_id,
+    flight_plan_payloads,
+)
 from gguf_limit_bench.flag_ladder import profile_descriptions, validate_extra_server_args
 from gguf_limit_bench.gpu_profiles import (
     describe as describe_gpu_profile,
@@ -27,6 +33,7 @@ from gguf_limit_bench.gpu_profiles import (
     recommended_always_on,
     recommended_parallel,
 )
+from gguf_limit_bench.hf_recommended_settings import recommended_sampler_presets
 from gguf_limit_bench.librarian.registry import LIBRARIAN_PACK_IDS
 from gguf_limit_bench.modes import RUN_MODES
 from gguf_limit_bench.programs import MIN_SERIOUS_CONTEXT_SIZE
@@ -52,6 +59,9 @@ RUN_ARTIFACTS = (
     ("Browser report", "report.html"),
     ("Itemized report", "itemized-report.md"),
     ("Summary", "summary.md"),
+    ("Resolved plan", "resolved-plan.json"),
+    ("Command", "command.txt"),
+    ("Status", "status.json"),
     ("Best settings", "best-settings.json"),
     ("Machine report", "report.json"),
     ("Suite summary", "suite-summary.json"),
@@ -76,11 +86,13 @@ class WebRunOptions:
     mode_id: str
     budget_minutes: int
     forced_server_args: tuple[str, ...]
+    flight_plan_id: str | None = None
     show_thinking: bool = False
     stream_prompts: bool = True
     benchmark_suite_plan: Path | None = None
     repeats: int = 1
     sample_size: int = 5
+    sampler_policy: str = "hf_recommended"
 
 
 @dataclass
@@ -165,7 +177,9 @@ class WebUiState:
         return {
             "models": [_model_payload(model) for model in models],
             "modes": [_mode_payload(mode) for mode in RUN_MODES],
-            "default_mode": "librarian_bench",
+            "flight_plans": flight_plan_payloads(self.project_root),
+            "default_flight_plan": DEFAULT_FLIGHT_PLAN_ID,
+            "default_mode": default_flight_plan().mode_id,
             "librarian_packs": list(LIBRARIAN_PACK_IDS),
             "run_configuration": self.run_configuration,
             "benchmark_suite_plans": benchmark_suite_plan_payloads(self.project_root),
@@ -206,15 +220,37 @@ class WebUiState:
                 return False, f"Could not start the engine: {exc}"
             self.active_run_dir = run_directory
             self.engine_process = process
+            flight_plan = (
+                flight_plan_by_id(options.flight_plan_id) if options.flight_plan_id else None
+            )
+            flight_plan_label = f"Flight plan: {flight_plan.label}; " if flight_plan else ""
+            plan_label = (
+                f"; suite plan: {options.benchmark_suite_plan.name}"
+                if options.benchmark_suite_plan is not None
+                else ""
+            )
+            events = [
+                _event(
+                    "configure",
+                    (
+                        f"{flight_plan_label}Mode: {options.mode_id}; "
+                        f"budget: {options.budget_minutes} min/model{plan_label}"
+                    ),
+                ),
+                _event(
+                    "flags",
+                    "Forced llama-server args: "
+                    + (" ".join(options.forced_server_args) or "(none)"),
+                ),
+                _event("preflight", f"Sampler policy: {options.sampler_policy}"),
+            ]
             self.run = WebRunState(
                 phase="running",
                 message=f"Engine launched for {len(selected)} model(s).",
                 selected_models=[model.name for model in selected],
-                options=asdict(options),
-                events=[
-                    _event("configure", f"Mode: {mode_id}; budget: {options.budget_minutes} min/model"),
-                    _event("engine", f"Detached engine started; run dir: {run_directory.name}"),
-                ],
+                options=_web_run_options_payload(options),
+                events=events
+                + [_event("engine", f"Detached engine started; run dir: {run_directory.name}")],
             )
         return True, "Benchmark started."
 
@@ -303,6 +339,7 @@ def _spec_payload(
             "stream_prompts": options.stream_prompts,
             "repeats": options.repeats,
             "sample_size": options.sample_size,
+            "sampler_policy": options.sampler_policy,
         },
         "paths": _paths_block(llama_paths),
     }
@@ -402,41 +439,138 @@ def validate_web_selection(selected: list[ModelInfo], mode_id: str) -> str | Non
 def build_run_options(
     mode_id: str, payload: dict, *, project_root: Path | None = None
 ) -> WebRunOptions:
+    flight_plan_id = _flight_plan_id_from_payload(payload)
+    flight_plan = flight_plan_by_id(flight_plan_id) if flight_plan_id is not None else None
+    if flight_plan is not None:
+        mode_id = flight_plan.mode_id
     mode = next((item for item in RUN_MODES if item.id == mode_id), None)
     if mode is None:
         raise ValueError(f"Unknown run mode: {mode_id}")
-    budget_minutes = int(payload.get("budget_minutes") or mode.budget_minutes)
-    if not 1 <= budget_minutes <= 24 * 60:
-        raise ValueError("Budget must be between 1 minute and 24 hours.")
+    budget_minutes = _int_option(
+        payload,
+        "budget_minutes",
+        default=flight_plan.budget_minutes if flight_plan is not None else mode.budget_minutes,
+        minimum=1,
+        maximum=24 * 60,
+        label="Budget",
+    )
     gpu_name = detect_gpu_name()
     default_forced_args = recommended_always_on(gpu_name)
-    raw_forced_args = payload.get("forced_server_args", default_forced_args)
-    forced_args = tuple(str(arg) for arg in raw_forced_args)
+    forced_args = _string_tuple_option(
+        payload, "forced_server_args", default=default_forced_args
+    )
     validate_extra_server_args(forced_args)
     allowed = set(default_forced_args)
     allowed.update(flag for flag, _description in OPTIONAL_FORCED_FLAGS)
     unknown = [arg for arg in forced_args if arg.startswith("--") and arg not in allowed]
     if unknown:
         raise ValueError(f"Unsupported forced flag from Web UI: {unknown[0]}")
-    benchmark_suite_plan = resolve_benchmark_suite_plan(
-        project_root or Path.cwd(), payload.get("benchmark_suite_plan")
+    raw_suite_plan = payload.get("benchmark_suite_plan")
+    if raw_suite_plan in (None, "") and flight_plan is not None:
+        raw_suite_plan = flight_plan.default_benchmark_suite_plan
+    benchmark_suite_plan = resolve_benchmark_suite_plan(project_root or Path.cwd(), raw_suite_plan)
+    sample_size = _int_option(
+        payload,
+        "sample_size",
+        default=15,
+        minimum=1,
+        maximum=200,
+        label="Sample size",
+        suffix=" questions per pack",
     )
-    repeats = int(payload.get("repeats") or 1)
-    if not 1 <= repeats <= 20:
-        raise ValueError("Repeats must be between 1 and 20.")
-    sample_size = int(payload.get("sample_size") or 5)
-    if not 1 <= sample_size <= 200:
-        raise ValueError("Sample size must be between 1 and 200.")
+    repeats = _int_option(
+        payload, "repeats", default=3, minimum=1, maximum=20, label="Repeats"
+    )
+    sampler_policy = _sampler_policy_from_payload(payload)
     return WebRunOptions(
         mode_id=mode_id,
         budget_minutes=budget_minutes,
         forced_server_args=forced_args,
-        show_thinking=bool(payload.get("show_thinking", False)),
-        stream_prompts=bool(payload.get("stream_prompts", True)),
+        flight_plan_id=flight_plan_id,
+        show_thinking=_bool_option(payload, "show_thinking", default=False),
+        stream_prompts=_bool_option(payload, "stream_prompts", default=True),
         benchmark_suite_plan=benchmark_suite_plan,
         repeats=repeats,
         sample_size=sample_size,
+        sampler_policy=sampler_policy,
     )
+
+
+def _int_option(
+    payload: dict,
+    name: str,
+    *,
+    default: int,
+    minimum: int,
+    maximum: int,
+    label: str,
+    suffix: str = "",
+) -> int:
+    raw_value = payload.get(name, default)
+    if raw_value in (None, ""):
+        raw_value = default
+    if isinstance(raw_value, bool):
+        raise ValueError(f"{label} must be a number.")
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{label} must be a number.") from None
+    if not minimum <= value <= maximum:
+        if suffix:
+            raise ValueError(f"{label} must be between {minimum} and {maximum}{suffix}.")
+        raise ValueError(f"{label} must be between {minimum} and {maximum}.")
+    return value
+
+
+def _string_tuple_option(payload: dict, name: str, *, default: tuple[str, ...]) -> tuple[str, ...]:
+    raw_value = payload.get(name, default)
+    if raw_value in (None, ""):
+        return tuple(default)
+    if not isinstance(raw_value, list | tuple):
+        raise ValueError(f"{name} must be a list of strings.")
+    if not all(isinstance(item, str) for item in raw_value):
+        raise ValueError(f"{name} entries must be strings.")
+    return tuple(raw_value)
+
+
+def _sampler_policy_from_payload(payload: dict) -> str:
+    raw_value = payload.get("sampler_policy")
+    if raw_value in (None, ""):
+        return "hf_recommended"
+    if not isinstance(raw_value, str):
+        raise ValueError("sampler_policy must be a string.")
+    if raw_value in {"hf_recommended", "runtime_defaults"} or raw_value.startswith("hf:"):
+        return raw_value
+    raise ValueError(f"Unsupported sampler policy from Web UI: {raw_value}")
+
+
+def _bool_option(payload: dict, name: str, *, default: bool) -> bool:
+    raw_value = payload.get(name, default)
+    if raw_value in (None, ""):
+        return default
+    if not isinstance(raw_value, bool):
+        raise ValueError(f"{name} must be true or false.")
+    return raw_value
+
+
+def _flight_plan_id_from_payload(payload: dict) -> str | None:
+    raw_value = payload.get("flight_plan_id")
+    if raw_value in (None, ""):
+        return None
+    if not isinstance(raw_value, str):
+        raise ValueError("flight_plan_id must be a string.")
+    try:
+        flight_plan_by_id(raw_value)
+    except KeyError:
+        raise ValueError(f"Unknown flight plan: {raw_value}") from None
+    return raw_value
+
+
+def _web_run_options_payload(options: WebRunOptions) -> dict:
+    payload = asdict(options)
+    if options.benchmark_suite_plan is not None:
+        payload["benchmark_suite_plan"] = str(options.benchmark_suite_plan)
+    return payload
 
 
 def resolve_benchmark_suite_plan(project_root: Path, raw_path: object) -> Path | None:
@@ -567,10 +701,18 @@ def start_run_from_payload(state: WebUiState, payload: object) -> tuple[bool, st
         return False, "model_paths must be a list."
     if not all(isinstance(path, str) for path in raw_model_paths):
         return False, "model_paths entries must be strings."
-    options = payload.get("options") if isinstance(payload.get("options"), dict) else {}
+    raw_options = payload.get("options", {})
+    if raw_options in (None, ""):
+        raw_options = {}
+    if not isinstance(raw_options, dict):
+        return False, "options must be a JSON object."
+    options = raw_options
+    if "flight_plan_id" in payload and "flight_plan_id" not in options:
+        options = {**options, "flight_plan_id": payload["flight_plan_id"]}
+    default_mode = default_flight_plan().mode_id
     return state.start_run(
         model_paths=raw_model_paths,
-        mode_id=str(payload.get("mode_id", "librarian_bench")),
+        mode_id=str(payload.get("mode_id", default_mode)),
         options_payload=options,
     )
 
@@ -726,6 +868,12 @@ def benchmark_suite_plan_payloads(project_root: Path) -> list[dict]:
         name = path.name
         description = ""
         warning = ""
+        plan_kind = ""
+        requires = ""
+        score_contract = ""
+        phases: list[str] = []
+        harnesses: list[str] = []
+        task_count = 0
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -733,23 +881,47 @@ def benchmark_suite_plan_payloads(project_root: Path) -> list[dict]:
         if isinstance(data, dict):
             name = str(data.get("name") or data.get("title") or path.name)
             description = str(data.get("description") or "")
-            warning = _plan_warning(data, description)
+            settings = data.get("settings") if isinstance(data.get("settings"), dict) else {}
+            plan_kind = str(settings.get("plan_kind") or data.get("plan_kind") or "")
+            requires = str(settings.get("requires") or data.get("requires") or "")
+            score_contract = str(settings.get("score_contract") or "")
+            tasks = data.get("tasks") if isinstance(data.get("tasks"), list) else []
+            task_count = len(tasks)
+            phases = sorted(
+                {str(task.get("phase")) for task in tasks if isinstance(task, dict)}
+            )
+            harnesses = sorted(
+                {str(task.get("harness")) for task in tasks if isinstance(task, dict)}
+            )
+            warning = _plan_warning(data, description, requires)
         payloads.append(
             {
                 "path": str(path),
                 "filename": path.name,
                 "name": name,
                 "description": description,
+                "plan_kind": plan_kind,
+                "requires": requires,
+                "score_contract": score_contract,
+                "task_count": task_count,
+                "phases": phases,
+                "harnesses": harnesses,
                 "warning": warning,
             }
         )
     return payloads
 
 
-def _plan_warning(data: dict, description: str) -> str:
-    text = json.dumps(data, ensure_ascii=True).lower() + " " + description.lower()
+def _plan_warning(data: dict, description: str, requires: str = "") -> str:
+    text = (
+        json.dumps(data, ensure_ascii=True).lower()
+        + " "
+        + description.lower()
+        + " "
+        + requires.lower()
+    )
     if "endpoint" in text:
-        return description
+        return requires or description
     if "external" in text or "uvx" in text:
         return "This plan may call an external benchmark tool."
     if "heavy" in text:
@@ -886,6 +1058,7 @@ def _model_payload(model: ModelInfo) -> dict:
         "is_moe": model.is_moe,
         "has_mtp": model.has_mtp,
         "has_vision": model.has_vision,
+        "sampler_presets": recommended_sampler_presets(model.path),
     }
 
 
@@ -1234,7 +1407,14 @@ INDEX_HTML = r"""<!doctype html>
           <div class="panel">
             <h2>Run menu</h2>
               <div class="body">
-                <select id="mode"></select>
+                <div class="field">
+                  <label for="flight-plan">Flight plan</label>
+                  <select id="flight-plan"></select>
+                </div>
+                <div class="field">
+                  <label for="mode">Advanced mode</label>
+                  <select id="mode"></select>
+                </div>
                 <div class="field">
                   <label for="benchmark-suite-plan">Benchmark suite plan</label>
                   <select id="benchmark-suite-plan"></select>
@@ -1359,6 +1539,7 @@ INDEX_HTML = r"""<!doctype html>
           mode.appendChild(option);
         }
       }
+      renderFlightPlans(state.flight_plans || [], state.default_flight_plan);
       const selectedMode = state.modes.find(item => item.id === mode.value);
       if (selectedMode && mode.dataset.defaultedFor !== mode.value) {
         document.querySelector("#budget").value = selectedMode.budget_minutes;
@@ -1533,6 +1714,53 @@ INDEX_HTML = r"""<!doctype html>
         +'</div></div>';
     }
 
+    function renderFlightPlans(plans, defaultFlightPlanId) {
+      const select = document.querySelector("#flight-plan");
+      if (!select.children.length) {
+        const advanced = document.createElement("option");
+        advanced.value = "";
+        advanced.textContent = "Advanced / choose mode directly";
+        select.appendChild(advanced);
+        for (const plan of plans) {
+          const option = document.createElement("option");
+          option.value = plan.id;
+          option.textContent = `${plan.label} (${plan.budget_minutes} min/model)`;
+          option.title = plan.description || plan.evidence_goal || "";
+          if (plan.id === defaultFlightPlanId) option.selected = true;
+          select.appendChild(option);
+        }
+      }
+      const selectedPlan = selectedFlightPlan();
+      if (selectedPlan && !select.dataset.appliedDefault) {
+        applyFlightPlan(selectedPlan);
+        select.dataset.appliedDefault = "true";
+      }
+    }
+
+    function selectedFlightPlan() {
+      const select = document.querySelector("#flight-plan");
+      if (!appState || !select.value) return null;
+      return (appState.flight_plans || []).find(plan => plan.id === select.value) || null;
+    }
+
+    function applyFlightPlan(plan) {
+      const mode = document.querySelector("#mode");
+      if ([...mode.options].some(option => option.value === plan.mode_id)) {
+        mode.value = plan.mode_id;
+        mode.dataset.defaultedFor = plan.mode_id;
+      }
+      document.querySelector("#budget").value = plan.budget_minutes;
+      document.querySelector("#start").textContent = plan.start_label || "Start benchmark";
+    }
+
+    function clearFlightPlanForAdvancedMode() {
+      const select = document.querySelector("#flight-plan");
+      if (select.value) {
+        select.value = "";
+        document.querySelector("#start").textContent = "Start benchmark";
+      }
+    }
+
     function renderConfiguration(config) {
       if (!config || document.querySelector("#standard-flags").children.length) return;
       const standard = document.querySelector("#standard-flags");
@@ -1620,19 +1848,70 @@ INDEX_HTML = r"""<!doctype html>
 
     function updateGuard() {
       if (!appState) return;
+      const flightPlan = selectedFlightPlan();
       const mode = document.querySelector("#mode").value;
       const plan = document.querySelector("#benchmark-suite-plan").value;
       const models = appState.models.filter(model => selected.has(model.path));
       const guard = document.querySelector("#guard");
       if (models.length === 0) {
-        guard.textContent = "Select one or more models to benchmark.";
+        if (!appState.models.length) {
+          guard.textContent = "No GGUF models found in the configured model folder.";
+        } else if (appState.models.length === 1) {
+          guard.textContent = "One model found. Start will use it automatically.";
+        } else {
+          guard.textContent = "Click Select all, or choose one or more models before starting.";
+        }
       } else {
+        const flightPlanText = flightPlan ? ` Flight plan: ${flightPlan.label}.` : "";
         const planText = plan ? ` Benchmark suite plan: ${plan.split(/[\\\\/]/).pop()}.` : "";
         const compareHint = (mode === "librarian_bench" && models.length === 1)
           ? " Add a second model to compare them head-to-head."
           : "";
-        guard.textContent = `${models.length} model(s) ready.${planText}${compareHint}`;
+        guard.textContent = `${models.length} model(s) ready.${flightPlanText}${planText}${samplerText}${compareHint}`;
       }
+    }
+
+    function updateRunSummary(models) {
+      const summary = document.querySelector("#run-summary");
+      if (!summary || !appState) return;
+      const flightPlan = selectedFlightPlan();
+      const modeId = document.querySelector("#mode").value;
+      const mode = appState.modes.find(item => item.id === modeId);
+      const budget = Number(document.querySelector("#budget").value || flightPlan?.budget_minutes || mode?.budget_minutes || 0);
+      const sampleSize = Number(document.querySelector("#sample-size").value || 0);
+      const repeats = Number(document.querySelector("#repeats").value || 0);
+      const packCount = modeId === "librarian_bench" ? appState.librarian_packs.length : 1;
+      const scoredAttempts = modeId === "quick" ? 0 : models.length * packCount * sampleSize * repeats;
+      const totalMinutes = models.length * budget;
+      const evidence = flightPlan?.evidence_goal || (modeId === "quick"
+        ? "load receipt"
+        : "weighted score + bias checks");
+      const workflow = flightPlan?.workflow?.length ? ` Plan: ${flightPlan.workflow.join(" -> ")}.` : "";
+      summary.innerHTML = `
+        <strong>Run summary</strong>
+        <div class="summary-grid">
+          <span><b>${models.length || "-"}</b><small>model(s)</small></span>
+          <span><b>${totalMinutes || "-"}</b><small>max minutes</small></span>
+          <span><b>${scoredAttempts || "-"}</b><small>scored attempts</small></span>
+        </div>
+        <div class="sub">${escapeHtml(evidence)}; receipts saved under _runs.${escapeHtml(workflow)}</div>`;
+    }
+
+    function modelPathsForStart() {
+      const paths = Array.from(selected);
+      const guard = document.querySelector("#guard");
+      if (paths.length) return paths;
+      if (!appState || appState.models.length === 0) {
+        guard.textContent = "No GGUF models found in the configured model folder.";
+        return null;
+      }
+      if (appState.models.length === 1) {
+        selected.add(appState.models[0].path);
+        render(appState);
+        return [appState.models[0].path];
+      }
+      guard.textContent = "Click Select all, or choose one or more models before starting.";
+      return null;
     }
 
     function connectSocket() {
@@ -1734,6 +2013,7 @@ INDEX_HTML = r"""<!doctype html>
       render(appState);
     });
     document.querySelector("#mode").addEventListener("change", () => {
+      clearFlightPlanForAdvancedMode();
       const mode = appState?.modes.find(item => item.id === document.querySelector("#mode").value);
       if (mode) {
         document.querySelector("#budget").value = mode.budget_minutes;
@@ -1741,12 +2021,22 @@ INDEX_HTML = r"""<!doctype html>
       }
       updateGuard();
     });
+    document.querySelector("#flight-plan").addEventListener("change", () => {
+      const plan = selectedFlightPlan();
+      if (plan) applyFlightPlan(plan);
+      updateGuard();
+    });
     document.querySelector("#start").addEventListener("click", () => {
+      const flightPlan = selectedFlightPlan();
+      const modelPaths = modelPathsForStart();
+      if (!modelPaths) return;
       sendSocket({
         type: "start_run",
-        model_paths: Array.from(selected),
+        flight_plan_id: flightPlan?.id || "",
+        model_paths: modelPaths,
         mode_id: document.querySelector("#mode").value,
         options: {
+          flight_plan_id: flightPlan?.id || "",
           budget_minutes: Number(document.querySelector("#budget").value),
           repeats: Number(document.querySelector("#repeats").value),
           benchmark_suite_plan: document.querySelector("#benchmark-suite-plan").value,

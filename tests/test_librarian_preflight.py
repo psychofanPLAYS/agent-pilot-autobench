@@ -68,7 +68,7 @@ def test_librarian_preflight_fails_unidentified_model_before_scoring(tmp_path, m
 
 
 def test_librarian_preflight_gemma_single_bos_uses_tokenize_endpoint(tmp_path, monkeypatch):
-    model = _identity_model(tmp_path, "Gemma-3-27B-Q4_K_M.gguf")
+    model = _identity_model(tmp_path, "Gemma-4-26B-A4B-Q4_K_M.gguf")
 
     def fake_urlopen(request, timeout):
         payload = json.loads(request.data.decode("utf-8"))
@@ -110,6 +110,46 @@ def test_librarian_preflight_qwen_thinking_gate_rejects_missing_think_block(tmp_
 
     assert receipt.ok is False
     assert receipt.failure == "thinking_sanity"
+
+
+def test_librarian_preflight_qwen_thinking_accepts_reasoning_content(tmp_path, monkeypatch):
+    model = _identity_model(tmp_path, "Qwen3.6-35B-A3B-Q4_K_M.gguf")
+
+    def fake_chat_completion_message(**_kwargs):
+        return "Final Answer: A", {
+            "content": "Final Answer: A",
+            "reasoning_content": "I should inspect the evidence.",
+        }
+
+    monkeypatch.setattr(
+        "gguf_limit_bench.librarian.preflight._chat_completion_message",
+        fake_chat_completion_message,
+    )
+    monkeypatch.setattr(
+        "gguf_limit_bench.librarian.preflight._chat",
+        lambda **_kwargs: ("Final Answer: A", 1.0, 1.0, 1.0, 1),
+    )
+
+    receipt = run_librarian_preflight(
+        model=model,
+        settings=AutoresearchSettings(
+            extra_server_args=(
+                "--jinja",
+                "--chat-template-kwargs",
+                '{"enable_thinking":true,"preserve_thinking":true}',
+                "--reasoning",
+                "on",
+                "--reasoning-format",
+                "deepseek",
+            )
+        ),
+        base_url="http://127.0.0.1:8080",
+        timeout_seconds=5,
+    )
+
+    gates = {gate.name: gate for gate in receipt.gates}
+    assert gates["thinking_sanity"].status == "pass"
+    assert gates["thinking_sanity"].evidence["reasoning"]["source"] == "reasoning_content"
 
 
 def test_librarian_preflight_answer_channel_rejects_unparseable_output(tmp_path, monkeypatch):

@@ -37,7 +37,7 @@ semantic class. `compress` and `rerank` already randomized position.
 
 Bundled benchmark-suite plans exist:
 
-- `benchmarks/plans/wiki-librarian-gemma3-27b-direct.plan.json`
+- `benchmarks/plans/wiki-librarian-gemma4-26b-a4b-thinking.plan.json`
 - `benchmarks/plans/wiki-librarian-qwen3-moe-thinking.plan.json`
 
 They call `python -m gguf_limit_bench.librarian_suite`, split the seven librarian

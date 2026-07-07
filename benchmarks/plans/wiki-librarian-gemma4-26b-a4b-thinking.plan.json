@@ -1,38 +1,39 @@
 {
-  "model": "gemma-3-27b-it",
+  "model": "gemma-4-26b-a4b-it",
   "context": 8192,
   "settings": {
     "base_url": "http://127.0.0.1:8080",
     "score_contract": "agent_bench_score",
-    "plan_kind": "wiki_librarian_gemma3_27b_direct",
-    "source_doc": "docs/feature-requests/wiki-librarian-bench/07-model-plan-gemma3-27b.md",
-    "comparison_family": "wiki_librarian_gemma_vs_qwen",
+    "plan_kind": "wiki_librarian_gemma4_26b_a4b_thinking",
+    "source_doc": "docs/feature-requests/wiki-librarian-bench/12-model-plan-gemma4.md",
+    "comparison_family": "wiki_librarian_current_models",
     "model_plan": {
-      "hf_slug": "google/gemma-3-27b-it",
-      "architecture": "gemma3_dense",
-      "quant_start": "Q4_K_M",
-      "reasoning_mode": "direct",
+      "hf_slug": "google/gemma-4-26B-A4B-it",
+      "architecture": "gemma4",
+      "quant_start": "Q4_K_M_or_QAT",
+      "thinking": "on",
+      "template": "gemma4_jinja",
       "template_preflight": [
-        "assert exactly one BOS token",
-        "fold system prompt into first user turn",
-        "use text-only GGUF"
+        "load with --jinja or llama.cpp --chat-template gemma",
+        "verify Gemma 4 turn template is active",
+        "verify final-answer channel after any thought output"
       ],
       "sampling": {
-        "temperature": 0.0,
+        "temperature": 1.0,
         "top_k": 64,
-        "top_p": 0.95,
-        "min_p": 0.0
+        "top_p": 0.95
       },
       "llama_cpp_flags": [
+        "--jinja",
         "standard ladder",
         "no MTP"
       ]
     },
-    "requires": "A Gemma 3 27B text-only GGUF served by a local OpenAI-compatible llama.cpp endpoint on http://127.0.0.1:8080."
+    "requires": "A Gemma 4 26B-A4B IT GGUF served by a local OpenAI-compatible llama.cpp endpoint on http://127.0.0.1:8080 with the Gemma 4 Jinja template active."
   },
   "tasks": [
     {
-      "id": "gemma_librarian_core",
+      "id": "gemma4_librarian_core",
       "phase": "general",
       "harness": "librarian-suite",
       "commands": [
@@ -53,7 +54,7 @@
           "--score-out",
           "{task_dir}/score.json",
           "--settings-json",
-          "{\"plan_kind\":\"wiki_librarian_gemma3_27b_direct\",\"reasoning_mode\":\"direct\",\"template\":\"gemma3_text_only\",\"temperature\":0.0,\"source_doc\":\"docs/feature-requests/wiki-librarian-bench/07-model-plan-gemma3-27b.md\"}",
+          "{\"plan_kind\":\"wiki_librarian_gemma4_26b_a4b_thinking\",\"thinking\":\"on\",\"template\":\"gemma4_jinja\",\"temperature\":1.0,\"top_k\":64,\"top_p\":0.95,\"source_doc\":\"docs/feature-requests/wiki-librarian-bench/12-model-plan-gemma4.md\"}",
           "--pack",
           "librarian-write-entry",
           "--pack",
@@ -67,7 +68,7 @@
       "timeout_seconds": 3600
     },
     {
-      "id": "gemma_librarian_reasoning_jobs",
+      "id": "gemma4_librarian_reasoning_jobs",
       "phase": "agentic",
       "harness": "librarian-suite",
       "commands": [
@@ -88,7 +89,7 @@
           "--score-out",
           "{task_dir}/score.json",
           "--settings-json",
-          "{\"plan_kind\":\"wiki_librarian_gemma3_27b_direct\",\"reasoning_mode\":\"direct\",\"template\":\"gemma3_text_only\",\"temperature\":0.0,\"source_doc\":\"docs/feature-requests/wiki-librarian-bench/07-model-plan-gemma3-27b.md\"}",
+          "{\"plan_kind\":\"wiki_librarian_gemma4_26b_a4b_thinking\",\"thinking\":\"on\",\"template\":\"gemma4_jinja\",\"temperature\":1.0,\"top_k\":64,\"top_p\":0.95,\"source_doc\":\"docs/feature-requests/wiki-librarian-bench/12-model-plan-gemma4.md\"}",
           "--pack",
           "librarian-gate",
           "--pack",

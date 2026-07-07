@@ -24,9 +24,10 @@ agent-autobench --start
 ```
 
 Plain `apb` opens the local pilotBENCHY web UI at `http://127.0.0.1:36939/`. The
-browser is the primary workflow for model selection, benchmark-suite plan
-selection, live WebSocket run progress, telemetry, and receipt links. `apb tui`
-remains available as a fallback terminal TUI.
+browser is the primary workflow for model selection, Flight Plan selection, live
+WebSocket run progress, telemetry, and receipt links. Benchmark-suite `.plan.json`
+files remain available as advanced/source-controlled run artifacts under the
+Flight Plan layer. `apb tui` remains available as a fallback terminal TUI.
 
 ## Checks
 
@@ -231,6 +232,36 @@ agent-autobench serve-probe --model "path\to\model.gguf" --context-size 4096
 
 The probe records server ready time, cold TTFT, warm TTFT, warmup penalty, and serving tokens/sec. Context tiers ask the same ordered question suite each time so `_runs\serving-metrics.tsv` stays comparable.
 
+## Flight Plans
+
+Flight Plans are the beginner contract: choose model(s), choose the goal, then
+start. The browser shows them in the Run menu, and the CLI can list the same
+plans for agents, scripts, and troubleshooting:
+
+```powershell
+agent-autobench flight-plans
+agent-autobench flight-plans --json-out
+```
+
+Use Flight Plans for normal runs. Use benchmark-suite `.plan.json` files only
+when you need the lower-level, source-controlled task artifact behind a run.
+
+The Flight Plan UX follows the durable patterns used by current LLM evaluation
+tools:
+
+- [Inspect AI](https://inspect.aisi.org.uk/eval-logs.html): keep eval logs as
+  the primary record and make eval sets resumable.
+- [promptfoo](https://www.promptfoo.dev/docs/usage/command-line/): keep a
+  simple eval command plus a browsable result surface.
+- [EleutherAI lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness):
+  keep task/model configuration declarative and runnable from one command.
+
+pilotBENCHY applies those ideas locally: a Flight Plan is the user-facing preset,
+`resolved-plan.json` is the replay-safe resolved configuration, `command.txt` is
+the readable command copy, and `status.json` is the small dashboard/agent status
+file. The web UI should preserve the two-button path: `Select all`, then
+`Start librarian benchmark`.
+
 ## Benchmark Suite
 
 Install harness extras:
@@ -279,6 +310,9 @@ Every run writes a folder under `_runs\<timestamp>-<model>`.
 Receipt files:
 
 - `events.jsonl`: attempt events, settings, telemetry, and failure class
+- `resolved-plan.json`: replay-safe run plan with exact command `argv` arrays
+- `command.txt`: human-readable command copy from `resolved-plan.json`
+- `status.json`: latest run status for dashboards and agents
 - `summary.md`: plain-English result
 - `itemized-report.md`: attempt-by-attempt report
 - `report.html`: browser report for the run
@@ -300,6 +334,13 @@ Receipt files:
 - `best-settings.json`: best settings and score
 - `learning.json`: best Optuna settings when learning is enabled
 - `recovery.json`: latest recovery status
+
+Export the resolved plan from a receipt:
+
+```powershell
+agent-autobench export-plan --run "_runs\20260629-example" --json-out
+agent-autobench export-plan --run "_runs\20260629-example" --output "_runs\replay-plan.json"
+```
 
 Folder-level reports:
 

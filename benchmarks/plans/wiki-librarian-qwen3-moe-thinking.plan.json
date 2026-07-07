@@ -6,13 +6,13 @@
     "score_contract": "agent_bench_score",
     "plan_kind": "wiki_librarian_qwen3_moe_thinking",
     "source_doc": "docs/feature-requests/wiki-librarian-bench/08-model-plan-qwen3-moe.md",
-    "comparison_family": "wiki_librarian_gemma_vs_qwen",
+    "comparison_family": "wiki_librarian_current_models",
     "model_plan": {
       "hf_slug": "Qwen/Qwen3.6-35B-A3B",
       "architecture": "qwen3_5_moe",
       "quant_start": "Q4_K_M",
       "thinking": "on",
-      "template": "froggeric-v19",
+      "template": "froggeric-v21.3",
       "template_preflight": [
         "load with --jinja",
         "verify thinking content is preserved",
@@ -29,7 +29,7 @@
         "MTP optional only for MTP GGUF plus llama.cpp b9180+"
       ]
     },
-    "requires": "A Qwen3.5/Qwen3.6 35B-A3B GGUF served by a local OpenAI-compatible llama.cpp endpoint on http://127.0.0.1:8080, preferably with froggeric-v19 template and --jinja."
+    "requires": "A Qwen3.5/Qwen3.6 35B-A3B GGUF served by a local OpenAI-compatible llama.cpp endpoint on http://127.0.0.1:8080 with Froggeric v21.3, --jinja, enable_thinking=true, preserve_thinking=true, --reasoning on, and --reasoning-format deepseek."
   },
   "tasks": [
     {
@@ -54,7 +54,7 @@
           "--score-out",
           "{task_dir}/score.json",
           "--settings-json",
-          "{\"plan_kind\":\"wiki_librarian_qwen3_moe_thinking\",\"thinking\":\"on\",\"template\":\"froggeric-v19\",\"temperature\":0.6,\"top_k\":20,\"top_p\":0.95,\"source_doc\":\"docs/feature-requests/wiki-librarian-bench/08-model-plan-qwen3-moe.md\"}",
+          "{\"plan_kind\":\"wiki_librarian_qwen3_moe_thinking\",\"thinking\":\"on\",\"template\":\"froggeric-v21.3\",\"temperature\":0.6,\"top_k\":20,\"top_p\":0.95,\"source_doc\":\"docs/feature-requests/wiki-librarian-bench/08-model-plan-qwen3-moe.md\"}",
           "--pack",
           "librarian-write-entry",
           "--pack",
@@ -89,7 +89,7 @@
           "--score-out",
           "{task_dir}/score.json",
           "--settings-json",
-          "{\"plan_kind\":\"wiki_librarian_qwen3_moe_thinking\",\"thinking\":\"on\",\"template\":\"froggeric-v19\",\"temperature\":0.6,\"top_k\":20,\"top_p\":0.95,\"source_doc\":\"docs/feature-requests/wiki-librarian-bench/08-model-plan-qwen3-moe.md\"}",
+          "{\"plan_kind\":\"wiki_librarian_qwen3_moe_thinking\",\"thinking\":\"on\",\"template\":\"froggeric-v21.3\",\"temperature\":0.6,\"top_k\":20,\"top_p\":0.95,\"source_doc\":\"docs/feature-requests/wiki-librarian-bench/08-model-plan-qwen3-moe.md\"}",
           "--pack",
           "librarian-gate",
           "--pack",

@@ -52,3 +52,69 @@ def test_run_receipt_create_avoids_same_second_folder_collisions(tmp_path, monke
 
     assert first.path.name == "20260526-120000-qwen-test"
     assert second.path.name == "20260526-120000-qwen-test-2"
+
+
+def test_run_receipt_writes_reproducible_plan_command_and_status(tmp_path):
+    receipt = RunReceipt.create(tmp_path, slug="qwen-test")
+
+    receipt.write_resolved_plan(
+        {"schema_version": 1, "program": "autoresearch", "model": "model.gguf"},
+        [
+            {
+                "argv": ["agent-autobench", "autoresearch", "--model", "model.gguf"],
+                "display_command": "agent-autobench autoresearch --model model.gguf",
+            }
+        ],
+    )
+    receipt.write_status("running", step="autoresearch", detail="attempt:1")
+
+    resolved = json.loads((receipt.path / "resolved-plan.json").read_text(encoding="utf-8"))
+    command = (receipt.path / "command.txt").read_text(encoding="utf-8")
+    status = json.loads((receipt.path / "status.json").read_text(encoding="utf-8"))
+
+    assert resolved["schema_version"] == 1
+    assert resolved["program"] == "autoresearch"
+    assert resolved["commands"][0]["argv"] == [
+        "agent-autobench",
+        "autoresearch",
+        "--model",
+        "model.gguf",
+    ]
+    assert command == "agent-autobench autoresearch --model model.gguf\n"
+    assert status["status"] == "running"
+    assert status["step"] == "autoresearch"
+    assert status["detail"] == "attempt:1"
+
+
+def test_run_receipt_command_fallback_quotes_argv_with_spaces(tmp_path):
+    receipt = RunReceipt.create(tmp_path, slug="qwen-test")
+
+    receipt.write_resolved_plan(
+        {"schema_version": 1, "program": "autoresearch"},
+        [
+            {
+                "argv": [
+                    "agent-autobench",
+                    "autoresearch",
+                    "--model",
+                    "G:\\models\\model with spaces.gguf",
+                ],
+            }
+        ],
+    )
+
+    command = (receipt.path / "command.txt").read_text(encoding="utf-8")
+
+    assert '"G:\\models\\model with spaces.gguf"' in command
+
+
+def test_run_receipt_rejects_unsafe_json_filenames(tmp_path):
+    receipt = RunReceipt.create(tmp_path, slug="qwen-test")
+
+    for filename in ("../outside.json", "nested/file.json", "CON.json"):
+        try:
+            receipt.write_json(filename, {})
+        except ValueError:
+            pass
+        else:  # pragma: no cover - assertion clarity
+            raise AssertionError(f"expected unsafe filename to be rejected: {filename}")

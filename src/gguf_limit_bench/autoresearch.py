@@ -305,6 +305,8 @@ class AutoresearchLoop:
         champion_state_db_path: Path | None = None,
         champion_gpu_name: str = "",
         is_benchmark_mode: bool = False,
+        resolved_plan: dict[str, Any] | None = None,
+        commands: tuple[dict[str, Any], ...] = (),
     ) -> None:
         self.model = model
         self.runs_root = runs_root
@@ -333,9 +335,16 @@ class AutoresearchLoop:
         self.champion_state_db_path = champion_state_db_path
         self.champion_gpu_name = champion_gpu_name
         self.is_benchmark_mode = is_benchmark_mode
+        self.resolved_plan = resolved_plan
+        self.commands = commands
 
     def run(self) -> RunReceipt:
         receipt = RunReceipt.create(self.runs_root, slug=_safe_slug(self.model.stem))
+        receipt.write_resolved_plan(
+            self.resolved_plan or self._default_resolved_plan(),
+            list(self.commands) or [self._default_command()],
+        )
+        receipt.write_status("running", step="autoresearch")
         attach_receipt = getattr(self.attempt_runner, "set_receipt_path", None)
         if callable(attach_receipt):
             attach_receipt(receipt.path)
@@ -504,6 +513,11 @@ class AutoresearchLoop:
                 {"score": best_result.workflow_score, "tasks": best_result.workflow_results},
             )
         receipt.write_json("recovery.json", {"status": "finished", "detail": best_result.failure})
+        receipt.write_status(
+            "finished" if best_result.ok else "failed",
+            step="autoresearch",
+            detail=best_result.failure,
+        )
         receipt.write_summary(
             _summary_lines(
                 self.model,
@@ -544,6 +558,51 @@ class AutoresearchLoop:
         write_itemized_run_report(receipt.path)
         self._run_champion_pack_eval(receipt, best_settings)
         return receipt
+
+    def _default_resolved_plan(self) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "program": "autoresearch",
+            "model": str(self.model),
+            "budget_seconds": self.budget_seconds,
+            "parallel_max": self.parallel_max,
+            "max_attempts": self.max_attempts,
+            "round_seconds": self.round_seconds,
+            "candidate_sequence": [settings.to_dict() for settings in self.candidate_sequence or ()],
+            "skipped_profiles": list(self.skipped_profiles),
+            "benchmark_suite_plan": _benchmark_suite_plan_to_dict(self.benchmark_suite_plan),
+            "context_ladder": list(self.context_ladder or ()),
+            "perplexity_contexts": list(self.perplexity_contexts or ()),
+            "champion_eval": {
+                "enabled": self.is_benchmark_mode,
+                "pack_ids": list(self.champion_pack_ids or ()),
+                "sample_size": self.champion_sample_size,
+                "repeats": self.champion_repeats,
+                "selection": self.champion_selection,
+                "seed": self.champion_seed,
+                "state_db_path": (
+                    None if self.champion_state_db_path is None else str(self.champion_state_db_path)
+                ),
+                "gpu_name": self.champion_gpu_name,
+            },
+        }
+
+    def _default_command(self) -> dict[str, Any]:
+        argv = [
+            "agent-autobench",
+            "autoresearch",
+            "--model",
+            str(self.model),
+            "--budget-minutes",
+            str(max(1, math.ceil(self.budget_seconds / 60))),
+            "--parallel-max",
+            str(self.parallel_max),
+        ]
+        if self.max_attempts is not None:
+            argv.extend(["--max-attempts", str(self.max_attempts)])
+        if self.candidate_sequence is not None:
+            argv.append("--flag-ladder")
+        return {"argv": argv, "display_command": subprocess.list2cmdline(argv)}
 
     def _run_champion_pack_eval(
         self, receipt: RunReceipt, best_settings: AutoresearchSettings
@@ -1094,6 +1153,17 @@ def _is_partial_result(result: AttemptResult) -> bool:
     return (
         not result.ok and result.completed_questions > 0 and result.generation_tokens_per_second > 0
     )
+
+
+def _benchmark_suite_plan_to_dict(plan: BenchmarkSuitePlan | None) -> dict[str, Any] | None:
+    if plan is None:
+        return None
+    return {
+        "model": plan.model,
+        "context": plan.context,
+        "settings": plan.settings,
+        "tasks": [asdict(task) for task in plan.tasks],
+    }
 
 
 def _score_fraction(result: AttemptResult) -> str | None:

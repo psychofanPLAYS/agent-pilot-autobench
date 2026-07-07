@@ -61,7 +61,7 @@ flowchart TD
 ## Cross-cutting (scored on every job above)
 
 - **format adherence** — exact output contract (JSON tool calls, frontmatter).
-  The thing froggeric-v19-vs-stock and thinking-on-vs-off move most.
+  The thing Froggeric-v21.3-vs-stock and thinking-on-vs-off move most.
 - **grounding** — no facts absent from the source / retrieved set.
 - **contradiction & staleness** — recognize when new info invalidates old.
 - **output stability** — same input, same output across N repeats. Its own meter,

@@ -19,7 +19,7 @@ options and trade-offs, but leave the choice to the owner.
 ## Sweep / scope
 
 4. **Default model + quant matrix** — exact list to ship in the default sweep
-   (which gemma3 build, which qwen3.5/3.6 MoE builds, which quants).
+   (which current Gemma 4 build if any, which qwen3.5/3.6 MoE builds, which quants).
 5. **Score weights** — how to weight job scores, grounding, stability, and system
    metrics into `librarian_bench_score`. Are some jobs gates (auto-fail on format
    violation) vs weighted contributors?

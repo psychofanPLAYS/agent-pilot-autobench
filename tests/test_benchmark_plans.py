@@ -10,7 +10,7 @@ def test_bundled_benchmark_suite_plans_are_valid_and_complete():
         "local-openai-smoke.plan.json",
         "local-bfcl-smoke.plan.json",
         "external-agentic-heavy.plan.json",
-        "wiki-librarian-gemma3-27b-direct.plan.json",
+        "wiki-librarian-gemma4-26b-a4b-thinking.plan.json",
         "wiki-librarian-qwen3-moe-thinking.plan.json",
     }
     for path in plan_paths:

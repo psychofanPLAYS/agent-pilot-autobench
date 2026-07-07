@@ -102,6 +102,8 @@ def test_webui_state_lists_models_modes_and_librarian_packs(tmp_path):
     assert any(mode["id"] == "librarian_bench" for mode in payload["modes"])
     assert payload["run_configuration"]["standard_forced_args"]
     assert "receipts" in payload
+    qwen = next(model for model in payload["models"] if model["family"] == "qwen")
+    assert any(preset["name"] == "thinking_general" for preset in qwen["sampler_presets"])
 
 
 def test_librarian_web_selection_accepts_any_models():
@@ -144,6 +146,9 @@ def test_webui_start_run_writes_spec_and_spawns_engine(tmp_path):
             "budget_minutes": 7,
             "benchmark_suite_plan": str(plan_path),
             "forced_server_args": ["--flash-attn", "on", "--jinja"],
+            "sample_size": 17,
+            "repeats": 4,
+            "sampler_policy": "runtime_defaults",
             "stream_prompts": True,
         },
     )
@@ -157,6 +162,9 @@ def test_webui_start_run_writes_spec_and_spawns_engine(tmp_path):
     assert spec["options"]["budget_minutes"] == 7
     assert spec["options"]["forced_server_args"] == ["--flash-attn", "on", "--jinja"]
     assert spec["options"]["benchmark_suite_plan"] == str(plan_path.resolve())
+    assert spec["options"]["sample_size"] == 17
+    assert spec["options"]["repeats"] == 4
+    assert spec["options"]["sampler_policy"] == "runtime_defaults"
     assert [m["path"] for m in spec["models"]] == [str(gemma_path), str(qwen_path)]
     assert state.run.phase == "running"
 
@@ -457,6 +465,9 @@ def test_webui_websocket_start_run_spawns_engine(tmp_path):
                     "budget_minutes": 3,
                     "benchmark_suite_plan": str(plan_path),
                     "forced_server_args": ["--jinja"],
+                    "sample_size": 17,
+                    "repeats": 4,
+                    "sampler_policy": "runtime_defaults",
                 },
             }
         )
@@ -467,6 +478,9 @@ def test_webui_websocket_start_run_spawns_engine(tmp_path):
     assert len(spawned) == 1
     spec = run_dir.read_spec(spawned[0])
     assert spec["options"]["budget_minutes"] == 3
+    assert spec["options"]["sample_size"] == 17
+    assert spec["options"]["repeats"] == 4
+    assert spec["options"]["sampler_policy"] == "runtime_defaults"
     assert [m["path"] for m in spec["models"]] == [str(gemma_path), str(qwen_path)]
 
 
@@ -589,15 +603,26 @@ def test_webui_state_lists_benchmark_suite_plans(tmp_path):
 
     payload = state.state_payload()
 
-    assert payload["benchmark_suite_plans"] == [
-        {
-            "path": str(plans / "local-openai-smoke.plan.json"),
-            "filename": "local-openai-smoke.plan.json",
-            "name": "Local OpenAI smoke",
-            "description": "Requires a local endpoint.",
-            "warning": "Requires a local endpoint.",
-        }
-    ]
+    assert payload["benchmark_suite_plans"][0] | {
+        "plan_kind": "",
+        "requires": "",
+        "score_contract": "",
+        "task_count": 0,
+        "phases": [],
+        "harnesses": [],
+    } == {
+        "path": str(plans / "local-openai-smoke.plan.json"),
+        "filename": "local-openai-smoke.plan.json",
+        "name": "Local OpenAI smoke",
+        "description": "Requires a local endpoint.",
+        "plan_kind": "",
+        "requires": "",
+        "score_contract": "",
+        "task_count": 0,
+        "phases": [],
+        "harnesses": [],
+        "warning": "Requires a local endpoint.",
+    }
 
 
 def test_receipt_event_payloads_tails_latest_receipt(tmp_path):

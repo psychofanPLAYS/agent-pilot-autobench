@@ -58,7 +58,7 @@ def test_librarian_suite_writes_score_and_receipts(tmp_path, monkeypatch):
     )
 
     summary = run_librarian_suite(
-        model="gemma-3-27b-it",
+        model="gemma-4-26b-a4b-it",
         base_url="http://127.0.0.1:8080",
         out_dir=tmp_path,
         pack_ids=("librarian-gate", "librarian-rerank"),
@@ -110,7 +110,7 @@ def test_librarian_suite_preflight_failure_writes_blocked_receipts(tmp_path, mon
         sample_size=1,
         repeats=1,
         timeout_seconds=123,
-        settings={"template": "froggeric-v19"},
+        settings={"template": "froggeric-v21.3"},
     )
 
     saved = json.loads((tmp_path / "librarian-suite-summary.json").read_text())

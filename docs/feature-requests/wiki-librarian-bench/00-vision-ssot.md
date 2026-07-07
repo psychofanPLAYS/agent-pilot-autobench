@@ -57,7 +57,7 @@ flowchart LR
 
 - best llama.cpp flag profile (extends the existing flag ladder + Optuna study)
 - thinking **on vs off** for librarian work (may differ per job family)
-- best chat template (froggeric v19 vs stock vs other)
+- best chat template (Froggeric v21.3 vs stock vs other)
 - best quant for the quality/speed Pareto frontier
 - which jobs the model is strong/weak at (capability profile)
 

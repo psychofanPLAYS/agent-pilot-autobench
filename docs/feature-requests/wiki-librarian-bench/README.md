@@ -33,7 +33,7 @@ The "wiki" here is **not** human-facing prose. It is a local-model-powered memor
 layer: markdown notes + a vector store, retrieved with a hybrid **RRF** fusion of
 vector and full-text search over `sqlite-vec`, with **autonomous injection** of
 relevant memories / lessons / logs into the *agent's* context. Any local model
-(for example gemma3-27b, or a qwen3.5 / qwen3.6 ~35B MoE, and other variants) is
+(for example a qwen3.6 / qwen3.5 ~35B MoE or a current Gemma 4 variant) is
 the librarian doing the cognitive work. Agent Pilot is the instrument that
 captures **every conceivable data point** about that model's librarian
 performance across every knob we can turn, then draws trends and a
@@ -72,10 +72,11 @@ Everything reduces to three independent dimensions. See
 | [04-knobs.md](04-knobs.md) | The control axes we sweep | draft, WIP |
 | [05-meters.md](05-meters.md) | The deterministic scorers / metrics | draft, WIP |
 | [06-open-questions.md](06-open-questions.md) | Decisions still needed from the owner | open |
-| [07-model-plan-gemma3-27b.md](07-model-plan-gemma3-27b.md) | Per-model plan: Gemma 3 27B (dense, no-thinking, double-BOS, QAT) | grounded |
 | [08-model-plan-qwen3-moe.md](08-model-plan-qwen3-moe.md) | Per-model plan: Qwen3.5/3.6 35B-A3B (MoE, thinking x template, MTP) | grounded |
 | [09-hardening-spec.md](09-hardening-spec.md) | Hardening the whole suite: preflight gates, determinism, MC validity, adversarial cases | actionable |
 | [10-runnable-presets.md](10-runnable-presets.md) | Runnable Gemma/Qwen plan artifacts and first live command path | runnable |
+| [11-flag-doctor-doctrine.md](11-flag-doctor-doctrine.md) | Runtime flag/template doctrine and current-model evaluation split | implementation target |
+| [12-model-plan-gemma4.md](12-model-plan-gemma4.md) | Current Google-family comparator: Gemma 4 26B-A4B IT | current |
 | [IMPLEMENTATION-STATUS.md](IMPLEMENTATION-STATUS.md) | What's built vs not, verification snapshot | live |
 
 ## How to contribute (Codex / CC)
@@ -107,5 +108,5 @@ Everything reduces to three independent dimensions. See
 - **librarian / wiki worker** — the local model acting as the memory layer's brain.
 - **job / knob / meter** — the three cube dimensions (task / variable / metric).
 - **thinking on/off** — the model's reasoning toggle; a primary knob.
-- **froggeric v19** — a chat-template variant for Qwen models; a primary knob.
+- **Froggeric v21.3** — the pinned custom Qwen chat-template lane; a primary knob.
 - **serving-Claude** — the layer exists to feed Claude Code / Codex, powered locally.

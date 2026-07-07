@@ -124,6 +124,8 @@ def test_autoresearch_loop_keeps_only_better_setting_and_writes_receipts(tmp_pat
 
     receipt = loop.run()
     best = json.loads((receipt.path / "best-settings.json").read_text(encoding="utf-8"))
+    resolved_plan = json.loads((receipt.path / "resolved-plan.json").read_text(encoding="utf-8"))
+    status = json.loads((receipt.path / "status.json").read_text(encoding="utf-8"))
     events = [
         json.loads(line)
         for line in (receipt.path / "events.jsonl").read_text(encoding="utf-8").splitlines()
@@ -137,6 +139,17 @@ def test_autoresearch_loop_keeps_only_better_setting_and_writes_receipts(tmp_pat
     assert (receipt.path / "itemized-report.md").exists()
     assert (receipt.path / "report.html").exists()
     assert (receipt.path / "report.json").exists()
+    assert resolved_plan["schema_version"] == 1
+    assert resolved_plan["program"] == "autoresearch"
+    assert resolved_plan["model"].endswith("Qwen3-Test-Q4_K_M.gguf")
+    assert resolved_plan["budget_seconds"] == 60
+    assert resolved_plan["commands"][0]["argv"][:2] == ["agent-autobench", "autoresearch"]
+    assert Path(resolved_plan["commands"][0]["argv"][3]).name == "Qwen3-Test-Q4_K_M.gguf"
+    assert "agent-autobench autoresearch" in (receipt.path / "command.txt").read_text(
+        encoding="utf-8"
+    )
+    assert status["status"] == "finished"
+    assert status["step"] == "autoresearch"
     report = json.loads((receipt.path / "report.json").read_text(encoding="utf-8"))
     metrics = {metric["metric"]: metric for metric in report["metric_statuses"]}
     assert metrics["generation_tps"]["status"] == "measured"
