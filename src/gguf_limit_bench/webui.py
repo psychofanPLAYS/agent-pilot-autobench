@@ -1231,58 +1231,88 @@ INDEX_HTML = r"""<!doctype html>
   <style>
     :root {
       color-scheme: dark;
-      --bg: #0e1117;
-      --panel: #151a22;
-      --panel-2: #10151d;
-      --line: #2b3441;
+      --bg: #0b0f14;
+      --rail: #090d12;
+      --panel: #121820;
+      --panel-2: #0e141b;
+      --panel-3: #0a0e14;
+      --line: #26313d;
+      --line-soft: rgba(255,255,255,.06);
       --text: #e8edf3;
       --muted: #9aa8b7;
+      --faint: #657282;
       --teal: #54d2bd;
+      --teal-dim: #2c6c63;
       --amber: #f4b860;
+      --amber-dim: #7a5a2c;
       --bad: #ff7373;
       --good: #79d18a;
+      --shadow: 0 24px 70px rgba(0,0,0,.28);
     }
     body.sepia {
       --bg: #16120f;
       --panel: #211b16;
       --panel-2: #18130f;
+      --panel-3: #120f0c;
       --line: #4a4037;
       --text: #eee2d1;
       --muted: #b8aa98;
+      --faint: #8f8170;
       --teal: #d0b06f;
+      --teal-dim: #6b5935;
       --amber: #c9925b;
+      --amber-dim: #735033;
       --bad: #e98570;
       --good: #a8c47a;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      background: var(--bg);
+      background:
+        linear-gradient(180deg, rgba(84,210,189,.035), transparent 280px),
+        var(--bg);
       color: var(--text);
       font: 14px/1.45 Inter, ui-sans-serif, system-ui, Segoe UI, Arial, sans-serif;
     }
-    .shell { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
+    .shell { display: grid; grid-template-columns: 236px minmax(0, 1fr); min-height: 100vh; }
     aside {
       border-right: 1px solid var(--line);
-      background: #0b0f15;
+      background: var(--rail);
       padding: 24px 18px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
     }
-    .brand { font-size: 22px; font-weight: 800; letter-spacing: 0; margin-bottom: 22px; }
+    .brand { font-size: 22px; font-weight: 800; letter-spacing: 0; margin-bottom: 2px; }
+    .brand-sub { color: var(--muted); font-size: 12px; margin-bottom: 24px; }
     .navitem {
       display: flex; justify-content: space-between; gap: 12px;
       padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,.05); color: var(--muted);
     }
-    main { width: min(100%, 1840px); margin: 0 auto; padding: clamp(20px, 2.4vw, 48px); }
-    header { display: flex; align-items: start; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
-    h1 { margin: 0; font-size: clamp(34px, 2.8vw, 56px); line-height: 0.95; letter-spacing: 0; }
-    .sub { margin-top: 7px; color: var(--muted); max-width: 840px; }
-    .grid { display: grid; grid-template-columns: minmax(520px, 1.25fr) minmax(420px, .82fr); gap: clamp(18px, 1.6vw, 30px); align-items: start; }
+    .navitem b { color: var(--text); font-weight: 700; }
+    .rail-note {
+      margin-top: 18px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 12px;
+      color: var(--muted);
+      background: var(--panel-2);
+      font-size: 12px;
+    }
+    .rail-note strong { display: block; color: var(--text); margin-bottom: 4px; }
+    main { width: min(100%, 1920px); margin: 0 auto; padding: clamp(18px, 2vw, 44px); }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
+    h1 { margin: 0; font-size: clamp(32px, 2.4vw, 50px); line-height: 0.96; letter-spacing: 0; }
+    .sub { margin-top: 7px; color: var(--muted); max-width: 840px; overflow-wrap: anywhere; }
+    .grid { display: grid; grid-template-columns: minmax(500px, 1.18fr) minmax(360px, .82fr); gap: clamp(16px, 1.4vw, 30px); align-items: start; }
+    .grid > *, .side, .panel { min-width: 0; }
     .grid > .panel:first-child { align-self: start; position: sticky; top: 16px; }
     .panel {
-      background: var(--panel);
+      background: linear-gradient(180deg, rgba(255,255,255,.018), transparent 90px), var(--panel);
       border: 1px solid var(--line);
       border-radius: 6px;
       overflow: hidden;
+      box-shadow: var(--shadow);
     }
     .panel h2 { margin: 0; padding: 14px 16px; font-size: 15px; border-bottom: 1px solid var(--line); }
     .section-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -1295,10 +1325,17 @@ INDEX_HTML = r"""<!doctype html>
       font-size: 12px;
       white-space: nowrap;
     }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { text-align: left; padding: 11px 12px; border-bottom: 1px solid rgba(255,255,255,.06); }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th, td { text-align: left; padding: 11px 12px; border-bottom: 1px solid rgba(255,255,255,.06); overflow-wrap: anywhere; }
     th { color: var(--muted); font-size: 12px; font-weight: 700; }
     td { vertical-align: middle; }
+    td:nth-child(2) { max-width: 360px; overflow-wrap: anywhere; }
+    th:nth-child(1), td:nth-child(1) { width: 50px; }
+    th:nth-child(3), td:nth-child(3) { width: 84px; }
+    th:nth-child(4), td:nth-child(4) { width: 78px; }
+    th:nth-child(5), td:nth-child(5) { width: 88px; }
+    th:nth-child(6), td:nth-child(6) { width: 68px; }
+    th:nth-child(7), td:nth-child(7) { width: 70px; }
     tr { cursor: pointer; }
     tr:hover td { background: rgba(84,210,189,.06); }
     tr.selected td {
@@ -1321,12 +1358,41 @@ INDEX_HTML = r"""<!doctype html>
       cursor: pointer; border-color: transparent;
     }
     #start {
-      position: sticky;
-      top: 16px;
-      z-index: 4;
       min-height: 52px;
       font-size: 16px;
       box-shadow: 0 14px 34px rgba(84, 210, 189, .18);
+    }
+    .launch-zone {
+      margin-top: 14px;
+      padding: 14px;
+      border: 1px solid var(--teal-dim);
+      border-radius: 8px;
+      background: linear-gradient(180deg, rgba(84,210,189,.09), rgba(84,210,189,.025));
+    }
+    .launch-readiness {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px 12px;
+      align-items: start;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 10px;
+    }
+    .launch-readiness strong { color: var(--text); font-size: 13px; }
+    .launch-readiness .ready-pill {
+      border: 1px solid var(--line);
+      background: var(--panel-3);
+      border-radius: 999px;
+      padding: 3px 9px;
+      color: var(--teal);
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    #guard {
+      min-height: 22px;
+      margin: 10px 0 0;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255,255,255,.07);
     }
     .ghost-button {
       width: auto; margin: 0; padding: 8px 10px; background: var(--panel-2);
@@ -1364,7 +1430,7 @@ INDEX_HTML = r"""<!doctype html>
       box-shadow: inset 3px 0 0 var(--teal);
     }
     .plan-card strong { display: block; font-size: 14px; margin-bottom: 4px; }
-    .plan-card span { display: block; color: var(--muted); font-size: 12px; line-height: 1.35; }
+    .plan-card span { display: block; color: var(--muted); font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
     .plan-card small { display: block; color: var(--amber); margin-top: 7px; }
     details.controls {
       margin-top: 14px;
@@ -1388,7 +1454,7 @@ INDEX_HTML = r"""<!doctype html>
     .run-summary {
       margin: 14px 0;
       padding: 14px;
-      border-radius: 10px;
+      border-radius: 8px;
       background: var(--panel-2);
       border: 1px solid var(--line);
     }
@@ -1399,24 +1465,69 @@ INDEX_HTML = r"""<!doctype html>
     .flow-diagram {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 8px;
+      gap: 10px;
       margin-top: 12px;
     }
     .flow-step {
+      position: relative;
       min-height: 78px;
       padding: 10px;
-      border-radius: 10px;
+      border-radius: 8px;
       border: 1px solid var(--line);
       background: linear-gradient(180deg, rgba(84,210,189,.08), rgba(84,210,189,.02));
+    }
+    .flow-step:not(:last-child)::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      right: -10px;
+      width: 10px;
+      height: 1px;
+      background: var(--teal-dim);
     }
     .flow-step.done { border-color: var(--teal-dim); }
     .flow-step.active { border-color: var(--teal); box-shadow: 0 0 0 1px rgba(84,210,189,.14); }
     .flow-step b { display: block; margin-bottom: 4px; }
     .flow-step small { color: var(--muted); }
+    .seam-diagram {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr auto 1fr;
+      align-items: center;
+      gap: 10px;
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-3);
+    }
+    .seam-node {
+      min-height: 62px;
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      padding: 9px 10px;
+      background: rgba(255,255,255,.025);
+    }
+    .seam-node b { display: block; font-size: 13px; }
+    .seam-node small { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
+    .seam-arrow { color: var(--teal); font-weight: 900; }
+    .status-legend {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .legend-item {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 9px;
+      background: var(--panel-2);
+    }
+    .legend-item b { display: block; font-size: 12px; color: var(--text); }
+    .legend-item small { color: var(--muted); font-size: 11px; }
     button:disabled { opacity: .5; cursor: not-allowed; }
     .pack { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; color: var(--muted); }
     .pack small { display: block; color: var(--muted); }
-    .telemetry { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 16px; }
+    .telemetry { display: grid; grid-template-columns: repeat(4, minmax(160px, 1fr)); gap: 10px; margin-top: 18px; }
     .metric { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
     .metric .label { color: var(--muted); font-size: 12px; }
     .metric .value { font-size: 18px; font-weight: 800; margin-top: 4px; }
@@ -1459,12 +1570,21 @@ INDEX_HTML = r"""<!doctype html>
       .grid > .panel:first-child { position: static; }
       .telemetry { grid-template-columns: repeat(2, 1fr); }
       .flow-diagram { grid-template-columns: 1fr 1fr; }
+      .flow-step::after { display: none; }
+      .seam-diagram { grid-template-columns: 1fr; }
+      .seam-arrow { text-align: center; transform: rotate(90deg); }
+      .status-legend { grid-template-columns: 1fr 1fr; }
       .summary-grid { grid-template-columns: 1fr; }
     }
     @media (min-width: 1700px) {
-      .grid { grid-template-columns: minmax(760px, 1.45fr) minmax(520px, .8fr); }
+      .shell { grid-template-columns: 268px minmax(0, 1fr); }
+      .grid { grid-template-columns: minmax(820px, 1.35fr) minmax(520px, .75fr); }
       body { font-size: 15px; }
       .panel h2 { font-size: 16px; }
+    }
+    @media (min-width: 2200px) {
+      main { max-width: 2060px; }
+      .grid { grid-template-columns: minmax(980px, 1.4fr) minmax(560px, .72fr); }
     }
 
     /* ===== in-flight cockpit (mission-control) ===== */
@@ -1489,11 +1609,18 @@ INDEX_HTML = r"""<!doctype html>
     #cockpit button.stop{border-color:var(--amber-dim); color:var(--amber);}
     #cockpit button.abort{border-color:#5a2630; color:var(--bad);}
     #cockpit button:disabled{opacity:.4; cursor:not-allowed;}
-    .stage{display:grid; grid-template-columns:minmax(0,1.62fr) minmax(330px,1fr); gap:16px; align-items:start;}
+    .stage{display:grid; grid-template-columns:minmax(0,1.38fr) minmax(360px,.9fr); gap:16px; align-items:start;}
     .col{display:grid; gap:16px;}
     .card{background:linear-gradient(180deg, var(--panel), var(--panel-2)); border:1px solid var(--line); border-radius:12px; overflow:hidden;}
     .card > h3{margin:0; padding:11px 15px; font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); border-bottom:1px solid var(--line-soft); display:flex; align-items:center; justify-content:space-between; gap:10px;}
     .card .pad{padding:14px 15px;}
+    .launch-overview{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px;}
+    .overview-tile{min-height:94px; border:1px solid var(--line-soft); border-radius:10px; padding:12px; background:var(--panel-3);}
+    .overview-tile strong{display:block; margin-bottom:8px; font-size:20px; line-height:1; color:var(--text); overflow-wrap:anywhere;}
+    .overview-tile span{display:block; color:var(--muted); font-size:11.5px;}
+    .overview-tile.live strong{color:var(--teal); text-shadow:var(--glow-teal);}
+    .overview-note{grid-column:1/-1; border:1px solid var(--teal-dim); border-radius:10px; padding:11px 12px; color:var(--muted); background:rgba(84,210,189,.05);}
+    .overview-note b{color:var(--text);}
     .qhead{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px;}
     .badge{font-size:11px; font-weight:800; letter-spacing:.06em; padding:3px 9px; border-radius:6px; border:1px solid var(--line); color:var(--muted); background:var(--panel-3);}
     .badge.pack{color:var(--violet); border-color:#33397a;}
@@ -1550,17 +1677,26 @@ INDEX_HTML = r"""<!doctype html>
     .bts{max-height:150px; overflow:auto; display:grid; gap:5px; font-size:11.5px;}
     .btsrow{display:grid; grid-template-columns:60px 130px 1fr; gap:10px; color:var(--muted);} .btsrow .bt{color:var(--faint); font-variant-numeric:tabular-nums;} .btsrow .bk{color:var(--violet); font-weight:700;}
     .ck-empty{color:var(--muted); padding:22px; text-align:center;}
+    .ck-empty.waiting{min-height:180px; display:grid; place-items:center; border:1px dashed var(--line); border-radius:10px; background:var(--panel-3);}
+    .ck-empty.waiting strong{display:block; color:var(--text); font-size:18px; margin-bottom:6px;}
+    .ck-empty.waiting span{display:block; max-width:460px;}
     @media (max-width: 980px){ .stage{grid-template-columns:1fr;} }
+    @media (max-width: 760px){ .launch-overview{grid-template-columns:1fr;} }
   </style>
 </head>
 <body>
   <div class="shell">
     <aside>
       <div class="brand">pilotBENCHY</div>
-      <div class="navitem"><span>Control</span><span>local</span></div>
-      <div class="navitem"><span>Models</span><span id="nav-models">0</span></div>
-      <div class="navitem"><span>Receipts</span><span>_runs</span></div>
-      <div class="navitem"><span>Server</span><span>127.0.0.1</span></div>
+      <div class="brand-sub">local benchmark cockpit</div>
+      <div class="navitem"><span>Control</span><b>local</b></div>
+      <div class="navitem"><span>Models</span><b id="nav-models">0</b></div>
+      <div class="navitem"><span>Receipts</span><b>_runs</b></div>
+      <div class="navitem"><span>Server</span><b>127.0.0.1</b></div>
+      <div class="rail-note">
+        <strong>Thin cockpit</strong>
+        The browser starts a detached engine, then reads the run folder. Refreshes do not own the benchmark.
+      </div>
     </aside>
     <main>
       <header>
@@ -1587,7 +1723,7 @@ INDEX_HTML = r"""<!doctype html>
         </div>
         <div class="side">
           <div class="panel">
-            <h2>Run setup</h2>
+          <h2>Run builder</h2>
               <div class="body">
                 <div class="field">
                   <label>Benchmark plan</label>
@@ -1601,8 +1737,24 @@ INDEX_HTML = r"""<!doctype html>
                   <div class="flow-step"><b>3. Engine</b><small>Detached runner writes receipts.</small></div>
                   <div class="flow-step"><b>4. Report</b><small>Review evidence, scores, and artifacts.</small></div>
                 </div>
-                <button id="start">Start benchmark</button>
-                <p id="guard" class="sub"></p>
+                <div class="seam-diagram" aria-label="Detached engine architecture">
+                  <div class="seam-node"><b>Browser</b><small>Chooses models and sends the run order.</small></div>
+                  <div class="seam-arrow">→</div>
+                  <div class="seam-node"><b>Run folder</b><small>run-spec, status, live events, receipts.</small></div>
+                  <div class="seam-arrow">→</div>
+                  <div class="seam-node"><b>Engine</b><small>Runs llama.cpp outside the web server.</small></div>
+                </div>
+                <div class="launch-zone">
+                  <div class="launch-readiness">
+                    <div>
+                      <strong id="launch-title">Ready to configure</strong>
+                      <span id="launch-detail">Select models and a benchmark plan.</span>
+                    </div>
+                    <span class="ready-pill" id="launch-pill">idle</span>
+                  </div>
+                  <button id="start" type="button">Start benchmark</button>
+                  <p id="guard" class="sub"></p>
+                </div>
 
                 <details class="controls" id="advanced-controls">
                   <summary>Advanced controls</summary>
@@ -1690,6 +1842,12 @@ INDEX_HTML = r"""<!doctype html>
       <section class="panel status">
         <strong>Run status</strong>
         <div id="run-status" class="sub">Loading...</div>
+        <div class="status-legend">
+          <div class="legend-item"><b>Ready</b><small>Pick models and plan.</small></div>
+          <div class="legend-item"><b>Running</b><small>Detached engine owns eval.</small></div>
+          <div class="legend-item"><b>Stopped</b><small>Finishes current item first.</small></div>
+          <div class="legend-item"><b>Receipt</b><small>Evidence saved under _runs.</small></div>
+        </div>
       </section>
       <section class="panel status reports">
         <strong>Receipts and reports</strong>
@@ -1707,6 +1865,7 @@ INDEX_HTML = r"""<!doctype html>
     let socket = null;
     let fallbackNotice = "";
     let selectionInitialized = false;
+    let startPending = false;
 
     function escapeHtml(value) {
       return String(value ?? "")
@@ -1881,7 +2040,10 @@ INDEX_HTML = r"""<!doctype html>
       // run-wide total from status if the engine exposes it, else discovered-plan fallback
       const total=Number(status.question_total)||m.planned||answered||0;
       const progFrac=total?Math.min(1,answered/total):0;
-      const modelName=(m.model||status.model||"").replace(/\.gguf$/i,"");
+      const selectedRunModels=Array.isArray(run.selected_models)?run.selected_models:[];
+      const modelName=(m.model||status.model||selectedRunModels[0]||"").replace(/\.gguf$/i,"");
+      const modelTotal=m.mt||status.model_total||selectedRunModels.length||1;
+      const modelIndex=m.mi||status.model_index||1;
       const activePhase=done?"complete":(CK_PHASES.some(p=>p[0]===phase)?phase:"librarian");
       const idx=CK_PHASES.findIndex(z=>z[0]===activePhase);
 
@@ -1889,17 +2051,18 @@ INDEX_HTML = r"""<!doctype html>
       const phaseHtml=CK_PHASES.map((p,i)=>{const cls=i<idx?"done":i===idx?"active":""; return '<span class="ph '+cls+'">'+p[1]+'</span>'+(i<CK_PHASES.length-1?'<span style="color:var(--faint)">›</span>':'');}).join(" ");
       const remain=Math.max(0,total-answered);
       const eta=done?"finished":(remain?("ETA ~"+(remain*4)+"s"):"ETA —");
+      const totalLabel=total||"?";
       const livePill=done?'<span class="phasepill"><span class="ph done">'+escapeHtml(phase)+'</span></span>':'<span class="live-pill"><span class="beat"></span> LIVE</span>';
       const cmd=
-        '<div><div class="ck-model mono">'+escapeHtml(modelName||"—")+'</div><div class="ck-sub">model '+(m.mi||status.model_index||1)+'/'+(m.mt||status.model_total||1)+'</div></div>'
+        '<div><div class="ck-model mono">'+escapeHtml(modelName||"Preparing model")+'</div><div class="ck-sub">model '+modelIndex+'/'+modelTotal+'</div></div>'
         +livePill+'<div class="phasepill">'+phaseHtml+'</div><div class="ck-spacer"></div>'
-        +'<div class="progress-read"><b>'+answered+'/'+(total||"·")+'</b><small>'+eta+'</small></div>'
+        +'<div class="progress-read"><b>'+answered+'/'+totalLabel+'</b><small>'+eta+'</small></div>'
         +'<div class="ck-btns"><button class="stop" '+(done?"disabled":"")+' onclick="ckStop()">■ Stop after current</button>'
         +'<button class="abort" '+(done?"disabled":"")+' onclick="ckAbort()">✕ Abort</button></div>';
 
       // current question / reasoning terminal
       let curHtml;
-      if(!cur){ curHtml='<div class="ck-empty">Waiting for the first question…</div>'; }
+      if(!cur){ curHtml='<div class="ck-empty waiting"><div><strong>Engine is warming up</strong><span>Waiting for the first question from the detached runner. The run folder remains the source of truth.</span></div></div>'; }
       else{
         const s=cur.scored; const streaming=!s;
         const chip=!s?'<span class="scorechip grading">grading…</span>':'<span class="scorechip '+(s.correct?'pass':'fail')+'">'+(s.correct?'PASS':'FAIL')+' · '+ckRound(s.score,2).toFixed(2)+'</span>';
@@ -1935,14 +2098,26 @@ INDEX_HTML = r"""<!doctype html>
         +'<div class="gauge"><div class="glab">RAM</div><div class="gval">'+ckRound(tel.ram_used_percent)+'<span class="gunit"> %</span></div></div>';
 
       const pipeHtml=CK_PHASES.map((p,i)=>{const cls=i<idx?"done":i===idx?"active":""; return '<div class="pstep '+cls+'"><span class="node"></span><span>'+p[1]+'</span></div>'+(i<CK_PHASES.length-1?'<div class="pconn"></div>':'');}).join("");
-      const queueSrc=m.models.length?m.models:[{name:modelName||"—",index:1,state:done?"done":"run"}];
+      const queueSrc=m.models.length
+        ? m.models
+        : (selectedRunModels.length
+          ? selectedRunModels.map((name,i)=>({name,index:i+1,state:done?"done":(i===0?"run":"queued")}))
+          : [{name:modelName||"Preparing model",index:1,state:done?"done":"run"}]);
       const queueHtml=queueSrc.map(mm=>{const cls=mm.state==="done"?"done":mm.state==="run"?"run":""; const right=mm.state==="done"?'<span class="qsc">✓</span>':mm.state==="run"?'<span class="qstate">running</span>':'<span class="qstate">queued</span>'; return '<div class="qitem '+cls+'"><span class="qdot"></span><span class="qn mono">'+escapeHtml(String(mm.name||"").replace(/\.gguf$/i,""))+'</span>'+right+'</div>';}).join("");
       const bts=m.bts.slice(-30);
       const btsHtml=bts.length?bts.map(b=>'<div class="btsrow"><span class="bt">'+ckTime(b.at)+'</span><span class="bk">'+escapeHtml(b.k.replace(/_/g," "))+'</span><span>'+escapeHtml(ckMsg(b.k,b.d))+'</span></div>').join(""):'<div class="ck-empty" style="padding:10px">Engine attempts, flag ladder, and champion eval appear here.</div>';
+      const overviewHtml=
+        '<div class="card"><h3>Run overview</h3><div class="pad"><div class="launch-overview">'
+        +'<div class="overview-tile live"><strong>'+escapeHtml(phase)+'</strong><span>detached engine phase</span></div>'
+        +'<div class="overview-tile"><strong>'+answered+'/'+totalLabel+'</strong><span>questions scored</span></div>'
+        +'<div class="overview-tile"><strong>'+escapeHtml(String(modelTotal))+'</strong><span>models in queue</span></div>'
+        +'<div class="overview-note"><b>'+escapeHtml(modelName||"Preparing model")+'</b><br>Live events, scores, telemetry, and receipts update here as the run folder changes.</div>'
+        +'</div></div></div>';
 
       document.getElementById("cockpit").innerHTML=
         '<div class="cmdbar">'+cmd+'</div>'
         +'<div class="stage"><div class="col">'
+        +overviewHtml
         +'<div class="card"><h3>Reasoning terminal <span class="mono" style="text-transform:none;letter-spacing:0;color:var(--faint)">'+escapeHtml(cur?cur.q_id:"")+'</span></h3><div class="pad">'+curHtml+'</div></div>'
         +'<div class="card"><h3>Completed this run <span style="color:var(--faint)">'+(hist.length||"")+'</span></h3><div class="pad"><div class="hist">'+histHtml+'</div></div></div>'
         +'</div><div class="col">'
@@ -2114,17 +2289,20 @@ INDEX_HTML = r"""<!doctype html>
       return "Local worker benchmark job.";
     }
 
+    function samplerPolicyText() {
+      const sampler = document.querySelector("#sampler-policy").value;
+      return sampler === "runtime_defaults"
+        ? "Sampler: llama.cpp defaults."
+        : "Sampler: HF recommended.";
+    }
+
     function updateGuard() {
       if (!appState) return;
       const flightPlan = selectedFlightPlan();
       const mode = document.querySelector("#mode").value;
       const plan = document.querySelector("#benchmark-suite-plan").value;
-      const sampler = document.querySelector("#sampler-policy").value;
       const models = appState.models.filter(model => selected.has(model.path));
       const guard = document.querySelector("#guard");
-      const samplerText = sampler === "runtime_defaults"
-        ? " Sampler: llama.cpp defaults."
-        : " Sampler: HF recommended.";
       if (models.length === 0) {
         if (!appState.models.length) {
           guard.textContent = "No GGUF models found in the configured model folder.";
@@ -2139,11 +2317,12 @@ INDEX_HTML = r"""<!doctype html>
         const compareHint = (mode === "librarian_bench" && models.length === 1)
           ? " Add a second model to compare them head-to-head."
           : "";
-        guard.textContent = `${models.length} model(s) ready.${flightPlanText}${planText}${samplerText}${compareHint}`;
+        guard.textContent = `${models.length} model(s) ready.${flightPlanText}${planText} ${samplerPolicyText()}${compareHint}`;
       }
       updateSelectedCount(models.length);
       updateRunSummary(models);
       updateFlowState(models.length, Boolean(flightPlan || plan || mode));
+      updateLaunchState(models, flightPlan);
     }
 
     function updateSelectedCount(count) {
@@ -2187,7 +2366,47 @@ INDEX_HTML = r"""<!doctype html>
           <span><b>${totalMinutes || "-"}</b><small>max minutes</small></span>
           <span><b>${scoredAttempts || "-"}</b><small>scored attempts</small></span>
         </div>
-        <div class="sub">${escapeHtml(evidence)}; receipts saved under _runs.${escapeHtml(workflow)}</div>`;
+        <div class="sub">${escapeHtml(evidence)}; ${escapeHtml(samplerPolicyText())} Receipts saved under _runs.${escapeHtml(workflow)}</div>`;
+    }
+
+    function updateLaunchState(models, flightPlan) {
+      const start = document.querySelector("#start");
+      const title = document.querySelector("#launch-title");
+      const detail = document.querySelector("#launch-detail");
+      const pill = document.querySelector("#launch-pill");
+      if (!start || !title || !detail || !pill || !appState) return;
+      const phase = appState.run?.phase || "idle";
+      const running = phase === "running";
+      const hasModels = appState.models.length > 0;
+      const selectedCount = models.length;
+      const planName = flightPlan?.label || "advanced settings";
+      start.disabled = startPending || running || !hasModels;
+      if (!hasModels) {
+        title.textContent = "No models found";
+        detail.textContent = "Point pilotBENCHY at a folder containing GGUF files.";
+        pill.textContent = "blocked";
+        start.textContent = "No models found";
+      } else if (running) {
+        title.textContent = "Run in progress";
+        detail.textContent = "The detached engine is writing live status and receipts.";
+        pill.textContent = "running";
+        start.textContent = "Engine running";
+      } else if (startPending) {
+        title.textContent = "Starting detached engine";
+        detail.textContent = "Writing run-spec.json and launching the engine process.";
+        pill.textContent = "launching";
+        start.textContent = "Starting...";
+      } else if (selectedCount === 0) {
+        title.textContent = "Ready after model selection";
+        detail.textContent = "Choose one or more models, or click Start to use the first detected models.";
+        pill.textContent = "needs model";
+        start.textContent = flightPlan?.start_label || "Start benchmark";
+      } else {
+        title.textContent = `${selectedCount} model${selectedCount === 1 ? "" : "s"} ready`;
+        detail.textContent = `${planName}; receipts will be saved under _runs.`;
+        pill.textContent = "ready";
+        start.textContent = flightPlan?.start_label || "Start benchmark";
+      }
     }
 
     function modelPathsForStart() {
@@ -2217,6 +2436,7 @@ INDEX_HTML = r"""<!doctype html>
         const message = JSON.parse(event.data);
         if (message.type === "state") render(message.payload);
         if (message.type === "run_started") {
+          startPending = false;
           document.querySelector("#guard").textContent = message.message;
           sendSocket({type: "refresh"});
         }
@@ -2224,7 +2444,11 @@ INDEX_HTML = r"""<!doctype html>
           document.querySelector("#guard").textContent = message.message;
           sendSocket({type: "refresh"});
         }
-        if (message.type === "error") document.querySelector("#guard").textContent = message.message;
+        if (message.type === "error") {
+          startPending = false;
+          document.querySelector("#guard").textContent = message.message;
+          updateGuard();
+        }
       });
       socket.addEventListener("open", () => {
         fallbackNotice = "";
@@ -2258,6 +2482,7 @@ INDEX_HTML = r"""<!doctype html>
         body: JSON.stringify(message)
       });
       const payload = await response.json();
+      if (message.type === "start_run") startPending = false;
       document.querySelector("#guard").textContent = payload.message;
       await loadStateViaHttp();
     }
@@ -2265,7 +2490,9 @@ INDEX_HTML = r"""<!doctype html>
     function sendSocket(message) {
       if (!socket || socket.readyState !== WebSocket.OPEN) {
         sendHttpCommand(message).catch(error => {
+          if (message.type === "start_run") startPending = false;
           document.querySelector("#guard").textContent = `Local command failed: ${error.message}`;
+          updateGuard();
         });
         return;
       }
@@ -2323,9 +2550,13 @@ INDEX_HTML = r"""<!doctype html>
       updateGuard();
     });
     document.querySelector("#start").addEventListener("click", () => {
+      if (startPending) return;
       const flightPlan = selectedFlightPlan();
       const modelPaths = modelPathsForStart();
       if (!modelPaths) return;
+      startPending = true;
+      document.querySelector("#guard").textContent = "Starting detached engine...";
+      updateGuard();
       sendSocket({
         type: "start_run",
         flight_plan_id: flightPlan?.id || "",
