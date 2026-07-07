@@ -1680,19 +1680,33 @@ INDEX_HTML = r"""<!doctype html>
       white-space: nowrap;
     }
     .model-table-wrap { overflow:auto; height:390px; }
-    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-    th, td { text-align: left; padding: 7px 12px; border-bottom: 1px solid rgba(255,255,255,.075); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    th { color: var(--muted); font-size: 12px; font-weight: 700; }
-    td { vertical-align: middle; }
-    th:nth-child(1), td:nth-child(1) { width: 50px; }
-    th:nth-child(3), td:nth-child(3) { width: 86px; text-align:right; }
-    th:nth-child(4), td:nth-child(4) { width: 92px; }
-    th:nth-child(5), td:nth-child(5) { width: 86px; }
-    th:nth-child(6), td:nth-child(6) { width: 92px; text-align:right; }
-    th:nth-child(7), td:nth-child(7) { width: 142px; }
-    tr { cursor: pointer; }
-    tr:hover td { background: rgba(84,210,189,.06); }
-    tr.selected td {
+    .model-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    .model-table th, .model-table td { text-align: left; padding: 7px 12px; border-bottom: 1px solid rgba(255,255,255,.075); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .model-table th { color: var(--muted); font-size: 12px; font-weight: 700; }
+    .model-table td { vertical-align: middle; }
+    .model-table th:nth-child(1), .model-table td:nth-child(1) { width: 50px; }
+    .model-table th:nth-child(3), .model-table td:nth-child(3) { width: 86px; text-align:right; }
+    .model-table th:nth-child(4), .model-table td:nth-child(4) { width: 92px; }
+    .model-table th:nth-child(5), .model-table td:nth-child(5) { width: 86px; }
+    .model-table th:nth-child(6), .model-table td:nth-child(6) { width: 92px; text-align:right; }
+    .model-table th:nth-child(7), .model-table td:nth-child(7) { width: 142px; }
+    .model-row {
+      cursor: pointer;
+      outline: none;
+      transition: transform .14s ease;
+    }
+    .model-row:hover,
+    .model-row:focus-visible {
+      transform: translateX(2px);
+    }
+    .model-row:hover td,
+    .model-row:focus-visible td {
+      background: rgba(84,210,189,.06);
+    }
+    .model-row:focus-visible td {
+      box-shadow: inset 0 1px 0 var(--teal-dim), inset 0 -1px 0 var(--teal-dim);
+    }
+    .model-row.selected td {
       background: linear-gradient(90deg, rgba(32,196,207,.18), rgba(32,196,207,.07));
       box-shadow: inset 3px 0 0 var(--teal);
     }
@@ -1823,6 +1837,17 @@ INDEX_HTML = r"""<!doctype html>
       border-color: var(--line); color: var(--text); font-weight: 700;
     }
     .ghost-button:hover:not(:disabled) { border-color: var(--teal-dim); background: rgba(32,196,207,.08); }
+    .theme-toggle {
+      min-width: 74px;
+      justify-content: center;
+      padding-inline: 10px;
+      color: var(--muted);
+    }
+    .theme-toggle[aria-pressed="true"] {
+      color: var(--text);
+      border-color: rgba(244,184,96,.28);
+      background: rgba(244,184,96,.08);
+    }
     .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .field { margin-top: 12px; }
     .field label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 6px; }
@@ -2341,7 +2366,7 @@ INDEX_HTML = r"""<!doctype html>
       }
       header h1 { font-size:21px; line-height:1; }
       header .sub { display:none; }
-      header .ghost-button { width:auto; min-width:92px; margin:0; }
+      header .ghost-button { width:auto; min-width:74px; margin:0; }
       .grid { grid-template-columns: 1fr; }
       .side { order:2; }
       .grid > .panel:first-child { order:1; }
@@ -2376,12 +2401,12 @@ INDEX_HTML = r"""<!doctype html>
       .brand-sub { font-size: 12px; }
       .navlink { padding: 9px 10px; gap: 9px; }
       .status-row { grid-template-columns: 1fr auto 8px; font-size: 11px; gap: 6px; }
-      th:nth-child(1), td:nth-child(1) { width: 42px; }
-      th:nth-child(3), td:nth-child(3) { width: 76px; }
-      th:nth-child(4), td:nth-child(4) { width: 82px; }
-      th:nth-child(5), td:nth-child(5) { width: 92px; }
-      th:nth-child(6), td:nth-child(6) { width: 104px; }
-      th:nth-child(7), td:nth-child(7) { display:none; }
+      .model-table th:nth-child(1), .model-table td:nth-child(1) { width: 42px; }
+      .model-table th:nth-child(3), .model-table td:nth-child(3) { width: 76px; }
+      .model-table th:nth-child(4), .model-table td:nth-child(4) { width: 82px; }
+      .model-table th:nth-child(5), .model-table td:nth-child(5) { width: 92px; }
+      .model-table th:nth-child(6), .model-table td:nth-child(6) { width: 104px; }
+      .model-table th:nth-child(7), .model-table td:nth-child(7) { display:none; }
       .selection-strip { margin-top:3px; }
       .selected-row {
         min-height:32px;
@@ -2419,14 +2444,14 @@ INDEX_HTML = r"""<!doctype html>
       .links a, .link-count { flex:1 1 auto; text-align:center; }
       .model-table-wrap { height:auto; max-height:420px; }
       .model-table-wrap table { min-width:0; table-layout:fixed; }
-      th, td { padding:8px 8px; }
-      th:nth-child(1), td:nth-child(1) { width:38px; }
-      th:nth-child(2), td:nth-child(2) { width:auto; }
-      th:nth-child(3), td:nth-child(3),
-      th:nth-child(5), td:nth-child(5),
-      th:nth-child(7), td:nth-child(7) { display:none; }
-      th:nth-child(4), td:nth-child(4) { width:76px; }
-      th:nth-child(6), td:nth-child(6) { width:74px; }
+      .model-table th, .model-table td { padding:8px 8px; }
+      .model-table th:nth-child(1), .model-table td:nth-child(1) { width:38px; }
+      .model-table th:nth-child(2), .model-table td:nth-child(2) { width:auto; }
+      .model-table th:nth-child(3), .model-table td:nth-child(3),
+      .model-table th:nth-child(5), .model-table td:nth-child(5),
+      .model-table th:nth-child(7), .model-table td:nth-child(7) { display:none; }
+      .model-table th:nth-child(4), .model-table td:nth-child(4) { width:76px; }
+      .model-table th:nth-child(6), .model-table td:nth-child(6) { width:74px; }
       .chip { max-width:66px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
       .chip.warn { max-width:54px; }
       .size-full { display:none; }
@@ -2585,7 +2610,7 @@ INDEX_HTML = r"""<!doctype html>
           <h1 id="app-title">pilotBENCHY</h1>
           <div class="sub" id="preflight-sub">Pick any local GGUF models, choose an agent-workload test, and launch repeatable local receipts from the browser.</div>
         </div>
-        <button id="theme" class="ghost-button" type="button">Sepia dark</button>
+        <button id="theme" class="theme-toggle ghost-button" type="button" aria-pressed="false" title="Switch to warm theme">Theme</button>
       </header>
       <div id="cockpit" hidden></div>
       <div id="preflight">
@@ -2599,7 +2624,7 @@ INDEX_HTML = r"""<!doctype html>
             <button id="sort-models" class="ghost-button" type="button" aria-label="Cycle model sort">Sort: family</button>
           </div>
           <div class="model-table-wrap">
-            <table>
+            <table class="model-table">
               <thead><tr><th></th><th>Model ↓</th><th>Params</th><th>Quant</th><th>Context</th><th>Size</th><th>File</th></tr></thead>
               <tbody id="models"></tbody>
             </table>
@@ -2934,9 +2959,13 @@ INDEX_HTML = r"""<!doctype html>
         const tr = document.createElement("tr");
         const checked = selected.has(model.path) ? "checked" : "";
         tr.dataset.path = model.path;
+        tr.classList.add("model-row");
+        tr.tabIndex = 0;
+        tr.setAttribute("aria-selected", selected.has(model.path) ? "true" : "false");
+        tr.setAttribute("aria-label", `Toggle ${model.name}`);
         if (selected.has(model.path)) tr.classList.add("selected");
         tr.innerHTML = `
-          <td><input type="checkbox" data-path="${escapeHtml(model.path)}" ${checked}></td>
+          <td><input type="checkbox" data-path="${escapeHtml(model.path)}" aria-label="Select ${escapeHtml(model.name)}" ${checked}></td>
           <td title="${escapeHtml(model.path)}">${escapeHtml(model.name)} <span class="${familyClass(model.family)}">●</span></td>
           <td>${escapeHtml(model.parameters)}</td>
           <td><span class="chip">${escapeHtml(model.quant)}</span></td>
@@ -2952,12 +2981,27 @@ INDEX_HTML = r"""<!doctype html>
           render(appState);
         });
       });
+      const focusModelRowByPath = path => {
+        const nextRow = [...tbody.querySelectorAll(".model-row")]
+          .find(candidate => candidate.dataset.path === path);
+        if (nextRow) nextRow.focus({preventScroll: true});
+      };
+      const toggleModelPath = path => {
+        if (selected.has(path)) selected.delete(path);
+        else selected.add(path);
+        render(appState);
+      };
       tbody.querySelectorAll("tr").forEach(row => {
         row.addEventListener("click", event => {
           if (event.target.tagName === "INPUT") return;
-          if (selected.has(row.dataset.path)) selected.delete(row.dataset.path);
-          else selected.add(row.dataset.path);
-          render(appState);
+          toggleModelPath(row.dataset.path);
+        });
+        row.addEventListener("keydown", event => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          const path = row.dataset.path;
+          toggleModelPath(path);
+          focusModelRowByPath(path);
         });
       });
 
@@ -3866,10 +3910,18 @@ INDEX_HTML = r"""<!doctype html>
             && !["complete","stopped","failed","aborted"].includes(appState.run.phase))));
     }
 
-    document.querySelector("#theme").addEventListener("click", () => {
+    const themeButton = document.querySelector("#theme");
+    function updateThemeButton() {
+      const isWarm = document.body.classList.contains("sepia");
+      themeButton.textContent = "Theme";
+      themeButton.setAttribute("aria-pressed", String(isWarm));
+      themeButton.title = isWarm ? "Switch to cool dark theme" : "Switch to warm theme";
+    }
+    themeButton.addEventListener("click", () => {
       document.body.classList.toggle("sepia");
-      document.querySelector("#theme").textContent = document.body.classList.contains("sepia") ? "Codex dark" : "Sepia dark";
+      updateThemeButton();
     });
+    updateThemeButton();
     document.querySelectorAll(".system-check").forEach(button => {
       button.addEventListener("click", async () => {
         const original = button.textContent;

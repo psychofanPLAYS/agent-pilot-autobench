@@ -187,6 +187,27 @@ def test_index_html_uses_probe_backed_status_rows():
     assert "Rows per page" not in webui.INDEX_HTML
 
 
+def test_index_html_makes_model_rows_clickable_and_keyboard_reachable():
+    assert '<table class="model-table">' in webui.INDEX_HTML
+    assert 'tr.classList.add("model-row")' in webui.INDEX_HTML
+    assert "tr.tabIndex = 0" in webui.INDEX_HTML
+    assert 'tr.setAttribute("aria-selected"' in webui.INDEX_HTML
+    assert 'aria-label="Select ${escapeHtml(model.name)}"' in webui.INDEX_HTML
+    assert 'row.addEventListener("keydown"' in webui.INDEX_HTML
+    assert 'event.key !== "Enter" && event.key !== " "' in webui.INDEX_HTML
+    assert "const focusModelRowByPath = path =>" in webui.INDEX_HTML
+    assert "nextRow.focus({preventScroll: true})" in webui.INDEX_HTML
+
+
+def test_index_html_keeps_theme_toggle_compact_and_stateful():
+    assert 'id="theme" class="theme-toggle ghost-button"' in webui.INDEX_HTML
+    assert 'aria-pressed="false"' in webui.INDEX_HTML
+    assert "function updateThemeButton()" in webui.INDEX_HTML
+    assert 'themeButton.setAttribute("aria-pressed", String(isWarm))' in webui.INDEX_HTML
+    assert ">Sepia dark</button>" not in webui.INDEX_HTML
+    assert '"Codex dark" : "Sepia dark"' not in webui.INDEX_HTML
+
+
 def test_librarian_web_selection_accepts_any_models():
     gemma = ModelInfo(path=Path("Gemma-3-27B.gguf"), name="Gemma-3-27B.gguf", family="gemma")
     qwen = ModelInfo(path=Path("Qwen3.6-35B-A3B.gguf"), name="Qwen3.6-35B-A3B.gguf", family="qwen")
