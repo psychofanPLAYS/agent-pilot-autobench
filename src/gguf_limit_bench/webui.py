@@ -1143,6 +1143,7 @@ INDEX_HTML = r"""<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230e141c'/%3E%3Cpath d='M7 21h18M7 16h18M7 11h18' stroke='%2354d2bd' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
   <title>pilotBENCHY</title>
   <style>
     :root {
@@ -1177,7 +1178,7 @@ INDEX_HTML = r"""<!doctype html>
       color: var(--text);
       font: 14px/1.45 Inter, ui-sans-serif, system-ui, Segoe UI, Arial, sans-serif;
     }
-    .shell { display: grid; grid-template-columns: 250px 1fr; min-height: 100vh; }
+    .shell { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
     aside {
       border-right: 1px solid var(--line);
       background: #0b0f15;
@@ -1188,11 +1189,11 @@ INDEX_HTML = r"""<!doctype html>
       display: flex; justify-content: space-between; gap: 12px;
       padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,.05); color: var(--muted);
     }
-    main { padding: 24px; }
-    header { display: flex; align-items: start; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
-    h1 { margin: 0; font-size: 30px; line-height: 1.1; letter-spacing: 0; }
-    .sub { margin-top: 7px; color: var(--muted); max-width: 760px; }
-    .grid { display: grid; grid-template-columns: minmax(0, 1.5fr) 360px; gap: 16px; }
+    main { width: min(100%, 1840px); margin: 0 auto; padding: clamp(20px, 2.4vw, 48px); }
+    header { display: flex; align-items: start; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
+    h1 { margin: 0; font-size: clamp(34px, 2.8vw, 56px); line-height: 0.95; letter-spacing: 0; }
+    .sub { margin-top: 7px; color: var(--muted); max-width: 840px; }
+    .grid { display: grid; grid-template-columns: minmax(520px, 1.25fr) minmax(420px, .82fr); gap: clamp(18px, 1.6vw, 30px); align-items: start; }
     .grid > .panel:first-child { align-self: start; position: sticky; top: 16px; }
     .panel {
       background: var(--panel);
@@ -1201,11 +1202,26 @@ INDEX_HTML = r"""<!doctype html>
       overflow: hidden;
     }
     .panel h2 { margin: 0; padding: 14px 16px; font-size: 15px; border-bottom: 1px solid var(--line); }
+    .section-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .count-chip {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 3px 9px;
+      color: var(--muted);
+      background: var(--panel-2);
+      font-size: 12px;
+      white-space: nowrap;
+    }
     table { width: 100%; border-collapse: collapse; }
     th, td { text-align: left; padding: 11px 12px; border-bottom: 1px solid rgba(255,255,255,.06); }
     th { color: var(--muted); font-size: 12px; font-weight: 700; }
     td { vertical-align: middle; }
+    tr { cursor: pointer; }
     tr:hover td { background: rgba(84,210,189,.06); }
+    tr.selected td {
+      background: rgba(84,210,189,.10);
+      box-shadow: inset 3px 0 0 var(--teal);
+    }
     input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--teal); }
     .chip { display: inline-block; border: 1px solid var(--line); border-radius: 4px; padding: 2px 6px; color: var(--muted); }
     .qwen { color: var(--teal); }
@@ -1220,6 +1236,14 @@ INDEX_HTML = r"""<!doctype html>
     button {
       margin-top: 12px; background: var(--teal); color: #07100e; font-weight: 800;
       cursor: pointer; border-color: transparent;
+    }
+    #start {
+      position: sticky;
+      top: 16px;
+      z-index: 4;
+      min-height: 52px;
+      font-size: 16px;
+      box-shadow: 0 14px 34px rgba(84, 210, 189, .18);
     }
     .ghost-button {
       width: auto; margin: 0; padding: 8px 10px; background: var(--panel-2);
@@ -1238,6 +1262,74 @@ INDEX_HTML = r"""<!doctype html>
     }
     .checkline strong { display: block; color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
     .checkline small { display: block; margin-top: 2px; }
+    .plan-cards { display: grid; gap: 10px; margin-top: 8px; }
+    .plan-card {
+      width: 100%;
+      margin: 0;
+      text-align: left;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 12px;
+      box-shadow: none;
+    }
+    .plan-card:hover { border-color: var(--teal-dim); background: rgba(84,210,189,.05); }
+    .plan-card.selected {
+      border-color: var(--teal);
+      background: rgba(84,210,189,.10);
+      box-shadow: inset 3px 0 0 var(--teal);
+    }
+    .plan-card strong { display: block; font-size: 14px; margin-bottom: 4px; }
+    .plan-card span { display: block; color: var(--muted); font-size: 12px; line-height: 1.35; }
+    .plan-card small { display: block; color: var(--amber); margin-top: 7px; }
+    details.controls {
+      margin-top: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-2);
+      overflow: hidden;
+    }
+    details.controls > summary {
+      cursor: pointer;
+      padding: 12px 14px;
+      font-weight: 800;
+      list-style: none;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    details.controls > summary::after { content: "open"; color: var(--muted); font-size: 12px; }
+    details.controls[open] > summary::after { content: "close"; }
+    details.controls .inside { padding: 0 14px 14px; }
+    .run-summary {
+      margin: 14px 0;
+      padding: 14px;
+      border-radius: 10px;
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+    }
+    .summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 12px 0; }
+    .summary-grid span { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: var(--bg); }
+    .summary-grid b { display: block; font-size: 24px; line-height: 1; }
+    .summary-grid small { color: var(--muted); }
+    .flow-diagram {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .flow-step {
+      min-height: 78px;
+      padding: 10px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(84,210,189,.08), rgba(84,210,189,.02));
+    }
+    .flow-step.done { border-color: var(--teal-dim); }
+    .flow-step.active { border-color: var(--teal); box-shadow: 0 0 0 1px rgba(84,210,189,.14); }
+    .flow-step b { display: block; margin-bottom: 4px; }
+    .flow-step small { color: var(--muted); }
     button:disabled { opacity: .5; cursor: not-allowed; }
     .pack { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; color: var(--muted); }
     .pack small { display: block; color: var(--muted); }
@@ -1283,6 +1375,13 @@ INDEX_HTML = r"""<!doctype html>
       .grid { grid-template-columns: 1fr; }
       .grid > .panel:first-child { position: static; }
       .telemetry { grid-template-columns: repeat(2, 1fr); }
+      .flow-diagram { grid-template-columns: 1fr 1fr; }
+      .summary-grid { grid-template-columns: 1fr; }
+    }
+    @media (min-width: 1700px) {
+      .grid { grid-template-columns: minmax(760px, 1.45fr) minmax(520px, .8fr); }
+      body { font-size: 15px; }
+      .panel h2 { font-size: 16px; }
     }
 
     /* ===== in-flight cockpit (mission-control) ===== */
@@ -1392,7 +1491,7 @@ INDEX_HTML = r"""<!doctype html>
       <div id="preflight">
       <section class="grid">
         <div class="panel">
-          <h2>Model selection</h2>
+          <h2 class="section-title"><span>Model selection</span><span id="selected-count" class="count-chip">0 selected</span></h2>
           <div class="body toolbar">
             <button id="select-all" class="ghost-button" type="button">Select all</button>
             <button id="clear-selection" class="ghost-button" type="button">Clear</button>
@@ -1405,52 +1504,97 @@ INDEX_HTML = r"""<!doctype html>
         </div>
         <div class="side">
           <div class="panel">
-            <h2>Run menu</h2>
+            <h2>Run setup</h2>
               <div class="body">
                 <div class="field">
-                  <label for="flight-plan">Flight plan</label>
-                  <select id="flight-plan"></select>
+                  <label>Benchmark plan</label>
+                  <select id="flight-plan" hidden aria-hidden="true"></select>
+                  <div id="plan-cards" class="plan-cards"></div>
                 </div>
-                <div class="field">
-                  <label for="mode">Advanced mode</label>
-                  <select id="mode"></select>
+                <div id="run-summary" class="run-summary"></div>
+                <div class="flow-diagram" aria-label="Run pipeline">
+                  <div class="flow-step"><b>1. Select</b><small>Choose one or more GGUF models.</small></div>
+                  <div class="flow-step"><b>2. Plan</b><small>Pick a benchmark contract.</small></div>
+                  <div class="flow-step"><b>3. Engine</b><small>Detached runner writes receipts.</small></div>
+                  <div class="flow-step"><b>4. Report</b><small>Review evidence, scores, and artifacts.</small></div>
                 </div>
-                <div class="field">
-                  <label for="benchmark-suite-plan">Benchmark suite plan</label>
-                  <select id="benchmark-suite-plan"></select>
-                </div>
-                <div class="field">
-                  <label for="budget">Budget minutes per model</label>
-                  <input id="budget" type="number" min="1" max="1440" value="30" />
-                </div>
-                <div class="field">
-                  <label for="repeats">Repeats per question (N-repeat, majority vote)</label>
-                  <input id="repeats" type="number" min="1" max="20" value="1" />
-                </div>
-              <div class="field">
-                <label>Standard forced flags</label>
-                <div id="standard-flags"></div>
-              </div>
-              <div class="field">
-                <label>Optional forced flags</label>
-                <div id="optional-flags"></div>
-              </div>
-              <label class="checkline">
-                <input id="stream-prompts" type="checkbox" checked />
-                <span><strong>Show live prompt/test activity</strong><small>Lightweight event feed while the backend runs.</small></span>
-              </label>
-              <label class="checkline">
-                <input id="show-thinking" type="checkbox" />
-                <span><strong>Show model thinking if a run records it</strong><small>Only appears when the backend receipt exposes safe thinking text.</small></span>
-              </label>
-              <button id="start">Start benchmark</button>
-              <button id="stop-after-current" class="ghost-button" type="button">Stop after current</button>
-              <p id="guard" class="sub"></p>
+                <button id="start">Start benchmark</button>
+                <p id="guard" class="sub"></p>
+
+                <details class="controls" id="advanced-controls">
+                  <summary>Advanced controls</summary>
+                  <div class="inside">
+                    <div class="field" id="advanced-mode-field">
+                      <label for="mode">Mode</label>
+                      <select id="mode"></select>
+                    </div>
+                    <div class="field">
+                      <label for="benchmark-suite-plan">Benchmark suite plan</label>
+                      <select id="benchmark-suite-plan"></select>
+                    </div>
+                    <div class="field">
+                      <label for="budget">Budget minutes per model</label>
+                      <input id="budget" type="number" min="1" max="1440" value="30" />
+                    </div>
+                    <div class="field">
+                      <label for="sample-size">Questions per pack</label>
+                      <input id="sample-size" type="number" min="1" max="200" value="15" />
+                    </div>
+                    <div class="field">
+                      <label for="repeats">Repeats per question</label>
+                      <input id="repeats" type="number" min="1" max="20" value="3" />
+                    </div>
+                    <div class="field">
+                      <label for="sampler-policy">Sampler policy</label>
+                      <select id="sampler-policy">
+                        <option value="hf_recommended">HF recommended</option>
+                        <option value="runtime_defaults">Runtime defaults</option>
+                      </select>
+                    </div>
+                  </div>
+                </details>
+
+                <details class="controls">
+                  <summary>Server flags</summary>
+                  <div class="inside">
+                    <div class="field">
+                      <label>Standard forced flags</label>
+                      <div id="standard-flags"></div>
+                    </div>
+                    <div class="field">
+                      <label>Optional forced flags</label>
+                      <div id="optional-flags"></div>
+                    </div>
+                  </div>
+                </details>
+
+                <details class="controls">
+                  <summary>Live display</summary>
+                  <div class="inside">
+                    <label class="checkline">
+                      <input id="stream-prompts" type="checkbox" checked />
+                      <span><strong>Show live prompt/test activity</strong><small>Lightweight event feed while the backend runs.</small></span>
+                    </label>
+                    <label class="checkline">
+                      <input id="show-thinking" type="checkbox" />
+                      <span><strong>Show model thinking if a run records it</strong><small>Only appears when the backend receipt exposes safe thinking text.</small></span>
+                    </label>
+                  </div>
+                </details>
+
+                <button id="stop-after-current" class="ghost-button" type="button">Stop after current</button>
             </div>
           </div>
-          <div class="panel">
-            <h2>Librarian bot jobs</h2>
+          <details class="panel controls">
+            <summary>Librarian bot jobs</summary>
             <div class="body" id="packs"></div>
+          </details>
+          <div class="panel">
+            <h2>Fast evidence</h2>
+            <div class="body">
+              <div id="winner" class="winner"></div>
+              <div id="events" class="event-feed"></div>
+            </div>
           </div>
         </div>
       </section>
@@ -1463,8 +1607,6 @@ INDEX_HTML = r"""<!doctype html>
       <section class="panel status">
         <strong>Run status</strong>
         <div id="run-status" class="sub">Loading...</div>
-        <div id="winner" class="winner"></div>
-        <div id="events" class="event-feed"></div>
       </section>
       <section class="panel status reports">
         <strong>Receipts and reports</strong>
@@ -1481,6 +1623,7 @@ INDEX_HTML = r"""<!doctype html>
     let appState = null;
     let socket = null;
     let fallbackNotice = "";
+    let selectionInitialized = false;
 
     function escapeHtml(value) {
       return String(value ?? "")
@@ -1505,12 +1648,18 @@ INDEX_HTML = r"""<!doctype html>
 
     function render(state) {
       appState = state;
+      if (!selectionInitialized && state.models.length) {
+        state.models.slice(0, Math.min(2, state.models.length)).forEach(model => selected.add(model.path));
+        selectionInitialized = true;
+      }
       document.querySelector("#nav-models").textContent = state.models.length;
       const tbody = document.querySelector("#models");
       tbody.innerHTML = "";
       for (const model of sortedModels(state.models)) {
         const tr = document.createElement("tr");
         const checked = selected.has(model.path) ? "checked" : "";
+        tr.dataset.path = model.path;
+        if (selected.has(model.path)) tr.classList.add("selected");
         tr.innerHTML = `
           <td><input type="checkbox" data-path="${escapeHtml(model.path)}" ${checked}></td>
           <td>${escapeHtml(model.name)}</td>
@@ -1525,7 +1674,15 @@ INDEX_HTML = r"""<!doctype html>
         input.addEventListener("change", event => {
           if (event.target.checked) selected.add(event.target.dataset.path);
           else selected.delete(event.target.dataset.path);
-          updateGuard();
+          render(appState);
+        });
+      });
+      tbody.querySelectorAll("tr").forEach(row => {
+        row.addEventListener("click", event => {
+          if (event.target.tagName === "INPUT") return;
+          if (selected.has(row.dataset.path)) selected.delete(row.dataset.path);
+          else selected.add(row.dataset.path);
+          render(appState);
         });
       });
 
@@ -1730,6 +1887,33 @@ INDEX_HTML = r"""<!doctype html>
           select.appendChild(option);
         }
       }
+      const cards = document.querySelector("#plan-cards");
+      if (cards) {
+        const selectedId = select.value;
+        cards.innerHTML = [
+          `<button type="button" class="plan-card ${selectedId ? "" : "selected"}" data-plan-id="">
+            <strong>Advanced controls</strong>
+            <span>Choose mode, budget, repeats, sampler policy, and optional suite manually.</span>
+            <small>For experiments</small>
+          </button>`,
+          ...plans.map(plan => `
+            <button type="button" class="plan-card ${selectedId === plan.id ? "selected" : ""}" data-plan-id="${escapeHtml(plan.id)}">
+              <strong>${escapeHtml(plan.label)}</strong>
+              <span>${escapeHtml(plan.description || plan.evidence_goal || "Ready-made benchmark contract.")}</span>
+              <small>${escapeHtml(plan.budget_minutes)} min/model</small>
+            </button>`)
+        ].join("");
+        cards.querySelectorAll(".plan-card").forEach(card => {
+          card.addEventListener("click", () => {
+            select.value = card.dataset.planId || "";
+            const plan = selectedFlightPlan();
+            if (plan) applyFlightPlan(plan);
+            else document.querySelector("#start").textContent = "Start benchmark";
+            renderFlightPlans(plans, defaultFlightPlanId);
+            updateGuard();
+          });
+        });
+      }
       const selectedPlan = selectedFlightPlan();
       if (selectedPlan && !select.dataset.appliedDefault) {
         applyFlightPlan(selectedPlan);
@@ -1768,6 +1952,7 @@ INDEX_HTML = r"""<!doctype html>
       const optional = document.querySelector("#optional-flags");
       optional.innerHTML = config.optional_forced_args.map(item => flagChoice(item, false)).join("");
       standard.querySelectorAll("input").forEach(input => input.checked = true);
+      document.querySelectorAll(".forced-flag").forEach(input => input.addEventListener("change", updateGuard));
     }
 
     function renderBenchmarkSuitePlans(plans) {
@@ -1851,8 +2036,12 @@ INDEX_HTML = r"""<!doctype html>
       const flightPlan = selectedFlightPlan();
       const mode = document.querySelector("#mode").value;
       const plan = document.querySelector("#benchmark-suite-plan").value;
+      const sampler = document.querySelector("#sampler-policy").value;
       const models = appState.models.filter(model => selected.has(model.path));
       const guard = document.querySelector("#guard");
+      const samplerText = sampler === "runtime_defaults"
+        ? " Sampler: llama.cpp defaults."
+        : " Sampler: HF recommended.";
       if (models.length === 0) {
         if (!appState.models.length) {
           guard.textContent = "No GGUF models found in the configured model folder.";
@@ -1869,6 +2058,27 @@ INDEX_HTML = r"""<!doctype html>
           : "";
         guard.textContent = `${models.length} model(s) ready.${flightPlanText}${planText}${samplerText}${compareHint}`;
       }
+      updateSelectedCount(models.length);
+      updateRunSummary(models);
+      updateFlowState(models.length, Boolean(flightPlan || plan || mode));
+    }
+
+    function updateSelectedCount(count) {
+      const chip = document.querySelector("#selected-count");
+      if (!chip) return;
+      chip.textContent = `${count} selected`;
+    }
+
+    function updateFlowState(modelCount, hasPlan) {
+      const steps = document.querySelectorAll(".flow-step");
+      if (!steps.length) return;
+      steps.forEach(step => step.classList.remove("done", "active"));
+      if (modelCount > 0) steps[0].classList.add("done");
+      else steps[0].classList.add("active");
+      if (modelCount > 0 && hasPlan) steps[1].classList.add("done");
+      else if (modelCount > 0) steps[1].classList.add("active");
+      if (appState?.run?.phase === "running") steps[2].classList.add("active");
+      if (["complete", "stopped"].includes(appState?.run?.phase)) steps[3].classList.add("done");
     }
 
     function updateRunSummary(models) {
@@ -1910,8 +2120,11 @@ INDEX_HTML = r"""<!doctype html>
         render(appState);
         return [appState.models[0].path];
       }
-      guard.textContent = "Click Select all, or choose one or more models before starting.";
-      return null;
+      const defaultModels = appState.models.slice(0, Math.min(2, appState.models.length));
+      defaultModels.forEach(model => selected.add(model.path));
+      render(appState);
+      guard.textContent = `No manual selection was set, so Start will use the first ${defaultModels.length} detected model(s).`;
+      return defaultModels.map(model => model.path);
     }
 
     function connectSocket() {
@@ -2039,6 +2252,8 @@ INDEX_HTML = r"""<!doctype html>
           flight_plan_id: flightPlan?.id || "",
           budget_minutes: Number(document.querySelector("#budget").value),
           repeats: Number(document.querySelector("#repeats").value),
+          sample_size: Number(document.querySelector("#sample-size").value),
+          sampler_policy: document.querySelector("#sampler-policy").value,
           benchmark_suite_plan: document.querySelector("#benchmark-suite-plan").value,
           forced_server_args: selectedForcedArgs(),
           stream_prompts: document.querySelector("#stream-prompts").checked,
@@ -2047,6 +2262,11 @@ INDEX_HTML = r"""<!doctype html>
       });
     });
     document.querySelector("#benchmark-suite-plan").addEventListener("change", updateGuard);
+    document.querySelector("#budget").addEventListener("input", updateGuard);
+    document.querySelector("#sample-size").addEventListener("input", updateGuard);
+    document.querySelector("#repeats").addEventListener("input", updateGuard);
+    document.querySelector("#sampler-policy").addEventListener("change", updateGuard);
+    document.querySelectorAll(".forced-flag").forEach(input => input.addEventListener("change", updateGuard));
     document.querySelector("#stop-after-current").addEventListener("click", () => {
       sendSocket({type: "stop_after_current"});
     });
