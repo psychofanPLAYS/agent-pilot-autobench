@@ -465,11 +465,56 @@ def test_recent_receipts_and_run_artifact_links_stay_under_runs_root(tmp_path):
     receipts = recent_receipts(runs_root)
 
     assert receipts[0]["model"] == "Qwen.gguf"
+    assert receipts[0]["verdict"] == "Completed"
+    assert receipts[0]["verdict_state"] == "ok"
+    assert receipts[0]["reason"] == "Finished with benchmark evidence recorded."
+    assert receipts[0]["primary_artifact"]["label"] == "Browser report"
     assert receipts[0]["artifacts"][0]["url"] == "/runs/2026-06-24-qwen/report.html"
     artifact_labels = {artifact["label"] for artifact in receipts[0]["artifacts"]}
     assert {"Suite summary", "Librarian report"} <= artifact_labels
     assert resolve_run_artifact(runs_root, "2026-06-24-qwen/report.html") == receipt / "report.html"
     assert resolve_run_artifact(runs_root, "../outside.txt") is None
+
+
+def test_recent_receipts_surface_preflight_block_as_primary_action(tmp_path):
+    runs_root = tmp_path / "_runs"
+    receipt = runs_root / "2026-06-24-blocked"
+    receipt.mkdir(parents=True)
+    (receipt / "preflight.json").write_text(
+        '{"ok": false, "status": "preflight_fail", "failure": "endpoint_not_ready"}',
+        encoding="utf-8",
+    )
+    (receipt / "status.json").write_text(
+        '{"status": "failed", "detail": "preflight_fail"}',
+        encoding="utf-8",
+    )
+    (receipt / "command.txt").write_text("agent-autobench run ...", encoding="utf-8")
+
+    receipts = recent_receipts(runs_root)
+
+    assert receipts[0]["verdict"] == "Preflight blocked"
+    assert receipts[0]["verdict_state"] == "warn"
+    assert receipts[0]["reason"] == "preflight fail"
+    assert receipts[0]["primary_artifact"]["label"] == "Preflight"
+    assert receipts[0]["score"] is None
+
+
+def test_recent_receipts_surface_failed_status_with_status_action(tmp_path):
+    runs_root = tmp_path / "_runs"
+    receipt = runs_root / "2026-06-24-failed"
+    receipt.mkdir(parents=True)
+    (receipt / "status.json").write_text(
+        '{"status": "failed", "detail": "benchmark_suite_failed"}',
+        encoding="utf-8",
+    )
+    (receipt / "command.txt").write_text("agent-autobench run ...", encoding="utf-8")
+
+    receipts = recent_receipts(runs_root)
+
+    assert receipts[0]["verdict"] == "Failed"
+    assert receipts[0]["verdict_state"] == "bad"
+    assert receipts[0]["reason"] == "benchmark suite failed"
+    assert receipts[0]["primary_artifact"]["label"] == "Status"
 
 
 def test_webui_start_endpoint_rejects_malformed_json(tmp_path):

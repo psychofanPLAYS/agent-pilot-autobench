@@ -1375,33 +1375,132 @@ def _receipt_payload(path: Path, runs_root: Path) -> dict:
         if (artifact := path / name).is_file()
     ]
     best = _read_best_settings(path / "best-settings.json")
+    status_payload = _read_json_object(path / "status.json")
+    preflight_payload = _read_json_object(path / "preflight.json")
+    verdict, verdict_state, reason = _receipt_verdict(best, status_payload, preflight_payload)
     return {
         "run_id": path.name,
         "model": best.get("model_name") or best.get("model") or path.name,
-        "status": best.get("status") or "receipt",
+        "status": best.get("status") or status_payload.get("status") or "receipt",
         "score": best.get("score"),
+        "verdict": verdict,
+        "verdict_state": verdict_state,
+        "reason": reason,
+        "primary_artifact": _primary_receipt_artifact(artifacts, verdict_state),
         "modified": _mtime_label(path),
         "path": str(path),
         "artifacts": artifacts,
     }
 
 
-def _read_best_settings(path: Path) -> dict:
+def _read_json_object(path: Path) -> dict[str, object]:
     if not path.is_file():
         return {}
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _read_best_settings(path: Path) -> dict[str, object]:
+    payload = _read_json_object(path)
+    if not payload:
+        return {}
     model = Path(str(payload.get("model", ""))).name
-    result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
-    score = result.get("agent_bench_score") or result.get("score")
+    raw_result = payload.get("result")
+    result: dict[str, object] = raw_result if isinstance(raw_result, dict) else {}
+    score = _first_present(
+        result.get("agent_bench_score"),
+        result.get("score"),
+        payload.get("score"),
+        result.get("simple_bench_score"),
+        result.get("workflow_score"),
+    )
     return {
         "model": str(payload.get("model", "")),
         "model_name": model,
         "status": str(payload.get("status") or result.get("failure") or "recorded"),
+        "failure": str(result.get("failure") or payload.get("failure") or ""),
+        "ok": result.get("ok"),
         "score": score,
     }
+
+
+def _first_present(*values: object) -> object:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def _receipt_verdict(
+    best: dict[str, object],
+    status_payload: dict[str, object],
+    preflight_payload: dict[str, object],
+) -> tuple[str, str, str]:
+    best_status = _lower_text(best.get("status"))
+    run_status = _lower_text(status_payload.get("status"))
+    preflight_status = _lower_text(preflight_payload.get("status"))
+    preflight_ok = preflight_payload.get("ok")
+    detail = _receipt_reason(
+        status_payload.get("detail"),
+        preflight_payload.get("detail"),
+        preflight_payload.get("failure"),
+        preflight_payload.get("error"),
+        best.get("failure"),
+    )
+
+    if preflight_payload and (
+        preflight_ok is False or "fail" in preflight_status or "block" in preflight_status
+    ):
+        return "Preflight blocked", "warn", detail or "Preflight stopped the run before scoring."
+    if "preflight" in best_status and ("fail" in best_status or "block" in best_status):
+        return "Preflight blocked", "warn", detail or "Preflight stopped the run before scoring."
+    if "fail" in run_status or "error" in run_status or "abort" in run_status:
+        return "Failed", "bad", detail or "Run stopped before a usable benchmark receipt."
+    if "fail" in best_status or "error" in best_status:
+        return "Failed", "bad", detail or "Best settings recorded a failed attempt."
+    if (
+        "partial" in best_status
+        or "stop" in best_status
+        or "context_unproven" in best_status
+        or "partial" in run_status
+    ):
+        return "Partial", "warn", detail or "Run produced evidence, but not a full pass."
+    if "running" in run_status or "start" in run_status:
+        return "Running", "info", detail or "Detached engine is still writing this receipt."
+    if best or "finish" in run_status or "complete" in run_status:
+        return "Completed", "ok", detail or "Finished with benchmark evidence recorded."
+    return "Recorded", "info", detail or "Receipt folder found."
+
+
+def _lower_text(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
+def _receipt_reason(*values: object) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text and text.lower() not in {"none", "null"}:
+            return text.replace("_", " ")[:160]
+    return ""
+
+
+def _primary_receipt_artifact(
+    artifacts: list[dict[str, str]], verdict_state: str
+) -> dict[str, str] | None:
+    labels_by_state = {
+        "bad": ("Status", "Preflight", "Command", "Browser report"),
+        "warn": ("Preflight", "Browser report", "Summary", "Status", "Best settings"),
+        "ok": ("Browser report", "Best settings", "Summary", "Machine report"),
+        "info": ("Status", "Browser report", "Summary", "Command"),
+    }
+    for label in labels_by_state.get(verdict_state, labels_by_state["info"]):
+        for artifact in artifacts:
+            if artifact["label"] == label:
+                return artifact
+    return artifacts[0] if artifacts else None
 
 
 def _runs_url(path: Path, runs_root: Path) -> str:
@@ -2118,7 +2217,7 @@ INDEX_HTML = r"""<!doctype html>
     .receipt-table { border:1px solid var(--line); border-radius:6px; overflow:hidden; background:rgba(0,0,0,.10); }
     .receipt-row {
       display:grid;
-      grid-template-columns:minmax(0,1fr) 86px 64px;
+      grid-template-columns:minmax(0,1fr) 112px 70px;
       gap:8px;
       align-items:center;
       min-width:0;
@@ -2143,9 +2242,24 @@ INDEX_HTML = r"""<!doctype html>
       white-space:nowrap;
     }
     .receipt-meta { color: var(--muted); font-size: 11px; margin-top: 3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .receipt-status { color:var(--good); font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .receipt-status.failed, .receipt-status.error { color:var(--bad); }
-    .receipt-status.partial { color:var(--amber); }
+    .receipt-reason { color: var(--muted); font-size: 11px; margin-top: 3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .receipt-status {
+      width:max-content;
+      max-width:100%;
+      border:1px solid rgba(76,217,100,.28);
+      border-radius:999px;
+      padding:4px 7px;
+      background:rgba(76,217,100,.08);
+      color:var(--good);
+      font-weight:900;
+      font-size:11px;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+    .receipt-status.bad { color:var(--bad); border-color:rgba(255,91,91,.34); background:rgba(255,91,91,.08); }
+    .receipt-status.warn { color:var(--amber); border-color:rgba(245,166,35,.34); background:rgba(245,166,35,.08); }
+    .receipt-status.info { color:var(--teal); border-color:var(--teal-dim); background:rgba(32,196,207,.08); }
     .receipt-score { font-weight:900; color:var(--teal); }
     .receipt-actions {
       display:flex;
@@ -2163,6 +2277,13 @@ INDEX_HTML = r"""<!doctype html>
       white-space:nowrap;
       font-size:11px;
       line-height:1.2;
+    }
+    .receipt-actions a.receipt-primary-action {
+      max-width:170px;
+      border-color:var(--teal-dim);
+      background:rgba(32,196,207,.11);
+      color:var(--teal);
+      font-weight:900;
     }
     .artifact-toggle {
       width:auto;
@@ -3242,11 +3363,11 @@ INDEX_HTML = r"""<!doctype html>
         receipts.innerHTML = `<div class="sub">No receipt folders found yet.</div>`;
         return;
       }
-      const scores = state.receipts.map(receipt => Number(receipt.score)).filter(value => Number.isFinite(value));
+      const scores = state.receipts.map(receipt => receiptScore(receipt.score)).filter(value => Number.isFinite(value));
       const statusCounts = state.receipts.reduce((counts, receipt) => {
-        const key = String(receipt.status || "receipt").toLowerCase();
-        if (key.includes("fail") || key.includes("error")) counts.failed += 1;
-        else if (key.includes("partial") || key.includes("stop")) counts.partial += 1;
+        const key = String(receipt.verdict_state || receipt.status || "receipt").toLowerCase();
+        if (key === "bad" || key.includes("fail") || key.includes("error")) counts.failed += 1;
+        else if (key === "warn" || key.includes("partial") || key.includes("stop")) counts.partial += 1;
         else counts.completed += 1;
         return counts;
       }, {completed: 0, partial: 0, failed: 0});
@@ -3260,30 +3381,29 @@ INDEX_HTML = r"""<!doctype html>
         </div>`;
       const tableHtml = `
         <div class="receipt-table">
-          <div class="receipt-row receipt-head"><span>Run</span><span>Status</span><span>Score</span><span>Artifacts</span></div>
+          <div class="receipt-row receipt-head"><span>Run</span><span>Verdict</span><span>Score</span><span>Artifacts</span></div>
           ${state.receipts.map((receipt, index) => {
             const status = String(receipt.status || "receipt");
-            const statusClass = status.toLowerCase().includes("fail") || status.toLowerCase().includes("error")
-              ? "failed"
-              : status.toLowerCase().includes("partial") || status.toLowerCase().includes("stop")
-                ? "partial"
-                : "";
-            const score = Number(receipt.score);
+            const verdict = String(receipt.verdict || receiptStatusLabel(status));
+            const statusClass = String(receipt.verdict_state || "").toLowerCase();
+            const score = receiptScore(receipt.score);
             const scoreLabel = Number.isFinite(score) ? score.toFixed(3) : "-";
-            const displayStatus = receiptStatusLabel(status);
-            const primaryArtifacts = primaryReceiptArtifacts(receipt.artifacts);
-            const overflowArtifacts = receipt.artifacts.filter(artifact => !primaryArtifacts.includes(artifact));
+            const reason = String(receipt.reason || "");
+            const primaryArtifacts = primaryReceiptArtifacts(receipt.artifacts, receipt.primary_artifact);
+            const primaryKeys = new Set(primaryArtifacts.map(artifact => artifactKey(artifact)));
+            const overflowArtifacts = receipt.artifacts.filter(artifact => !primaryKeys.has(artifactKey(artifact)));
             const remainingArtifacts = overflowArtifacts.length;
             return `
               <div class="receipt-row" data-receipt-row="${index}">
                 <div class="receipt-main">
                   <strong title="${escapeHtml(receipt.model)}">${escapeHtml(receipt.model)}</strong>
                   <div class="receipt-meta" title="${escapeHtml(receipt.run_id)}">${escapeHtml(receipt.run_id)} | ${escapeHtml(receipt.modified)}</div>
+                  <div class="receipt-reason" title="${escapeHtml(reason)}">${escapeHtml(reason)}</div>
                 </div>
-                <div class="receipt-status ${statusClass}" title="${escapeHtml(status)}">${escapeHtml(displayStatus)}</div>
+                <div class="receipt-status ${statusClass}" title="${escapeHtml(status)}">${escapeHtml(verdict)}</div>
                 <div class="receipt-score">${escapeHtml(scoreLabel)}</div>
                 <div class="receipt-actions">
-                  ${primaryArtifacts.map(artifact => `<a href="${escapeHtml(artifact.url)}" target="_blank" rel="noreferrer" title="${escapeHtml(artifact.label)}">${escapeHtml(shortArtifactLabel(artifact.label))}</a>`).join("")}
+                  ${primaryArtifacts.map((artifact, artifactIndex) => `<a class="${artifactIndex === 0 ? "receipt-primary-action" : ""}" href="${escapeHtml(artifact.url)}" target="_blank" rel="noreferrer" title="${escapeHtml(artifact.label)}">${escapeHtml(artifactIndex === 0 ? `Open ${shortArtifactLabel(artifact.label)}` : shortArtifactLabel(artifact.label))}</a>`).join("")}
                   ${remainingArtifacts ? `<button type="button" class="artifact-toggle" aria-expanded="false" data-artifact-toggle title="${escapeHtml(overflowArtifacts.map(artifact => artifact.label).join(", "))}">+${remainingArtifacts}</button>` : ""}
                 </div>
                 ${remainingArtifacts ? `<div class="receipt-more">${overflowArtifacts.map(artifact => `<a href="${escapeHtml(artifact.url)}" target="_blank" rel="noreferrer" title="${escapeHtml(artifact.label)}">${escapeHtml(shortArtifactLabel(artifact.label))}</a>`).join("")}</div>` : ""}
@@ -3305,18 +3425,35 @@ INDEX_HTML = r"""<!doctype html>
       });
     }
 
-    function primaryReceiptArtifacts(artifacts) {
+    function artifactKey(artifact) {
+      return `${artifact.label || ""}|${artifact.url || ""}`;
+    }
+
+    function primaryReceiptArtifacts(artifacts, primaryArtifact) {
       const priority = ["Browser report", "Summary", "Best settings"];
       const selectedArtifacts = [];
+      if (primaryArtifact) {
+        const match = artifacts.find(artifact => artifactKey(artifact) === artifactKey(primaryArtifact))
+          || artifacts.find(artifact => artifact.label === primaryArtifact.label);
+        if (match) selectedArtifacts.push(match);
+      }
       for (const label of priority) {
         const match = artifacts.find(artifact => artifact.label === label);
         if (match) selectedArtifacts.push(match);
       }
       for (const artifact of artifacts) {
         if (selectedArtifacts.length >= 3) break;
-        if (!selectedArtifacts.includes(artifact)) selectedArtifacts.push(artifact);
+        if (!selectedArtifacts.some(selected => artifactKey(selected) === artifactKey(artifact))) {
+          selectedArtifacts.push(artifact);
+        }
       }
-      return selectedArtifacts;
+      const seen = new Set();
+      return selectedArtifacts.filter(artifact => {
+        const key = artifactKey(artifact);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }).slice(0, 3);
     }
 
     function primaryGlobalReports(reports) {
@@ -3341,6 +3478,11 @@ INDEX_HTML = r"""<!doctype html>
       if (key.includes("context")) return "context";
       if (key.includes("complete") || key.includes("pass") || key.includes("score")) return "complete";
       return text.length > 12 ? text.slice(0, 11) + "…" : text;
+    }
+
+    function receiptScore(value) {
+      if (value === null || value === undefined || value === "") return NaN;
+      return Number(value);
     }
 
     function renderBenchmarkGraphics(state) {
@@ -3405,7 +3547,7 @@ INDEX_HTML = r"""<!doctype html>
     function shortArtifactLabel(label) {
       const text = String(label || "");
       const map = {
-        "Browser report": "Browser",
+        "Browser report": "Report",
         "Itemized report": "Items",
         "Resolved plan": "Plan",
         "Best settings": "Best",
