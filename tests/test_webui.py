@@ -235,6 +235,15 @@ def test_index_html_keeps_analytics_aligned_to_selected_plan():
     assert 'plan?.workflow || ["fit", "speed", "quality", "settings", "report"]' in webui.INDEX_HTML
 
 
+def test_index_html_includes_results_studio_for_returning_users():
+    assert 'id="results-studio"' in webui.INDEX_HTML
+    assert "function renderResultsStudio(state)" in webui.INDEX_HTML
+    assert "Latest run, historical score trend" in webui.INDEX_HTML
+    assert "trend-bars" in webui.INDEX_HTML
+    assert "Open latest report" in webui.INDEX_HTML
+    assert "renderResultsStudio(state)" in webui.INDEX_HTML
+
+
 def test_librarian_web_selection_accepts_any_models():
     gemma = ModelInfo(path=Path("Gemma-3-27B.gguf"), name="Gemma-3-27B.gguf", family="gemma")
     qwen = ModelInfo(path=Path("Qwen3.6-35B-A3B.gguf"), name="Qwen3.6-35B-A3B.gguf", family="qwen")

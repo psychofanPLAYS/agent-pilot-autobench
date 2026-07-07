@@ -2189,6 +2189,138 @@ INDEX_HTML = r"""<!doctype html>
     .timeline-stage span { display:block; color:var(--muted); font-size:11px; margin-top:4px; }
     .timeline-stage.active { border-color:var(--teal); background:rgba(32,196,207,.10); box-shadow:inset 3px 0 0 var(--teal); }
     .timeline-stage.done { border-color:rgba(121,209,138,.35); }
+    .results-studio {
+      margin-top:8px;
+      padding:12px;
+    }
+    .results-studio-head {
+      display:flex;
+      justify-content:space-between;
+      gap:14px;
+      align-items:flex-start;
+      margin-bottom:12px;
+    }
+    .results-studio-title strong { display:block; font-size:16px; }
+    .results-studio-title span { display:block; color:var(--muted); font-size:12px; margin-top:3px; }
+    .results-studio-grid {
+      display:grid;
+      grid-template-columns:minmax(240px,1fr) minmax(300px,1.2fr) minmax(240px,.9fr);
+      gap:10px;
+      align-items:stretch;
+    }
+    .results-hero,
+    .results-card {
+      min-width:0;
+      border:1px solid var(--line);
+      border-radius:8px;
+      background:rgba(255,255,255,.025);
+      padding:12px;
+    }
+    .results-hero {
+      border-color:rgba(32,196,207,.35);
+      background:linear-gradient(180deg, rgba(32,196,207,.12), rgba(32,196,207,.025));
+    }
+    .results-kicker {
+      color:var(--muted);
+      font-size:11px;
+      font-weight:900;
+      letter-spacing:.06em;
+      text-transform:uppercase;
+    }
+    .results-hero h3 {
+      margin:6px 0 0;
+      font-size:20px;
+      line-height:1.15;
+      overflow-wrap:anywhere;
+    }
+    .results-hero p,
+    .results-card p {
+      margin:7px 0 0;
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.35;
+    }
+    .result-verdict {
+      display:inline-flex;
+      align-items:center;
+      width:max-content;
+      max-width:100%;
+      margin-top:11px;
+      border:1px solid rgba(121,209,138,.35);
+      border-radius:999px;
+      padding:5px 9px;
+      background:rgba(121,209,138,.08);
+      color:var(--good);
+      font-weight:900;
+      font-size:12px;
+    }
+    .result-verdict.warn { color:var(--amber); border-color:rgba(245,166,35,.35); background:rgba(245,166,35,.08); }
+    .result-verdict.bad { color:var(--bad); border-color:rgba(255,91,91,.35); background:rgba(255,91,91,.08); }
+    .result-scoreline {
+      display:flex;
+      align-items:baseline;
+      gap:7px;
+      margin-top:9px;
+    }
+    .result-scoreline b { color:var(--teal); font-size:34px; line-height:1; font-variant-numeric:tabular-nums; }
+    .result-scoreline span { color:var(--muted); font-size:12px; }
+    .trend-bars {
+      display:grid;
+      grid-template-columns:repeat(var(--trend-count, 1), minmax(12px,1fr));
+      gap:5px;
+      height:86px;
+      align-items:end;
+      margin-top:12px;
+      padding:8px;
+      border:1px solid var(--line-soft);
+      border-radius:8px;
+      background:rgba(0,0,0,.12);
+    }
+    .trend-bars i {
+      display:block;
+      height:max(8px, var(--bar-height, 8%));
+      border-radius:4px 4px 2px 2px;
+      background:linear-gradient(180deg, var(--teal), rgba(32,196,207,.28));
+      box-shadow:0 0 18px rgba(32,196,207,.14);
+    }
+    .result-stats {
+      display:grid;
+      grid-template-columns:repeat(3,minmax(0,1fr));
+      gap:8px;
+      margin-top:12px;
+    }
+    .result-stat {
+      border:1px solid var(--line-soft);
+      border-radius:7px;
+      padding:8px;
+      background:rgba(0,0,0,.10);
+      min-width:0;
+    }
+    .result-stat span { display:block; color:var(--muted); font-size:11px; }
+    .result-stat b { display:block; color:var(--text); font-size:18px; margin-top:2px; }
+    .result-links {
+      display:flex;
+      flex-wrap:wrap;
+      gap:7px;
+      margin-top:12px;
+    }
+    .result-links a {
+      color:var(--text);
+      text-decoration:none;
+      border:1px solid var(--line);
+      border-radius:7px;
+      background:var(--panel-2);
+      padding:7px 9px;
+      font-size:12px;
+      font-weight:900;
+    }
+    .result-links a.primary {
+      color:#061012;
+      background:var(--teal);
+      border-color:transparent;
+    }
+    .result-links a:hover { border-color:var(--teal-dim); background:rgba(32,196,207,.10); }
+    .result-links a.primary:hover { background:#39d5df; }
     .seam-diagram {
       display: grid;
       grid-template-columns: 1fr auto 1fr auto 1fr;
@@ -2457,6 +2589,8 @@ INDEX_HTML = r"""<!doctype html>
       .plan-menu { position:static; margin-top:8px; }
       .run-flow { grid-template-columns:1fr; }
       .analytics-grid { grid-template-columns:1fr; }
+      .results-studio-grid { grid-template-columns:1fr; }
+      .results-studio-head { align-items:flex-start; flex-direction:column; gap:6px; }
       .bottom-grid { grid-template-columns:1fr; }
       .receipt-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
       .receipt-row { grid-template-columns:minmax(0,1fr) 86px 64px; gap:6px; }
@@ -2876,6 +3010,7 @@ INDEX_HTML = r"""<!doctype html>
           <div class="timeline" id="stage-timeline"></div>
         </section>
       </section>
+      <section class="panel results-studio" id="results-studio" aria-label="Results studio"></section>
       <section class="bottom-grid">
         <section class="panel">
           <h2 class="section-title"><span>Live telemetry</span><span class="count-chip">All good</span></h2>
@@ -3114,6 +3249,7 @@ INDEX_HTML = r"""<!doctype html>
       renderEvents(run.events || []);
       renderReceipts(state);
       renderBenchmarkGraphics(state);
+      renderResultsStudio(state);
       updateGuard();
 
       // pre-flight -> in-flight transform: once the engine is running (or a run dir
@@ -3477,6 +3613,110 @@ INDEX_HTML = r"""<!doctype html>
         ? events.slice(-80).map(event => `<div class="event"><span>${escapeHtml(event.at)}</span><strong>${escapeHtml(event.kind)}</strong><span>${escapeHtml(event.message)}</span></div>`).join("")
         : `<div class="sub">Live benchmark activity will appear here.</div>`;
       feed.scrollTop = feed.scrollHeight;
+    }
+
+    function renderResultsStudio(state) {
+      const studio = document.querySelector("#results-studio");
+      if (!studio) return;
+      const receipts = state.receipts || [];
+      const reports = state.global_reports || [];
+      if (!receipts.length) {
+        studio.innerHTML = `
+          <div class="results-studio-head">
+            <div class="results-studio-title">
+              <strong>Results studio</strong>
+              <span>Run a benchmark and this becomes your return dashboard.</span>
+            </div>
+            <span class="count-chip">Waiting for receipts</span>
+          </div>
+          <div class="results-studio-grid">
+            <div class="results-hero">
+              <div class="results-kicker">No runs yet</div>
+              <h3>Your first finished run will appear here.</h3>
+              <p>pilotBENCHY will summarize the latest verdict, best score, run health, trend, and direct report links.</p>
+            </div>
+            <div class="results-card">
+              <div class="results-kicker">Trend</div>
+              <p>No score history yet.</p>
+              <div class="trend-bars" style="--trend-count:1"><i style="--bar-height:8%"></i></div>
+            </div>
+            <div class="results-card">
+              <div class="results-kicker">Next</div>
+              <p>Select models, pick a test, and leave the engine running. Come back here for the result story.</p>
+            </div>
+          </div>`;
+        return;
+      }
+
+      const latest = receipts[0];
+      const scored = receipts
+        .map(receipt => ({receipt, score: receiptScore(receipt.score)}))
+        .filter(item => Number.isFinite(item.score));
+      const best = scored.length
+        ? [...scored].sort((a, b) => b.score - a.score)[0]
+        : null;
+      const statusCounts = receipts.reduce((counts, receipt) => {
+        const key = String(receipt.verdict_state || "").toLowerCase();
+        if (key === "bad") counts.failed += 1;
+        else if (key === "warn") counts.partial += 1;
+        else counts.completed += 1;
+        return counts;
+      }, {completed: 0, partial: 0, failed: 0});
+      const trend = scored.slice().reverse().slice(-8);
+      const maxScore = Math.max(1, ...trend.map(item => item.score));
+      const trendHtml = trend.length
+        ? trend.map(item => {
+            const height = Math.max(8, Math.round((item.score / maxScore) * 100));
+            return `<i style="--bar-height:${height}%" title="${escapeHtml(item.receipt.model)}: ${escapeHtml(item.score.toFixed(3))}"></i>`;
+          }).join("")
+        : `<i style="--bar-height:8%" title="No scored receipts yet"></i>`;
+      const latestClass = String(latest.verdict_state || "").toLowerCase();
+      const bestScore = best ? best.score.toFixed(3) : "-";
+      const bestModel = best ? best.receipt.model : "No scored run yet";
+      const latestScore = Number.isFinite(receiptScore(latest.score))
+        ? receiptScore(latest.score).toFixed(3)
+        : "not scored";
+      const primaryReceipt = latest.primary_artifact || (latest.artifacts || [])[0];
+      const reportLinks = [
+        primaryReceipt ? {...primaryReceipt, primary: true} : null,
+        ...primaryGlobalReports(reports).map(report => ({...report, primary: false})),
+      ].filter(Boolean).slice(0, 4);
+      studio.innerHTML = `
+        <div class="results-studio-head">
+          <div class="results-studio-title">
+            <strong>Results studio</strong>
+            <span>Latest run, historical score trend, and the reports worth opening first.</span>
+          </div>
+          <span class="count-chip">${receipts.length} recent run${receipts.length === 1 ? "" : "s"}</span>
+        </div>
+        <div class="results-studio-grid">
+          <div class="results-hero">
+            <div class="results-kicker">Latest run</div>
+            <h3 title="${escapeHtml(latest.model)}">${escapeHtml(latest.model)}</h3>
+            <span class="result-verdict ${escapeHtml(latestClass)}">${escapeHtml(latest.verdict || "Receipt")}</span>
+            <p>${escapeHtml(latest.reason || "Finished with benchmark evidence recorded.")}</p>
+            <div class="result-scoreline"><b>${escapeHtml(latestScore)}</b><span>latest score</span></div>
+          </div>
+          <div class="results-card">
+            <div class="results-kicker">Score trend</div>
+            <p>Best so far: <strong>${escapeHtml(bestModel)}</strong> at <strong>${escapeHtml(bestScore)}</strong>.</p>
+            <div class="trend-bars" style="--trend-count:${Math.max(1, trend.length)}">${trendHtml}</div>
+            <div class="result-stats">
+              <div class="result-stat"><span>Complete</span><b>${statusCounts.completed}</b></div>
+              <div class="result-stat"><span>Partial</span><b>${statusCounts.partial}</b></div>
+              <div class="result-stat"><span>Failed</span><b>${statusCounts.failed}</b></div>
+            </div>
+          </div>
+          <div class="results-card">
+            <div class="results-kicker">Open first</div>
+            <p>Start with the browser report, then compare the leaderboard and model comparison artifacts.</p>
+            <div class="result-links">
+              ${reportLinks.length
+                ? reportLinks.map(link => `<a class="${link.primary ? "primary" : ""}" href="${escapeHtml(link.url)}" target="_blank" rel="noreferrer">${escapeHtml(link.primary ? "Open latest report" : shortArtifactLabel(link.label))}</a>`).join("")
+                : `<span class="sub">Report links appear after the first artifact is written.</span>`}
+            </div>
+          </div>
+        </div>`;
     }
 
     function renderReceipts(state) {
