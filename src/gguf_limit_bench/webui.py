@@ -6,6 +6,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
 import json
 import mimetypes
+import os
 from pathlib import Path, PurePosixPath
 import socket
 import subprocess
@@ -252,6 +253,14 @@ class WebUiState:
             "proof_commands": hard_recommendations.get("proof_commands", []),
             "global_reports": global_report_payloads(self.runs_root),
             "receipts": recent_receipts(self.runs_root),
+            "local_status": _local_status_payload(
+                model_root=self.root,
+                runs_root=self.runs_root,
+                models=models,
+                llama_paths=self.llama_paths,
+                telemetry=telemetry,
+                run_payload=run_payload,
+            ),
             "run": run_payload,
         }
 
@@ -417,6 +426,196 @@ def _paths_block(llama_paths: dict[str, str | None] | None) -> dict[str, str | N
         key: source.get(key)
         for key in ("llama_server", "llama_bench", "llama_cli", "llama_perplexity", "runs_root")
     }
+
+
+def _status_row(
+    row_id: str, label: str, value: str, state: str, detail: str = ""
+) -> dict[str, str]:
+    return {
+        "id": row_id,
+        "label": label,
+        "value": value,
+        "state": state,
+        "detail": detail,
+    }
+
+
+def _local_status_payload(
+    *,
+    model_root: Path,
+    runs_root: Path,
+    models: list[ModelInfo],
+    llama_paths: dict[str, str | None],
+    telemetry: dict[str, int | float | None],
+    run_payload: dict,
+) -> dict[str, object]:
+    rows: list[dict[str, str]] = [
+        _status_row("api", "Local API", "online", "ok", "The browser reached /api/state."),
+    ]
+
+    phase = str(run_payload.get("phase") or "idle")
+    if phase == "running":
+        rows.append(
+            _status_row(
+                "engine",
+                "Engine seam",
+                "running",
+                "ok",
+                "Detached engine status is being read from the active run directory.",
+            )
+        )
+    elif phase in {"failed", "aborted"}:
+        rows.append(
+            _status_row(
+                "engine",
+                "Engine seam",
+                phase,
+                "bad",
+                "The last detached engine state needs attention.",
+            )
+        )
+    else:
+        rows.append(
+            _status_row(
+                "engine",
+                "Engine seam",
+                "detached idle",
+                "info",
+                "No engine is running until you start a benchmark.",
+            )
+        )
+
+    if not model_root.exists():
+        rows.append(
+            _status_row(
+                "models",
+                "Model root",
+                "missing",
+                "bad",
+                f"Model folder does not exist: {model_root}",
+            )
+        )
+    elif not models:
+        rows.append(
+            _status_row(
+                "models",
+                "Model root",
+                "0 models",
+                "warn",
+                f"No GGUF models were found under {model_root}.",
+            )
+        )
+    else:
+        rows.append(
+            _status_row(
+                "models",
+                "Model root",
+                f"{len(models)} model{'s' if len(models) != 1 else ''}",
+                "ok",
+                str(model_root),
+            )
+        )
+
+    if runs_root.is_dir() and os.access(runs_root, os.W_OK):
+        rows.append(_status_row("runs", "Run storage", "writable", "ok", str(runs_root)))
+    elif runs_root.exists():
+        rows.append(
+            _status_row(
+                "runs",
+                "Run storage",
+                "not writable",
+                "bad",
+                f"Run folder exists but is not writable: {runs_root}",
+            )
+        )
+    else:
+        rows.append(
+            _status_row(
+                "runs",
+                "Run storage",
+                "will create",
+                "info",
+                f"Run folder will be created when needed: {runs_root}",
+            )
+        )
+
+    configured_paths = {
+        key: value for key, value in llama_paths.items() if key != "runs_root" and value
+    }
+    missing_paths = [
+        key for key, value in configured_paths.items() if not Path(str(value)).is_file()
+    ]
+    if missing_paths:
+        rows.append(
+            _status_row(
+                "llama",
+                "llama.cpp",
+                f"{len(missing_paths)} missing",
+                "warn",
+                "Configured llama.cpp binary path(s) are missing: " + ", ".join(missing_paths),
+            )
+        )
+    elif configured_paths:
+        rows.append(
+            _status_row(
+                "llama",
+                "llama.cpp",
+                f"{len(configured_paths)} paths",
+                "ok",
+                "Configured llama.cpp binaries will be passed to the detached engine.",
+            )
+        )
+    else:
+        rows.append(
+            _status_row(
+                "llama",
+                "llama.cpp",
+                "engine resolves",
+                "info",
+                "No explicit binary paths were provided; the detached engine will use its config/PATH.",
+            )
+        )
+
+    if telemetry.get("gpu_util_percent") is None:
+        rows.append(
+            _status_row(
+                "telemetry",
+                "Telemetry",
+                "CPU/RAM only",
+                "info",
+                "nvidia-smi did not return GPU metrics for this sample.",
+            )
+        )
+    else:
+        rows.append(
+            _status_row(
+                "telemetry",
+                "Telemetry",
+                "GPU sampled",
+                "ok",
+                "CPU, RAM, and GPU telemetry are available.",
+            )
+        )
+
+    if any(row["state"] == "bad" for row in rows):
+        overall = {
+            "state": "bad",
+            "label": "Blocked",
+            "detail": "One or more local prerequisites need attention.",
+        }
+    elif any(row["state"] == "warn" for row in rows):
+        overall = {
+            "state": "warn",
+            "label": "Needs attention",
+            "detail": "The cockpit can load, but one local check is weak.",
+        }
+    else:
+        overall = {
+            "state": "ok",
+            "label": "Ready",
+            "detail": "Local cockpit state refreshed.",
+        }
+    return {"overall": overall, "rows": rows}
 
 
 def _tail_live_events(run_directory: Path, *, limit: int = 80) -> list[dict]:
@@ -1328,7 +1527,14 @@ INDEX_HTML = r"""<!doctype html>
     .status-title { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.05em; margin-bottom:8px; }
     .status-row { display:grid; grid-template-columns: 1fr auto 10px; gap:8px; align-items:center; color:var(--muted); font-size:12px; padding:4px 0; }
     .status-row strong { color:var(--text); font-weight:600; text-align:right; }
+    .status-row[data-state="info"] strong { color:var(--muted); }
+    .status-row[data-state="warn"] strong { color:var(--amber); }
+    .status-row[data-state="bad"] strong { color:var(--bad); }
     .ok-dot { width:7px; height:7px; border-radius:50%; background:var(--good); box-shadow:0 0 12px rgba(121,209,138,.45); }
+    .ok-dot.state-info { background:var(--teal); box-shadow:0 0 12px rgba(32,196,207,.42); }
+    .ok-dot.state-warn { background:var(--amber); box-shadow:0 0 12px rgba(244,184,96,.42); }
+    .ok-dot.state-bad { background:var(--bad); box-shadow:0 0 12px rgba(255,115,115,.42); }
+    .ok-dot.state-muted { background:var(--faint); box-shadow:none; }
     .system-check { margin:10px 0 0; width:100%; background:var(--panel-2); color:var(--text); border:1px solid var(--line); }
     .rail-foot { margin-top:auto; border-top:1px solid var(--line); padding-top:12px; display:flex; justify-content:space-between; color:var(--muted); font-size:12px; }
     .rail-note {
@@ -1995,6 +2201,7 @@ INDEX_HTML = r"""<!doctype html>
     }
     .winner strong { color: var(--good); }
     .ok { color: var(--good); }
+    .warn { color: var(--amber); }
     .bad { color: var(--bad); }
     @media (max-width: 980px) {
       .shell { grid-template-columns: 1fr; }
@@ -2237,17 +2444,19 @@ INDEX_HTML = r"""<!doctype html>
         <a class="navlink" href="#run-flow"><span class="navico">ⓘ</span>About</a>
       </nav>
       <div class="status-block">
-        <div class="status-title">System status</div>
-        <div class="status-row"><span>Backend config</span><strong>llama.cpp</strong><i class="ok-dot"></i></div>
-        <div class="status-row"><span>Engine mode</span><strong>Detached</strong><i class="ok-dot"></i></div>
-        <div class="status-row"><span>_models</span><strong id="rail-model-root">local</strong><i class="ok-dot"></i></div>
-        <div class="status-row"><span>Runs</span><strong>_runs</strong><i class="ok-dot"></i></div>
-        <div class="status-row"><span>RAM</span><strong id="rail-ram">-</strong><i class="ok-dot"></i></div>
-        <div class="status-row"><span>CPU</span><strong id="rail-cpu">-</strong><i class="ok-dot"></i></div>
-        <div class="status-row"><span>GPU</span><strong id="rail-gpu">-</strong><i class="ok-dot"></i></div>
+        <div class="status-title">Local state</div>
+        <div class="status-row" data-status-row="api" data-state="info"><span>Local API</span><strong id="rail-api">checking</strong><i class="ok-dot state-info"></i></div>
+        <div class="status-row" data-status-row="engine" data-state="info"><span>Engine seam</span><strong id="rail-engine">checking</strong><i class="ok-dot state-info"></i></div>
+        <div class="status-row" data-status-row="models" data-state="info"><span>Model root</span><strong id="rail-model-root">checking</strong><i class="ok-dot state-info"></i></div>
+        <div class="status-row" data-status-row="runs" data-state="info"><span>Run storage</span><strong id="rail-runs">checking</strong><i class="ok-dot state-info"></i></div>
+        <div class="status-row" data-status-row="llama" data-state="info"><span>llama.cpp</span><strong id="rail-llama">checking</strong><i class="ok-dot state-info"></i></div>
+        <div class="status-row" data-status-row="telemetry" data-state="info"><span>Telemetry</span><strong id="rail-telemetry">checking</strong><i class="ok-dot state-info"></i></div>
+        <div class="status-row" data-status-row="ram" data-state="info"><span>RAM</span><strong id="rail-ram">-</strong><i class="ok-dot state-info"></i></div>
+        <div class="status-row" data-status-row="cpu" data-state="info"><span>CPU</span><strong id="rail-cpu">-</strong><i class="ok-dot state-info"></i></div>
+        <div class="status-row" data-status-row="gpu" data-state="info"><span>GPU</span><strong id="rail-gpu">-</strong><i class="ok-dot state-info"></i></div>
         <button class="system-check ghost-button" type="button">↻ Refresh state</button>
       </div>
-      <div class="rail-foot"><span class="ok">● Local state</span><span id="rail-clock">local</span></div>
+      <div class="rail-foot"><span id="rail-local-state" class="ok">● Local state</span><span id="rail-clock">local</span></div>
     </aside>
     <main>
       <header>
@@ -2303,7 +2512,7 @@ INDEX_HTML = r"""<!doctype html>
                 </div>
                 <div id="run-summary" class="run-summary"></div>
                 <div class="builder-card" id="engine-card">
-                  <div class="builder-card-head"><span>Engine (detached)</span><span class="ok">● Ready</span></div>
+                  <div class="builder-card-head"><span>Engine (detached)</span><span id="engine-status-chip" class="ok">● Detached idle</span></div>
                   <div class="builder-card-body engine-grid">
                     <span>Backend</span><b>llama.cpp</b>
                     <span>Context</span><b>Auto</b>
@@ -2523,6 +2732,62 @@ INDEX_HTML = r"""<!doctype html>
       });
     }
 
+    function statusClass(state) {
+      if (state === "bad") return "bad";
+      if (state === "warn") return "warn";
+      if (state === "ok") return "ok";
+      return "info";
+    }
+
+    function setRailStatus(rowId, value, state, detail) {
+      const row = document.querySelector(`[data-status-row="${rowId}"]`);
+      if (!row) return;
+      const status = statusClass(state);
+      row.dataset.state = status;
+      row.title = detail || "";
+      const strong = row.querySelector("strong");
+      const dot = row.querySelector(".ok-dot");
+      if (strong) strong.textContent = value || "-";
+      if (dot) dot.className = `ok-dot state-${status}`;
+    }
+
+    function renderLocalStatus(status) {
+      const rows = Array.isArray(status?.rows) ? status.rows : [];
+      for (const row of rows) {
+        setRailStatus(row.id, row.value, row.state, row.detail);
+      }
+      const overall = status?.overall || {};
+      const foot = document.querySelector("#rail-local-state");
+      if (foot) {
+        const state = statusClass(overall.state);
+        foot.className = state === "bad" ? "bad" : state === "warn" ? "warn" : "ok";
+        foot.textContent = `● Local state: ${overall.label || "Unknown"}`;
+        foot.title = overall.detail || "";
+      }
+      const engine = rows.find(row => row.id === "engine") || {};
+      const engineChip = document.querySelector("#engine-status-chip");
+      if (engineChip) {
+        const state = statusClass(engine.state);
+        engineChip.className = state === "bad" ? "bad" : state === "warn" ? "warn" : "ok";
+        engineChip.textContent = `● ${engine.value || "Detached idle"}`;
+        engineChip.title = engine.detail || "";
+      }
+    }
+
+    function renderTelemetryRail(t) {
+      const cpu = Math.round(t.cpu_used_percent || 0);
+      const ram = Math.round(t.ram_used_percent || 0);
+      const gpuText = t.gpu_util_percent == null ? "n/a" : `${t.gpu_util_percent}%`;
+      setRailStatus("cpu", `${cpu}%`, cpu >= 90 ? "warn" : "ok", "Current CPU utilization sample.");
+      setRailStatus("ram", `${ram}%`, ram >= 90 ? "warn" : "ok", "Current RAM utilization sample.");
+      setRailStatus(
+        "gpu",
+        gpuText,
+        t.gpu_util_percent == null ? "info" : t.gpu_util_percent >= 95 ? "warn" : "ok",
+        t.gpu_util_percent == null ? "GPU metrics unavailable for this sample." : "Current GPU utilization sample.",
+      );
+    }
+
     function render(state) {
       appState = state;
       if (!selectionInitialized && state.models.length) {
@@ -2603,9 +2868,8 @@ INDEX_HTML = r"""<!doctype html>
       document.querySelector("#ram").textContent = `${Math.round(t.ram_used_percent)}%`;
       document.querySelector("#gpu").textContent = t.gpu_util_percent == null ? "n/a" : `${t.gpu_util_percent}%`;
       document.querySelector("#vram").textContent = t.gpu_used_mb == null ? "n/a" : `${t.gpu_used_mb}/${t.gpu_total_mb} MB`;
-      document.querySelector("#rail-cpu").textContent = `${Math.round(t.cpu_used_percent)}%`;
-      document.querySelector("#rail-ram").textContent = `${Math.round(t.ram_used_percent)}%`;
-      document.querySelector("#rail-gpu").textContent = t.gpu_util_percent == null ? "n/a" : `${t.gpu_util_percent}%`;
+      renderLocalStatus(state.local_status || {});
+      renderTelemetryRail(t);
       document.querySelector("#rail-clock").textContent = new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
       const run = state.run;
       const active = state.active_run ? ` | ${state.active_run}` : "";
@@ -3170,6 +3434,19 @@ INDEX_HTML = r"""<!doctype html>
         : "Sampler: HF recommended.";
     }
 
+    function runSnapshotText() {
+      if (!appState) return "Run state: loading local state.";
+      const run = appState.run || {};
+      const phase = run.phase || "idle";
+      const message = run.message ? ` - ${run.message}` : "";
+      const active = appState.active_run ? ` (${appState.active_run})` : "";
+      if (phase === "running") return `Run state: running${message}${active}.`;
+      if (["failed", "aborted", "stopped", "complete"].includes(phase)) {
+        return `Last run: ${phase}${message}${active}.`;
+      }
+      return "Run state: detached idle.";
+    }
+
     function updateGuard() {
       if (!appState) return;
       const flightPlan = selectedFlightPlan();
@@ -3191,7 +3468,7 @@ INDEX_HTML = r"""<!doctype html>
         const compareHint = (mode === "librarian_bench" && models.length === 1)
           ? " Add a second model to compare them head-to-head."
           : "";
-        guard.textContent = `${models.length} model(s) ready.${flightPlanText}${planText} ${samplerPolicyText()}${compareHint}`;
+        guard.textContent = `${models.length} model(s) ready.${flightPlanText}${planText} ${samplerPolicyText()} ${runSnapshotText()}${compareHint}`;
       }
       updateSelectedCount(models.length);
       updateSelectedModelStats(models);
@@ -3301,6 +3578,7 @@ INDEX_HTML = r"""<!doctype html>
       const dockStart = document.querySelector("#dock-start");
       if (!start || !title || !detail || !pill || !appState) return;
       const phase = appState.run?.phase || "idle";
+      const runSnapshot = runSnapshotText();
       const running = phase === "running";
       const hasModels = appState.models.length > 0;
       const selectedCount = models.length;
@@ -3315,7 +3593,7 @@ INDEX_HTML = r"""<!doctype html>
         dockLabel = "Blocked";
       } else if (running) {
         title.textContent = "Run in progress";
-        detail.textContent = "The detached engine is writing live status and receipts.";
+        detail.textContent = runSnapshot;
         pill.textContent = "running";
         start.textContent = "Engine running";
         dockLabel = "Running";
@@ -3327,13 +3605,13 @@ INDEX_HTML = r"""<!doctype html>
         dockLabel = "Starting";
       } else if (selectedCount === 0) {
         title.textContent = "Ready after model selection";
-        detail.textContent = "Choose the exact GGUF model(s) to benchmark.";
+        detail.textContent = `Choose the exact GGUF model(s) to benchmark. ${runSnapshot}`;
         pill.textContent = "needs model";
         start.textContent = "Select model first";
         dockLabel = "Select";
       } else {
         title.textContent = `${selectedCount} model${selectedCount === 1 ? "" : "s"} ready`;
-        detail.textContent = `${planName}; receipts will be saved under _runs.`;
+        detail.textContent = `${planName}; ${runSnapshot} Receipts will be saved under _runs.`;
         pill.textContent = "ready";
         start.textContent = flightPlan?.start_label || "Start benchmark";
         dockLabel = "Start run";
@@ -3382,7 +3660,6 @@ INDEX_HTML = r"""<!doctype html>
       });
       socket.addEventListener("open", () => {
         fallbackNotice = "";
-        document.querySelector("#guard").textContent = "Live connection ready.";
         sendSocket({type: "refresh"});
       });
       socket.addEventListener("close", () => {
@@ -3395,10 +3672,10 @@ INDEX_HTML = r"""<!doctype html>
 
     async function loadStateViaHttp(statusText = "") {
       try {
+        if (statusText) document.querySelector("#guard").textContent = statusText;
         const response = await fetch("/api/state", {cache: "no-store"});
         if (!response.ok) throw new Error(`state ${response.status}`);
         render(await response.json());
-        if (statusText) document.querySelector("#guard").textContent = statusText;
       } catch (error) {
         document.querySelector("#guard").textContent = `Could not load local state: ${error.message}`;
       }

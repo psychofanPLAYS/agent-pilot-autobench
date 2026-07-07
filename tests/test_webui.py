@@ -111,6 +111,47 @@ def test_webui_state_lists_models_modes_and_librarian_packs(tmp_path):
     assert any(preset["name"] == "thinking_general" for preset in qwen["sampler_presets"])
 
 
+def test_webui_state_exposes_truthful_local_status(tmp_path, monkeypatch):
+    class _Telemetry:
+        def to_dict(self):
+            return {
+                "ram_available_mb": 1024,
+                "ram_used_percent": 40.0,
+                "cpu_used_percent": 12.0,
+                "swap_used_percent": 0.0,
+                "disk_read_mb": 1.0,
+                "disk_write_mb": 2.0,
+                "gpu_used_mb": 512,
+                "gpu_total_mb": 24576,
+                "gpu_util_percent": 22,
+                "gpu_power_watts": 88.0,
+            }
+
+    monkeypatch.setattr(webui, "sample_telemetry", lambda: _Telemetry())
+    model_root = tmp_path / "models"
+    model_root.mkdir()
+    (model_root / "Qwen2.5-14B-Instruct-Q4_K_M.gguf").write_bytes(b"1" * 30)
+    llama_server = tmp_path / "llama-server.exe"
+    llama_server.write_bytes(b"exe")
+
+    state = WebUiState(
+        root=model_root,
+        runs_root=tmp_path / "_runs",
+        llama_server=llama_server,
+    )
+    payload = state.state_payload()
+
+    rows = {row["id"]: row for row in payload["local_status"]["rows"]}
+    assert rows["api"]["value"] == "online"
+    assert rows["engine"]["value"] == "detached idle"
+    assert rows["models"]["value"] == "1 model"
+    assert rows["models"]["state"] == "ok"
+    assert rows["runs"]["value"] == "writable"
+    assert rows["llama"]["value"] == "1 paths"
+    assert rows["telemetry"]["value"] == "GPU sampled"
+    assert payload["local_status"]["overall"]["state"] == "ok"
+
+
 def test_model_payload_marks_tiny_fixture_files_as_unestimated(tmp_path):
     model = ModelInfo(
         path=tmp_path / "Gemma-2-9B-Instruct-Q5_K_M.gguf",
@@ -134,6 +175,16 @@ def test_index_html_includes_responsive_launch_dock():
     assert 'id="dock-start"' in webui.INDEX_HTML
     assert 'dockLabel = "Start run"' in webui.INDEX_HTML
     assert 'document.querySelector("#start").click()' in webui.INDEX_HTML
+
+
+def test_index_html_uses_probe_backed_status_rows():
+    assert 'data-status-row="api"' in webui.INDEX_HTML
+    assert 'id="rail-local-state"' in webui.INDEX_HTML
+    assert 'id="engine-status-chip"' in webui.INDEX_HTML
+    assert "function runSnapshotText()" in webui.INDEX_HTML
+    assert "Systems nominal" not in webui.INDEX_HTML
+    assert "Check systems" not in webui.INDEX_HTML
+    assert "Rows per page" not in webui.INDEX_HTML
 
 
 def test_librarian_web_selection_accepts_any_models():
