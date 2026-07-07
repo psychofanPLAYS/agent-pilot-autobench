@@ -19,16 +19,16 @@ classifiers = [
     "Topic :: System :: Benchmark",
 ]
 dependencies = [
-    "fastapi>=0.115.0",
+    "fastapi>=0.138.2",
     "huggingface_hub>=0.34",
     "nvidia-ml-py>=13.610.43",
-    "optuna>=4.8.0",
+    "optuna>=4.9.0",
     "psutil>=5.9.0",
     "pyyaml>=6.0",
     "rich>=13.0.0",
     "textual>=0.80.0",
     "typer>=0.26.8",
-    "uvicorn>=0.30.0",
+    "uvicorn>=0.49.0",
     "websockets>=12.0",
 ]
 
@@ -40,8 +40,8 @@ dev = [
     "types-psutil>=7.0.0.20250601",
 ]
 bench = [
-    "inspect-ai>=0.3.241",
-    "openai>=1.0.0",
+    "inspect-ai>=0.3.242",
+    "openai>=2.44.0",
 ]
 
 [project.scripts]
