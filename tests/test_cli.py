@@ -2460,12 +2460,14 @@ def test_flight_plans_command_lists_beginner_contract():
     assert result.exit_code == 0
     plans = json.loads(result.output)
     librarian = next(plan for plan in plans if plan["id"] == "librarian_benchmark")
-    assert librarian["recommended"] is True
     assert librarian["mode_id"] == "librarian_bench"
     assert librarian["evidence_class"] == "recommendation"
     assert librarian["score_contract"] == "agent_bench_score"
     assert librarian["budget_minutes"] == 30
     assert librarian["suggested_benchmark_suite_plans"][0]["filename"].endswith(".plan.json")
+    best = next(plan for plan in plans if plan["id"] == "find_best_settings")
+    assert best["recommended"] is True
+    assert best["evidence_class"] == "recommendation"
 
 
 def test_flight_plans_command_human_output_marks_recommended_plan():
@@ -2473,12 +2475,10 @@ def test_flight_plans_command_human_output_marks_recommended_plan():
 
     assert result.exit_code == 0
     assert "pilotBENCHY Flight Plans" in result.output
-    assert "Librarian benchmark" in result.output
-    assert "Recommended" in result.output
+    assert "Does it run?" in result.output
+    assert "Recommended plan: How good is it?" in result.output
     assert "Score" in result.output
-    assert "agent_bench_score" in result.output
     assert "speed_only" in result.output
-    assert "yes" in result.output
 
 
 def test_run_one_autoresearch_benchmark_mode_uses_simplebench_runner(monkeypatch, tmp_path):

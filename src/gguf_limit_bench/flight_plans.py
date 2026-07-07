@@ -6,7 +6,7 @@ from pathlib import Path
 from gguf_limit_bench.modes import mode_by_id
 
 
-DEFAULT_FLIGHT_PLAN_ID = "librarian_benchmark"
+DEFAULT_FLIGHT_PLAN_ID = "find_best_settings"
 
 
 @dataclass(frozen=True)
@@ -39,43 +39,70 @@ class FlightPlan:
         return payload
 
 
+# Cards are ordered as the questions a person actually asks about a new model,
+# easiest first. Labels are plain English; the technical name lives in the
+# description so power users and the CLI listing keep their bearings.
 FLIGHT_PLANS: tuple[FlightPlan, ...] = (
     FlightPlan(
+        id="quick_check",
+        label="Does it run?",
+        description=(
+            "Loads the model on your GPU and measures how fast it writes. "
+            "No questions asked; this is the 5-minute quick check."
+        ),
+        mode_id="quick",
+        budget_minutes=5,
+        evidence_goal="You get: a pass/fail load check and a speed number.",
+        evidence_class="speed_only",
+        score_contract="none",
+        workflow=("preflight", "speed"),
+        start_label="Run the 5-minute check",
+    ),
+    FlightPlan(
+        id="find_best_settings",
+        label="How good is it?",
+        description=(
+            "Asks the model real test questions, scores the answers, and finds "
+            "the settings that run it best on this machine."
+        ),
+        mode_id="best_settings",
+        budget_minutes=30,
+        evidence_goal="You get: a score, the best llama.cpp settings, and a full report.",
+        evidence_class="recommendation",
+        score_contract="simple_bench_score",
+        workflow=("preflight", "fit", "speed", "intelligence", "flag-ablation", "report"),
+        start_label="Run the full benchmark",
+        recommended=True,
+    ),
+    FlightPlan(
         id="librarian_benchmark",
-        label="Librarian benchmark",
-        description="Recommended agent-memory test for local models; one model runs, two compare.",
+        label="Which model wins?",
+        description=(
+            "Runs the same memory-and-recall job on every model you picked, then "
+            "crowns a winner. Pick two or more models; this is the Librarian benchmark."
+        ),
         mode_id="librarian_bench",
         budget_minutes=30,
-        evidence_goal="Preflight-gated librarian score, per-pack matrix, receipts, and winner.",
+        evidence_goal="You get: a ranked comparison with per-test scores for each model.",
         evidence_class="recommendation",
         score_contract="agent_bench_score",
         workflow=("preflight", "librarian-packs", "bias-checks", "report"),
-        start_label="Start librarian benchmark",
-        recommended=True,
+        start_label="Compare the selected models",
         suggested_benchmark_suite_plans=(
             "wiki-librarian-gemma4-26b-a4b-thinking.plan.json",
             "wiki-librarian-qwen3-moe-thinking.plan.json",
         ),
     ),
     FlightPlan(
-        id="find_best_settings",
-        label="Find best settings",
-        description="Recommended general run: prove fit, speed, quality, and useful flags.",
-        mode_id="best_settings",
-        budget_minutes=30,
-        evidence_goal="Actionable settings with accuracy-first scoring and report links.",
-        evidence_class="recommendation",
-        score_contract="simple_bench_score",
-        workflow=("preflight", "fit", "speed", "intelligence", "flag-ablation", "report"),
-        start_label="Find best settings",
-    ),
-    FlightPlan(
         id="overnight_campaign",
-        label="Overnight campaign",
-        description="Long run for serious comparisons when the machine can work unattended.",
+        label="Overnight deep dive",
+        description=(
+            "The most thorough answer: full settings search plus long-context "
+            "checks. Start it before bed, read the report in the morning."
+        ),
         mode_id="deep",
         budget_minutes=60,
-        evidence_goal="Deep campaign receipts across fit, speed, quality, flags, and context.",
+        evidence_goal="You get: everything, including scores, best settings, and long-context behavior.",
         evidence_class="recommendation",
         score_contract="agent_bench_score",
         workflow=(
@@ -87,20 +114,7 @@ FLIGHT_PLANS: tuple[FlightPlan, ...] = (
             "long-context-dropoff",
             "report",
         ),
-        start_label="Start overnight campaign",
-        advanced=True,
-    ),
-    FlightPlan(
-        id="quick_check",
-        label="Quick check",
-        description="Fast proof that the model loads and produces a speed receipt.",
-        mode_id="quick",
-        budget_minutes=5,
-        evidence_goal="Load success, rough throughput, and a receipt path.",
-        evidence_class="speed_only",
-        score_contract="none",
-        workflow=("preflight", "speed"),
-        start_label="Start quick check",
+        start_label="Start the overnight run",
         advanced=True,
     ),
 )

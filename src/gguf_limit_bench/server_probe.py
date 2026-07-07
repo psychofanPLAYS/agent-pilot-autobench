@@ -17,6 +17,8 @@ from gguf_limit_bench.autoresearch import AutoresearchSettings
 from gguf_limit_bench.oom import is_oom_failure
 
 _CREATE_NEW_PROCESS_GROUP = int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200))
+_CREATE_BREAKAWAY_FROM_JOB = int(getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000))
+_DETACHED_PROCESS = int(getattr(subprocess, "DETACHED_PROCESS", 0x00000008))
 
 
 @dataclass(frozen=True)
@@ -489,6 +491,23 @@ def process_group_kwargs() -> dict:
     return {"start_new_session": True}
 
 
+def detached_process_kwargs() -> dict:
+    """Popen kwargs for a child that should survive its parent's shutdown.
+
+    ``CREATE_NEW_PROCESS_GROUP`` isolates Ctrl+C-style signals, but on Windows
+    a supervisor can still kill its whole Job Object. ``CREATE_BREAKAWAY_FROM_JOB``
+    requests escape when the parent job allows breakaway. Callers should fall
+    back to :func:`process_group_kwargs` if process creation rejects the flags.
+    """
+    if _is_windows():
+        return {
+            "creationflags": (
+                _CREATE_NEW_PROCESS_GROUP | _CREATE_BREAKAWAY_FROM_JOB | _DETACHED_PROCESS
+            )
+        }
+    return {"start_new_session": True}
+
+
 def kill_process_tree(process: subprocess.Popen) -> None:
     """Terminate *process* and every child it spawned. Best-effort, cross-platform.
 
@@ -531,6 +550,29 @@ def kill_process_tree(process: subprocess.Popen) -> None:
             process.wait(timeout=10)
         except (ProcessLookupError, subprocess.TimeoutExpired):
             pass
+
+
+def kill_pid_tree(pid: int) -> None:
+    """Terminate process *pid* and children by id. Best-effort, cross-platform."""
+    if pid <= 0:
+        return
+    if _is_windows():
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        return
+    try:
+        killpg = getattr(os, "killpg", None)
+        getpgid = getattr(os, "getpgid", None)
+        if callable(killpg) and callable(getpgid):
+            killpg(getpgid(pid), signal.SIGTERM)
+        else:
+            os.kill(pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        pass
 
 
 def _stop_process(process: subprocess.Popen) -> None:

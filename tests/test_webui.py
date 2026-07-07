@@ -102,7 +102,8 @@ def test_webui_state_lists_models_modes_and_librarian_packs(tmp_path):
     payload = state.state_payload()
 
     assert [model["family"] for model in payload["models"]] == ["qwen", "gemma"]
-    assert payload["default_mode"] == "librarian_bench"
+    assert payload["default_flight_plan"] == "find_best_settings"
+    assert payload["default_mode"] == "best_settings"
     assert payload["librarian_packs"] == list(LIBRARIAN_PACK_IDS)
     assert any(mode["id"] == "librarian_bench" for mode in payload["modes"])
     assert payload["run_configuration"]["standard_forced_args"]
@@ -206,6 +207,32 @@ def test_index_html_keeps_theme_toggle_compact_and_stateful():
     assert 'themeButton.setAttribute("aria-pressed", String(isWarm))' in webui.INDEX_HTML
     assert ">Sepia dark</button>" not in webui.INDEX_HTML
     assert '"Codex dark" : "Sepia dark"' not in webui.INDEX_HTML
+
+
+def test_index_html_uses_plain_language_plan_picker():
+    assert "What do you want to know?" in webui.INDEX_HTML
+    assert "Custom (advanced)" in webui.INDEX_HTML
+    assert "Extra question file (optional)" in webui.INDEX_HTML
+    assert "None - use the standard questions" in webui.INDEX_HTML
+    assert "questions asked" in webui.INDEX_HTML
+    assert "scored attempts" not in webui.INDEX_HTML
+    assert "Benchmark suite plan" not in webui.INDEX_HTML
+    assert "Ready-made benchmark contract" not in webui.INDEX_HTML
+    assert 'class="badge">Recommended</em>' in webui.INDEX_HTML
+
+
+def test_index_html_preserves_manual_budget_and_stable_question_file_menu():
+    assert "function setBudgetDefault(minutes)" in webui.INDEX_HTML
+    assert 'budget.dataset.userEdited === "true"' in webui.INDEX_HTML
+    assert 'event.target.dataset.userEdited = "true"' in webui.INDEX_HTML
+    assert "if (select.dataset.sig === sig) return;" in webui.INDEX_HTML
+
+
+def test_index_html_keeps_analytics_aligned_to_selected_plan():
+    assert 'id="task-heatmap-label"' in webui.INDEX_HTML
+    assert 'modeId === "librarian_bench" ? "packs x models" : "steps x models"' in webui.INDEX_HTML
+    assert 'modeId === "quick" ? 0 : modeId === "librarian_bench"' in webui.INDEX_HTML
+    assert 'plan?.workflow || ["fit", "speed", "quality", "settings", "report"]' in webui.INDEX_HTML
 
 
 def test_librarian_web_selection_accepts_any_models():
@@ -388,6 +415,27 @@ def test_webui_state_payload_reflects_engine_status_and_live_events(tmp_path):
 
     assert payload["run"]["phase"] == "running"
     assert "question_scored" in [event["kind"] for event in payload["run"]["events"]]
+    assert payload["active_run"] is not None
+
+
+def test_webui_state_payload_hides_stale_active_run_when_idle(tmp_path):
+    model_root = tmp_path / "models"
+    model_root.mkdir()
+    runs_root = tmp_path / "_runs"
+    old = runs_root / "20260707-000000-cockpit"
+    old.mkdir(parents=True)
+    run_dir.write_status(old, phase="complete", pid=7)
+    state = WebUiState(
+        root=model_root,
+        runs_root=runs_root,
+        spawn_engine=_fake_spawn_factory(),
+        project_root=tmp_path,
+    )
+
+    payload = state.state_payload()
+
+    assert payload["run"]["phase"] == "idle"
+    assert payload["active_run"] is None
 
 
 def test_webui_reattaches_to_live_engine_run(tmp_path):
@@ -415,7 +463,9 @@ def test_webui_abort_writes_control_and_kills_engine(tmp_path, monkeypatch):
     model_path = model_root / "Qwen3.6-35B-A3B-Q4_K_M.gguf"
     model_path.write_bytes(b"1" * 30)
     killed: list = []
+    killed_pids: list[int] = []
     monkeypatch.setattr(webui, "kill_process_tree", lambda proc: killed.append(proc))
+    monkeypatch.setattr(webui, "kill_pid_tree", lambda pid: killed_pids.append(pid))
     state = WebUiState(
         root=model_root,
         runs_root=tmp_path / "_runs",
@@ -423,14 +473,40 @@ def test_webui_abort_writes_control_and_kills_engine(tmp_path, monkeypatch):
         project_root=tmp_path,
     )
     state.start_run([str(model_path)], "librarian_bench", {"budget_minutes": 1})
+    run_dir.write_status(state.active_run_dir, phase="running", pid=7777)
 
     ok, _ = state.request_abort()
 
     assert ok is True
     assert run_dir.read_control(state.active_run_dir)["action"] == "abort"
+    assert killed_pids == [7777]
     assert len(killed) == 1
     # a hard-killed engine can't update its own status, so the web server stamps it
     assert run_dir.read_status(state.active_run_dir)["phase"] == "aborted"
+
+
+def test_default_spawn_engine_uses_bootstrap_and_run_log(tmp_path, monkeypatch):
+    calls: list[tuple[list[str], dict]] = []
+
+    class Proc:
+        pid = 9
+
+    def fake_popen(command, **kwargs):
+        calls.append((command, kwargs))
+        return Proc()
+
+    monkeypatch.setattr(webui.subprocess, "Popen", fake_popen)
+    run_directory = tmp_path / "run"
+    run_directory.mkdir()
+
+    proc = webui._default_spawn_engine(run_directory)
+
+    assert proc.pid == 9
+    command, kwargs = calls[0]
+    assert command[:3] == [webui.sys.executable, "-c", webui._ENGINE_BOOTSTRAP]
+    assert "gguf_limit_bench" in command[3]
+    assert str(run_directory / "engine.log") == command[4]
+    assert kwargs
 
 
 def test_webui_rejects_unknown_model_path(tmp_path):

@@ -46,7 +46,11 @@ from gguf_limit_bench.reports import (
     write_leaderboard,
 )
 from gguf_limit_bench import run_dir as run_dir_io
-from gguf_limit_bench.server_probe import kill_process_tree, process_group_kwargs
+from gguf_limit_bench.server_probe import (
+    kill_pid_tree,
+    kill_process_tree,
+    process_group_kwargs,
+)
 from gguf_limit_bench.telemetry import sample_telemetry
 from gguf_limit_bench.tui import active_run_status
 
@@ -233,7 +237,9 @@ class WebUiState:
             "run_configuration": self.run_configuration,
             "benchmark_suite_plans": benchmark_suite_plan_payloads(self.project_root),
             "telemetry": telemetry,
-            "active_run": active_run_status(self.runs_root),
+            "active_run": (
+                active_run_status(self.runs_root) if run_payload.get("phase") == "running" else None
+            ),
             "champion": champion,
             "verdict": verdict_payload,
             "report_audit": asdict(report_audit),
@@ -343,6 +349,10 @@ class WebUiState:
             if self.active_run_dir is None:
                 return False, "No active benchmark run can be aborted."
             run_dir_io.write_control(self.active_run_dir, "abort")
+            status = run_dir_io.read_status(self.active_run_dir)
+            engine_pid = int(status.get("pid") or 0)
+            if engine_pid:
+                kill_pid_tree(engine_pid)
             if self.engine_process is not None:
                 kill_process_tree(self.engine_process)
             # A hard-killed engine can't update its own status, so stamp the final
@@ -384,10 +394,46 @@ class WebUiState:
         return run_directory
 
 
+_ENGINE_BOOTSTRAP = r"""
+import json
+import os
+import subprocess
+import sys
+
+command = json.loads(sys.argv[1])
+log = open(sys.argv[2], "ab")
+if os.name == "nt":
+    base = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+    try:
+        subprocess.Popen(
+            command,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            creationflags=base | subprocess.CREATE_BREAKAWAY_FROM_JOB,
+        )
+    except OSError:
+        subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, creationflags=base)
+else:
+    subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+"""
+
+
 def _default_spawn_engine(run_directory: Path) -> subprocess.Popen:
-    """Launch the engine as a detached subprocess in its own process group."""
+    """Launch the engine through a bootstrap so it survives web-server restarts.
+
+    The returned handle is the short-lived bootstrap process. Runtime control
+    still goes through the run directory: ``control.json`` for requests and the
+    engine pid recorded in ``status.json`` for hard aborts.
+    """
+    command = [sys.executable, "-m", "gguf_limit_bench", "engine", "--run-dir", str(run_directory)]
     return subprocess.Popen(
-        [sys.executable, "-m", "gguf_limit_bench", "engine", "--run-dir", str(run_directory)],
+        [
+            sys.executable,
+            "-c",
+            _ENGINE_BOOTSTRAP,
+            json.dumps(command),
+            str(run_directory / "engine.log"),
+        ],
         **process_group_kwargs(),
     )
 
@@ -1885,7 +1931,25 @@ INDEX_HTML = r"""<!doctype html>
     }
     .plan-current { cursor: default; }
     .plan-current:hover { transform:none; }
-    .plan-card strong { display: block; font-size: 13px; margin-bottom: 3px; }
+    .plan-card strong {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      margin-bottom: 3px;
+    }
+    .plan-card strong .badge {
+      margin-left: auto;
+      border: 1px solid var(--teal-dim);
+      border-radius: 999px;
+      padding: 1px 7px;
+      color: var(--teal);
+      font-size: 9px;
+      font-style: normal;
+      font-weight: 900;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
     .plan-card span {
       display: -webkit-box;
       color: var(--muted);
@@ -1897,6 +1961,12 @@ INDEX_HTML = r"""<!doctype html>
       -webkit-box-orient: vertical;
     }
     .plan-card small { display: block; color: var(--amber); margin-top: 5px; }
+    .plan-card span.gets {
+      color: var(--text);
+      font-size: 11.5px;
+      margin-top: 5px;
+      -webkit-line-clamp: 2;
+    }
     .plan-menu {
       display:none;
       position:absolute;
@@ -2650,7 +2720,7 @@ INDEX_HTML = r"""<!doctype html>
                   </div>
                 </div>
                 <div class="builder-card">
-                  <div class="builder-card-head"><span>Benchmark plan</span><span id="plan-count" class="count-chip">cards</span></div>
+                  <div class="builder-card-head"><span>What do you want to know?</span><span id="plan-count" class="count-chip">cards</span></div>
                   <div class="builder-card-body">
                     <select id="flight-plan" hidden aria-hidden="true"></select>
                     <div id="plan-cards" class="plan-cards"></div>
@@ -2676,9 +2746,9 @@ INDEX_HTML = r"""<!doctype html>
                 </div>
                 <div class="flow-diagram" aria-label="Run pipeline" hidden>
                   <div class="flow-step"><b>1. Select</b><small>Choose one or more GGUF models.</small></div>
-                  <div class="flow-step"><b>2. Plan</b><small>Pick a benchmark contract.</small></div>
-                  <div class="flow-step"><b>3. Engine</b><small>Detached runner writes receipts.</small></div>
-                  <div class="flow-step"><b>4. Report</b><small>Review evidence, scores, and artifacts.</small></div>
+                  <div class="flow-step"><b>2. Pick a test</b><small>One card answers one question.</small></div>
+                  <div class="flow-step"><b>3. It runs</b><small>In the background; closing this tab is safe.</small></div>
+                  <div class="flow-step"><b>4. Results</b><small>Scores and reports are saved under _runs.</small></div>
                 </div>
                 <div class="seam-diagram" aria-label="Detached engine architecture" hidden>
                   <div class="seam-node"><b>Browser</b><small>Chooses models and sends the run order.</small></div>
@@ -2691,7 +2761,7 @@ INDEX_HTML = r"""<!doctype html>
                   <div class="launch-readiness">
                     <div>
                       <strong id="launch-title">Ready to configure</strong>
-                      <span id="launch-detail">Select models and a benchmark plan.</span>
+                      <span id="launch-detail">Select models and a test.</span>
                     </div>
                     <span class="ready-pill" id="launch-pill">idle</span>
                   </div>
@@ -2707,7 +2777,7 @@ INDEX_HTML = r"""<!doctype html>
                       <select id="mode"></select>
                     </div>
                     <div class="field">
-                      <label for="benchmark-suite-plan">Benchmark suite plan</label>
+                      <label for="benchmark-suite-plan">Extra question file (optional)</label>
                       <select id="benchmark-suite-plan"></select>
                     </div>
                     <div class="field">
@@ -2787,9 +2857,9 @@ INDEX_HTML = r"""<!doctype html>
         <div class="run-flow" aria-label="Run flow">
           <div class="flow-label">RUN FLOW</div>
           <div class="flow-mini"><span class="num">1</span><span><b>Select models</b><small>Pick GGUF models from your library</small></span></div>
-          <div class="flow-mini"><span class="num">2</span><span><b>Choose plan</b><small>Select benchmark cards and settings</small></span></div>
-          <div class="flow-mini"><span class="num">3</span><span><b>Detached engine</b><small>pilotBENCHY runs in the background</small></span></div>
-          <div class="flow-mini"><span class="num">4</span><span><b>Receipts</b><small>Results, metrics, and artifacts saved</small></span></div>
+          <div class="flow-mini"><span class="num">2</span><span><b>Pick a test</b><small>Choose the question you want answered</small></span></div>
+          <div class="flow-mini"><span class="num">3</span><span><b>Runs in background</b><small>Closing this tab is safe</small></span></div>
+          <div class="flow-mini"><span class="num">4</span><span><b>Results saved</b><small>Scores, reports, and artifacts</small></span></div>
         </div>
       </section>
       <section class="analytics-grid" id="benchmark-analytics" aria-label="Benchmark analytics">
@@ -2798,7 +2868,7 @@ INDEX_HTML = r"""<!doctype html>
           <div class="scope-grid" id="scope-metrics"></div>
         </section>
         <section class="panel analytics-panel">
-          <div class="analytics-title">Task heatmap <span>packs x models</span></div>
+          <div class="analytics-title">Task heatmap <span id="task-heatmap-label">steps x models</span></div>
           <div class="heatmap" id="task-heatmap"></div>
         </section>
         <section class="panel analytics-panel">
@@ -3017,10 +3087,10 @@ INDEX_HTML = r"""<!doctype html>
       }
       renderFlightPlans(state.flight_plans || [], state.default_flight_plan);
       const planCount = document.querySelector("#plan-count");
-      if (planCount) planCount.textContent = `${(state.flight_plans || []).length} cards`;
+      if (planCount) planCount.textContent = `${(state.flight_plans || []).length} options`;
       const selectedMode = state.modes.find(item => item.id === mode.value);
       if (selectedMode && mode.dataset.defaultedFor !== mode.value) {
-        document.querySelector("#budget").value = selectedMode.budget_minutes;
+        setBudgetDefault(selectedMode.budget_minutes);
         mode.dataset.defaultedFor = mode.value;
       }
       renderBenchmarkSuitePlans(state.benchmark_suite_plans || []);
@@ -3225,12 +3295,12 @@ INDEX_HTML = r"""<!doctype html>
       if (!select.children.length) {
         const advanced = document.createElement("option");
         advanced.value = "";
-        advanced.textContent = "Advanced / choose mode directly";
+        advanced.textContent = "Custom (advanced)";
         select.appendChild(advanced);
         for (const plan of plans) {
           const option = document.createElement("option");
           option.value = plan.id;
-          option.textContent = `${plan.label} (${plan.budget_minutes} min/model)`;
+          option.textContent = `${plan.label} (~${plan.budget_minutes} min/model)`;
           option.title = plan.description || plan.evidence_goal || "";
           if (plan.id === defaultFlightPlanId) option.selected = true;
           select.appendChild(option);
@@ -3240,30 +3310,36 @@ INDEX_HTML = r"""<!doctype html>
       if (cards) {
         const selectedId = select.value;
         const planItems = [
-          {
-            id: "",
-            label: "Advanced controls",
-            description: "Choose mode, budget, repeats, sampler policy, and optional suite manually.",
-            budget: "For experiments"
-          },
           ...plans.map(plan => ({
             id: plan.id,
             label: plan.label,
-            description: plan.description || plan.evidence_goal || "Ready-made benchmark contract.",
-            budget: `${plan.budget_minutes} min/model`
-          }))
+            description: plan.description || "Ready-made benchmark.",
+            gets: plan.evidence_goal || "",
+            budget: `~${plan.budget_minutes} min/model`,
+            recommended: Boolean(plan.recommended)
+          })),
+          {
+            id: "",
+            label: "Custom (advanced)",
+            description: "Pick the mode, budget, repeats, sampler, and question files yourself.",
+            gets: "You get: a manual run using the advanced controls below.",
+            budget: "For experiments",
+            recommended: false
+          },
         ];
         const currentPlan = planItems.find(item => item.id === selectedId) || planItems[0];
         const currentPlanCard = `
           <div class="plan-card selected plan-current" aria-live="polite">
-            <strong>${escapeHtml(currentPlan.label)}</strong>
+            <strong>${escapeHtml(currentPlan.label)}${currentPlan.recommended ? '<em class="badge">Recommended</em>' : ""}</strong>
             <span>${escapeHtml(currentPlan.description)}</span>
+            <span class="gets">${escapeHtml(currentPlan.gets)}</span>
             <small>${escapeHtml(currentPlan.budget)}</small>
           </div>`;
         const planButton = (item, extraClass = "") => `
           <button type="button" class="plan-card ${item.id === selectedId ? "selected" : ""} ${extraClass}" data-plan-id="${escapeHtml(item.id)}">
-            <strong>${escapeHtml(item.label)}</strong>
+            <strong>${escapeHtml(item.label)}${item.recommended ? '<em class="badge">Recommended</em>' : ""}</strong>
             <span>${escapeHtml(item.description)}</span>
+            <span class="gets">${escapeHtml(item.gets)}</span>
             <small>${escapeHtml(item.budget)}</small>
           </button>`;
         cards.innerHTML = [
@@ -3318,8 +3394,14 @@ INDEX_HTML = r"""<!doctype html>
         mode.value = plan.mode_id;
         mode.dataset.defaultedFor = plan.mode_id;
       }
-      document.querySelector("#budget").value = plan.budget_minutes;
+      setBudgetDefault(plan.budget_minutes);
       document.querySelector("#start").textContent = plan.start_label || "Start benchmark";
+    }
+
+    function setBudgetDefault(minutes) {
+      const budget = document.querySelector("#budget");
+      if (budget.dataset.userEdited === "true") return;
+      budget.value = minutes;
     }
 
     function clearFlightPlanForAdvancedMode() {
@@ -3342,8 +3424,11 @@ INDEX_HTML = r"""<!doctype html>
 
     function renderBenchmarkSuitePlans(plans) {
       const select = document.querySelector("#benchmark-suite-plan");
+      const sig = plans.map(plan => plan.path).join(";");
+      if (select.dataset.sig === sig) return;
+      select.dataset.sig = sig;
       const current = select.value;
-      select.innerHTML = `<option value="">Autoresearch only</option>` + plans
+      select.innerHTML = `<option value="">None - use the standard questions</option>` + plans
         .map(plan => {
           const label = plan.name && plan.name !== plan.filename ? `${plan.name} (${plan.filename})` : plan.filename;
           return `<option value="${escapeHtml(plan.path)}" title="${escapeHtml(plan.warning || plan.description || "")}">${escapeHtml(label)}</option>`;
@@ -3372,10 +3457,18 @@ INDEX_HTML = r"""<!doctype html>
     function renderWinner(state) {
       const winner = document.querySelector("#winner");
       if (!state.champion) {
-        winner.innerHTML = "<span class=\"sub\">No winner yet. Run Gemma and Qwen, then this panel will show the current champion.</span>";
+        winner.innerHTML = "<span class=\"sub\">No winner yet. Run a benchmark and the best model for this machine appears here.</span>";
         return;
       }
-      winner.innerHTML = `<strong>Current best for this machine:</strong> ${escapeHtml(state.champion.model)} (${Number(state.champion.score).toFixed(2)})`;
+      const contractNotes = {
+        agent_bench_score: "scored on real agent work",
+        simple_bench_score: "scored on reasoning questions",
+        librarian_bench_score_unpromoted: "librarian score, not yet confirmed",
+        speed_or_fit_only: "speed only so far - run How good is it? for an intelligence score",
+      };
+      const note = contractNotes[state.champion.score_contract] || "";
+      winner.innerHTML = `<strong>Current best for this machine:</strong> ${escapeHtml(state.champion.model)} (${Number(state.champion.score).toFixed(2)})`
+        + (note ? `<div class="sub">${escapeHtml(note)}</div>` : "");
     }
 
     function renderEvents(events) {
@@ -3532,14 +3625,21 @@ INDEX_HTML = r"""<!doctype html>
     function renderBenchmarkGraphics(state) {
       const selectedModels = state.models.filter(model => selected.has(model.path));
       const shownModels = (selectedModels.length ? selectedModels : state.models).slice(0, 3);
-      const packs = (state.librarian_packs || []).slice(0, 5);
+      const modeId = document.querySelector("#mode")?.value || "";
       const sampleSize = Number(document.querySelector("#sample-size")?.value || 0);
       const repeats = Number(document.querySelector("#repeats")?.value || 0);
       const plan = selectedFlightPlan();
+      const librarianPacks = (state.librarian_packs || []).slice(0, 5);
+      const taskRows = modeId === "librarian_bench"
+        ? librarianPacks
+        : modeId === "quick"
+          ? ["load check", "speed receipt"]
+          : (plan?.workflow || ["fit", "speed", "quality", "settings", "report"]).slice(0, 5);
       const run = state.run || {};
       const phase = run.phase || "ready";
       const receiptCount = (state.receipts || []).length;
-      const questionCount = packs.length && sampleSize && repeats ? packs.length * sampleSize * repeats : 0;
+      const packCount = modeId === "quick" ? 0 : modeId === "librarian_bench" ? librarianPacks.length : 1;
+      const questionCount = packCount && sampleSize && repeats ? packCount * sampleSize * repeats : 0;
 
       const scopePlan = document.querySelector("#scope-plan");
       if (scopePlan) scopePlan.textContent = plan ? plan.label : "manual";
@@ -3554,19 +3654,21 @@ INDEX_HTML = r"""<!doctype html>
       }
 
       const heatmap = document.querySelector("#task-heatmap");
+      const heatmapLabel = document.querySelector("#task-heatmap-label");
+      if (heatmapLabel) heatmapLabel.textContent = modeId === "librarian_bench" ? "packs x models" : "steps x models";
       if (heatmap) {
         const modelHeaders = shownModels.map(model => `<span class="heat-label" title="${escapeHtml(model.name)}">${escapeHtml(model.name.replace(/\.gguf$/i, ""))}</span>`).join("");
-        const rows = packs.length
-          ? packs.map(pack => {
+        const rows = taskRows.length
+          ? taskRows.map(task => {
               const cells = shownModels.length
                 ? shownModels.map(() => `<span class="heat-cell">ready</span>`).join("")
                 : `<span class="heat-cell dim">no model</span>`;
-              return `<div class="heat-row"><span class="heat-label" title="${escapeHtml(pack)}">${escapeHtml(pack.replace(/^librarian-/, ""))}</span>${cells}</div>`;
+              return `<div class="heat-row"><span class="heat-label" title="${escapeHtml(task)}">${escapeHtml(String(task).replace(/^librarian-/, ""))}</span>${cells}</div>`;
             }).join("")
-          : `<div class="sub">Benchmark packs appear after configuration loads.</div>`;
+          : `<div class="sub">Benchmark steps appear after configuration loads.</div>`;
         heatmap.style.setProperty("--model-cols", String(Math.max(1, shownModels.length)));
         heatmap.innerHTML = shownModels.length
-          ? `<div class="heat-row"><span class="heat-label">pack</span>${modelHeaders}</div>${rows}`
+          ? `<div class="heat-row"><span class="heat-label">${modeId === "librarian_bench" ? "pack" : "step"}</span>${modelHeaders}</div>${rows}`
           : rows;
       }
 
@@ -3649,12 +3751,12 @@ INDEX_HTML = r"""<!doctype html>
           guard.textContent = "Click Select visible, or choose one or more models before starting.";
         }
       } else {
-        const flightPlanText = flightPlan ? ` Flight plan: ${flightPlan.label}.` : "";
-        const planText = plan ? ` Benchmark suite plan: ${plan.split(/[\\\\/]/).pop()}.` : "";
+        const flightPlanText = flightPlan ? ` Test: ${flightPlan.label}` : "";
+        const planText = plan ? ` Extra questions: ${plan.split(/[\\\\/]/).pop()}.` : "";
         const compareHint = (mode === "librarian_bench" && models.length === 1)
           ? " Add a second model to compare them head-to-head."
           : "";
-        guard.textContent = `${models.length} model(s) ready.${flightPlanText}${planText} ${samplerPolicyText()} ${runSnapshotText()}${compareHint}`;
+        guard.textContent = `${models.length} model${models.length === 1 ? "" : "s"} ready.${flightPlanText}${planText} ${samplerPolicyText()} ${runSnapshotText()}${compareHint}`;
       }
       updateSelectedCount(models.length);
       updateSelectedModelStats(models);
@@ -3740,17 +3842,19 @@ INDEX_HTML = r"""<!doctype html>
       const scoredAttempts = modeId === "quick" ? 0 : models.length * packCount * sampleSize * repeats;
       const totalMinutes = models.length * budget;
       const evidence = flightPlan?.evidence_goal || (modeId === "quick"
-        ? "load receipt"
-        : "weighted score + bias checks");
-      const workflow = flightPlan?.workflow?.length ? ` Plan: ${flightPlan.workflow.join(" -> ")}.` : "";
+        ? "You get: a load check and a speed number."
+        : "You get: a weighted score with bias checks.");
+      const questionsLabel = scoredAttempts
+        ? `<span><b>${scoredAttempts}</b><small>questions asked</small></span>`
+        : `<span><b>0</b><small>questions (speed only)</small></span>`;
       summary.innerHTML = `
-        <strong>Run summary</strong>
+        <strong>This run</strong>
         <div class="summary-grid">
-          <span><b>${models.length || "-"}</b><small>model(s)</small></span>
-          <span><b>${totalMinutes || "-"}</b><small>max minutes</small></span>
-          <span><b>${scoredAttempts || "-"}</b><small>scored attempts</small></span>
+          <span><b>${models.length || "-"}</b><small>model${models.length === 1 ? "" : "s"}</small></span>
+          <span><b>${totalMinutes ? "~" + totalMinutes : "-"}</b><small>minutes total</small></span>
+          ${questionsLabel}
         </div>
-        <div class="sub">${escapeHtml(evidence)}; ${escapeHtml(samplerPolicyText())} Receipts saved under _runs.${escapeHtml(workflow)}</div>`;
+        <div class="sub">${escapeHtml(evidence)} Results are saved under _runs.</div>`;
     }
 
     function updateLaunchState(models, flightPlan) {
@@ -3972,7 +4076,7 @@ INDEX_HTML = r"""<!doctype html>
       clearFlightPlanForAdvancedMode();
       const mode = appState?.modes.find(item => item.id === document.querySelector("#mode").value);
       if (mode) {
-        document.querySelector("#budget").value = mode.budget_minutes;
+        setBudgetDefault(mode.budget_minutes);
         document.querySelector("#mode").dataset.defaultedFor = mode.id;
       }
       updateGuard();
@@ -4012,7 +4116,10 @@ INDEX_HTML = r"""<!doctype html>
       document.querySelector("#start").click();
     });
     document.querySelector("#benchmark-suite-plan").addEventListener("change", updateGuard);
-    document.querySelector("#budget").addEventListener("input", updateGuard);
+    document.querySelector("#budget").addEventListener("input", event => {
+      event.target.dataset.userEdited = "true";
+      updateGuard();
+    });
     document.querySelector("#sample-size").addEventListener("input", updateGuard);
     document.querySelector("#repeats").addEventListener("input", updateGuard);
     document.querySelector("#sampler-policy").addEventListener("change", updateGuard);

@@ -15,22 +15,29 @@ def test_default_flight_plan_is_beginner_recommended():
 
     assert plan.id == DEFAULT_FLIGHT_PLAN_ID
     assert plan.recommended is True
-    assert plan.mode_id == "librarian_bench"
+    assert plan.mode_id == "best_settings"
     assert plan.evidence_class == "recommendation"
     assert "preflight" in plan.workflow
     assert plan.start_label
 
 
-def test_flight_plans_present_score_backed_options_before_speed_only():
+def test_flight_plans_read_as_a_question_ladder():
     plans = all_flight_plans()
 
-    assert plans[0].id == "librarian_benchmark"
-    assert plans[0].evidence_class == "recommendation"
+    assert [plan.id for plan in plans] == [
+        "quick_check",
+        "find_best_settings",
+        "librarian_benchmark",
+        "overnight_campaign",
+    ]
+    for plan in plans:
+        assert plan.description, plan.id
+        assert plan.evidence_goal.startswith("You get:"), plan.id
     assert flight_plan_by_id("quick_check").evidence_class == "speed_only"
-    assert all(
-        plan.evidence_class != "speed_only"
-        for plan in plans[: [plan.id for plan in plans].index("quick_check")]
-    )
+    recommended = [plan for plan in plans if plan.recommended]
+    assert len(recommended) == 1
+    assert recommended[0].id == "find_best_settings"
+    assert recommended[0].evidence_class == "recommendation"
 
 
 def test_every_flight_plan_points_to_a_real_mode():
