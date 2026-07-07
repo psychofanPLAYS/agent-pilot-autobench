@@ -1461,6 +1461,58 @@ INDEX_HTML = r"""<!doctype html>
       text-align: center;
       font-size: 11px;
     }
+    .launch-dock {
+      position: fixed;
+      left: 8px;
+      right: 8px;
+      bottom: 8px;
+      z-index: 40;
+      display: none;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 9px;
+      border: 1px solid rgba(32,196,207,.34);
+      border-radius: 8px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.025)),
+        rgba(13,18,24,.96);
+      box-shadow: 0 18px 44px rgba(0,0,0,.38);
+      backdrop-filter: blur(12px);
+    }
+    .launch-dock[aria-disabled="true"] {
+      border-color: var(--line);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.02)),
+        rgba(13,18,24,.94);
+    }
+    .launch-dock-meta {
+      min-width:0;
+      display:grid;
+      gap:2px;
+    }
+    .launch-dock-meta strong {
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+      font-size:13px;
+    }
+    .launch-dock-meta span {
+      color:var(--muted);
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+      font-size:11px;
+    }
+    .launch-dock button {
+      width:auto;
+      min-width:138px;
+      margin:0;
+      padding:10px 13px;
+      border-radius:6px;
+      box-shadow:none;
+    }
+    .launch-dock button::before { content:"▶"; margin-right:8px; }
     .ghost-button {
       width: auto; margin: 0; padding: 8px 10px; background: var(--panel-2);
       border-color: var(--line); color: var(--text); font-weight: 700;
@@ -1947,6 +1999,7 @@ INDEX_HTML = r"""<!doctype html>
     @media (max-width: 980px) {
       .shell { grid-template-columns: 1fr; }
       aside { display: none; }
+      main { padding-bottom:86px; }
       header {
         display:flex;
         align-items:center;
@@ -1964,6 +2017,7 @@ INDEX_HTML = r"""<!doctype html>
       .grid { grid-template-columns: 1fr; }
       .side { order:2; }
       .grid > .panel:first-child { order:1; }
+      .launch-dock { display:grid; }
       .library-head { grid-template-columns:1fr auto; }
       .searchbox { grid-column:1/-1; justify-self:stretch; width:100%; }
       .model-table-wrap table { min-width: 820px; }
@@ -2184,16 +2238,16 @@ INDEX_HTML = r"""<!doctype html>
       </nav>
       <div class="status-block">
         <div class="status-title">System status</div>
-        <div class="status-row"><span>Backend</span><strong>llama.cpp</strong><i class="ok-dot"></i></div>
-        <div class="status-row"><span>Engine</span><strong>Detached</strong><i class="ok-dot"></i></div>
+        <div class="status-row"><span>Backend config</span><strong>llama.cpp</strong><i class="ok-dot"></i></div>
+        <div class="status-row"><span>Engine mode</span><strong>Detached</strong><i class="ok-dot"></i></div>
         <div class="status-row"><span>_models</span><strong id="rail-model-root">local</strong><i class="ok-dot"></i></div>
         <div class="status-row"><span>Runs</span><strong>_runs</strong><i class="ok-dot"></i></div>
         <div class="status-row"><span>RAM</span><strong id="rail-ram">-</strong><i class="ok-dot"></i></div>
         <div class="status-row"><span>CPU</span><strong id="rail-cpu">-</strong><i class="ok-dot"></i></div>
         <div class="status-row"><span>GPU</span><strong id="rail-gpu">-</strong><i class="ok-dot"></i></div>
-        <button class="system-check ghost-button" type="button">↻ Check systems</button>
+        <button class="system-check ghost-button" type="button">↻ Refresh state</button>
       </div>
-      <div class="rail-foot"><span class="ok">● Systems nominal</span><span id="rail-clock">local</span></div>
+      <div class="rail-foot"><span class="ok">● Local state</span><span id="rail-clock">local</span></div>
     </aside>
     <main>
       <header>
@@ -2221,8 +2275,8 @@ INDEX_HTML = r"""<!doctype html>
             </table>
           </div>
           <div class="body toolbar" style="justify-content:space-between;border-top:1px solid var(--line);">
-            <span class="sub">Rows per page: 10</span>
-            <span class="sub" id="library-page">1-10 of 0</span>
+            <span class="sub" id="library-scope">Showing local GGUF models</span>
+            <span class="sub" id="library-page">0 of 0</span>
             <button id="clear-selection" class="ghost-button" type="button">Clear</button>
           </div>
         </div>
@@ -2423,6 +2477,13 @@ INDEX_HTML = r"""<!doctype html>
       </div><!-- /preflight -->
     </main>
   </div>
+  <div class="launch-dock" id="launch-dock" aria-disabled="true">
+    <div class="launch-dock-meta">
+      <strong id="dock-title">Select model first</strong>
+      <span id="dock-detail">Choose GGUF models from the library.</span>
+    </div>
+    <button id="dock-start" type="button" disabled>Select</button>
+  </div>
   <script>
     const selected = new Set();
     const sortModes = ["family", "size", "name"];
@@ -2470,10 +2531,14 @@ INDEX_HTML = r"""<!doctype html>
       const visibleModels = sortedModels(state.models);
       const libraryCount = document.querySelector("#library-count");
       const libraryPage = document.querySelector("#library-page");
+      const libraryScope = document.querySelector("#library-scope");
       if (libraryCount) libraryCount.textContent = `${state.models.length} model${state.models.length === 1 ? "" : "s"}`;
       if (libraryPage) libraryPage.textContent = state.models.length
-        ? `1-${Math.min(visibleModels.length, 10)} of ${visibleModels.length}`
+        ? `${visibleModels.length} visible of ${state.models.length}`
         : "0 of 0";
+      if (libraryScope) libraryScope.textContent = modelSearch.trim()
+        ? `Filter: ${modelSearch.trim()}`
+        : "Showing local GGUF models";
       const tbody = document.querySelector("#models");
       tbody.innerHTML = "";
       if (!visibleModels.length) {
@@ -3230,6 +3295,10 @@ INDEX_HTML = r"""<!doctype html>
       const title = document.querySelector("#launch-title");
       const detail = document.querySelector("#launch-detail");
       const pill = document.querySelector("#launch-pill");
+      const dock = document.querySelector("#launch-dock");
+      const dockTitle = document.querySelector("#dock-title");
+      const dockDetail = document.querySelector("#dock-detail");
+      const dockStart = document.querySelector("#dock-start");
       if (!start || !title || !detail || !pill || !appState) return;
       const phase = appState.run?.phase || "idle";
       const running = phase === "running";
@@ -3237,31 +3306,44 @@ INDEX_HTML = r"""<!doctype html>
       const selectedCount = models.length;
       const planName = flightPlan?.label || "advanced settings";
       start.disabled = startPending || running || !hasModels || selectedCount === 0;
+      let dockLabel = "Start run";
       if (!hasModels) {
         title.textContent = "No models found";
         detail.textContent = "Point pilotBENCHY at a folder containing GGUF files.";
         pill.textContent = "blocked";
         start.textContent = "No models found";
+        dockLabel = "Blocked";
       } else if (running) {
         title.textContent = "Run in progress";
         detail.textContent = "The detached engine is writing live status and receipts.";
         pill.textContent = "running";
         start.textContent = "Engine running";
+        dockLabel = "Running";
       } else if (startPending) {
         title.textContent = "Starting detached engine";
         detail.textContent = "Writing run-spec.json and launching the engine process.";
         pill.textContent = "launching";
         start.textContent = "Starting...";
+        dockLabel = "Starting";
       } else if (selectedCount === 0) {
         title.textContent = "Ready after model selection";
         detail.textContent = "Choose the exact GGUF model(s) to benchmark.";
         pill.textContent = "needs model";
         start.textContent = "Select model first";
+        dockLabel = "Select";
       } else {
         title.textContent = `${selectedCount} model${selectedCount === 1 ? "" : "s"} ready`;
         detail.textContent = `${planName}; receipts will be saved under _runs.`;
         pill.textContent = "ready";
         start.textContent = flightPlan?.start_label || "Start benchmark";
+        dockLabel = "Start run";
+      }
+      if (dock && dockTitle && dockDetail && dockStart) {
+        dockTitle.textContent = title.textContent;
+        dockDetail.textContent = detail.textContent;
+        dockStart.textContent = dockLabel;
+        dockStart.disabled = start.disabled;
+        dock.setAttribute("aria-disabled", String(start.disabled));
       }
     }
 
@@ -3380,7 +3462,7 @@ INDEX_HTML = r"""<!doctype html>
         if (clock) clock.textContent = now.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
         button.textContent = "Checked";
         window.setTimeout(() => {
-          button.textContent = original || "↻ Check systems";
+          button.textContent = original || "↻ Refresh state";
           button.disabled = false;
         }, 900);
       });
@@ -3454,6 +3536,9 @@ INDEX_HTML = r"""<!doctype html>
           show_thinking: document.querySelector("#show-thinking").checked
         }
       });
+    });
+    document.querySelector("#dock-start").addEventListener("click", () => {
+      document.querySelector("#start").click();
     });
     document.querySelector("#benchmark-suite-plan").addEventListener("change", updateGuard);
     document.querySelector("#budget").addEventListener("input", updateGuard);

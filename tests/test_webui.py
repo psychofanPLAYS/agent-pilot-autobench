@@ -129,6 +129,13 @@ def test_model_payload_marks_tiny_fixture_files_as_unestimated(tmp_path):
     assert payload["file_label"] == "Gemma-2-9B-Instruct-Q5_K_M.gguf"
 
 
+def test_index_html_includes_responsive_launch_dock():
+    assert 'id="launch-dock"' in webui.INDEX_HTML
+    assert 'id="dock-start"' in webui.INDEX_HTML
+    assert 'dockLabel = "Start run"' in webui.INDEX_HTML
+    assert 'document.querySelector("#start").click()' in webui.INDEX_HTML
+
+
 def test_librarian_web_selection_accepts_any_models():
     gemma = ModelInfo(path=Path("Gemma-3-27B.gguf"), name="Gemma-3-27B.gguf", family="gemma")
     qwen = ModelInfo(path=Path("Qwen3.6-35B-A3B.gguf"), name="Qwen3.6-35B-A3B.gguf", family="qwen")
