@@ -3180,6 +3180,9 @@ INDEX_HTML = r"""<!doctype html>
     function render(state) {
       appState = state;
       if (!selectionInitialized && state.models.length) {
+        if (state.models.length === 1 && !state.models[0].size_warning) {
+          selected.add(state.models[0].path);
+        }
         selectionInitialized = true;
       }
       const visibleModels = sortedModels(state.models);
@@ -4020,11 +4023,15 @@ INDEX_HTML = r"""<!doctype html>
       const plan = document.querySelector("#benchmark-suite-plan").value;
       const models = appState.models.filter(model => selected.has(model.path));
       const guard = document.querySelector("#guard");
-      if (models.length === 0) {
+      if (startPending) {
+        guard.textContent = "Starting detached engine...";
+      } else if (models.length === 0) {
         if (!appState.models.length) {
           guard.textContent = "No GGUF models found in the configured model folder.";
         } else if (appState.models.length === 1) {
-          guard.textContent = "One model found. Start will use it automatically.";
+          guard.textContent = appState.models[0].size_warning
+            ? tinyModelMessage
+            : "One model found. Select it to run.";
         } else {
           guard.textContent = "Click Select visible, or choose one or more models before starting.";
         }

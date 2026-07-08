@@ -266,6 +266,15 @@ def test_index_html_names_selected_models_before_launch():
     assert "selectedModelLabel(models)" in webui.INDEX_HTML
 
 
+def test_index_html_auto_selects_single_runnable_model_once():
+    assert "if (state.models.length === 1 && !state.models[0].size_warning)" in webui.INDEX_HTML
+    assert "selected.add(state.models[0].path)" in webui.INDEX_HTML
+    assert "if (startPending)" in webui.INDEX_HTML
+    assert 'guard.textContent = "Starting detached engine..."' in webui.INDEX_HTML
+    assert "One model found. Select it to run." in webui.INDEX_HTML
+    assert "One model found. Start will use it automatically." not in webui.INDEX_HTML
+
+
 def test_librarian_web_selection_accepts_any_models():
     gemma = ModelInfo(path=Path("Gemma-3-27B.gguf"), name="Gemma-3-27B.gguf", family="gemma")
     qwen = ModelInfo(path=Path("Qwen3.6-35B-A3B.gguf"), name="Qwen3.6-35B-A3B.gguf", family="qwen")
