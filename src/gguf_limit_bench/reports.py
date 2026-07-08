@@ -1884,8 +1884,10 @@ def _html_css() -> str:
     @media (max-width: 720px) {
       h1 { font-size: 1.8rem; }
       .hero, .panel { padding: 18px; }
-      table { font-size: 0.78rem; table-layout: fixed; }
-      table.matrix th, table.matrix td { white-space: normal; }
+      .table-wrap { -webkit-overflow-scrolling: touch; }
+      table { font-size: 0.78rem; min-width: 760px; }
+      table.matrix { min-width: 680px; }
+      table.matrix th, table.matrix td { white-space: nowrap; }
       th, td { overflow-wrap: anywhere; padding: 7px 5px; }
       .chart-grid { grid-template-columns: 1fr; }
       .return-summary { grid-template-columns: 1fr; padding: 16px; }
