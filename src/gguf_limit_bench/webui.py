@@ -1307,9 +1307,15 @@ def _flag_description(flag: str, value: str) -> str:
 def recent_receipts(runs_root: Path, *, limit: int = RECENT_RECEIPT_LIMIT) -> list[dict]:
     if not runs_root.exists():
         return []
-    candidates = [path for path in runs_root.iterdir() if path.is_dir()]
+    candidates = [
+        path for path in runs_root.iterdir() if path.is_dir() and _looks_like_receipt_dir(path)
+    ]
     ordered = sorted(candidates, key=_safe_mtime, reverse=True)[:limit]
     return [_receipt_payload(path, runs_root) for path in ordered]
+
+
+def _looks_like_receipt_dir(path: Path) -> bool:
+    return any((path / artifact_name).is_file() for _, artifact_name in RUN_ARTIFACTS)
 
 
 def receipt_event_payloads(runs_root: Path, *, limit: int = 40) -> list[dict]:

@@ -647,6 +647,20 @@ def test_recent_receipts_and_run_artifact_links_stay_under_runs_root(tmp_path):
     assert resolve_run_artifact(runs_root, "../outside.txt") is None
 
 
+def test_recent_receipts_ignore_internal_non_receipt_directories(tmp_path):
+    runs_root = tmp_path / "_runs"
+    receipt = runs_root / "2026-06-24-qwen"
+    internal = runs_root / "learning"
+    receipt.mkdir(parents=True)
+    internal.mkdir()
+    (receipt / "status.json").write_text('{"status": "complete"}', encoding="utf-8")
+    (internal / "optuna.sqlite3").write_bytes(b"sqlite")
+
+    receipts = recent_receipts(runs_root)
+
+    assert [receipt["run_id"] for receipt in receipts] == ["2026-06-24-qwen"]
+
+
 def test_recent_receipts_surface_preflight_block_as_primary_action(tmp_path):
     runs_root = tmp_path / "_runs"
     receipt = runs_root / "2026-06-24-blocked"
