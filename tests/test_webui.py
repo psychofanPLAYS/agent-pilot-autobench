@@ -251,7 +251,14 @@ def test_index_html_includes_results_studio_for_returning_users():
     assert "function renderResultsStudio(state)" in webui.INDEX_HTML
     assert "Latest run, historical score trend" in webui.INDEX_HTML
     assert "trend-bars" in webui.INDEX_HTML
+    assert "trend-bar" in webui.INDEX_HTML
     assert "Open latest report" in webui.INDEX_HTML
+    assert "Read latest run" in webui.INDEX_HTML
+    assert "Browse history" in webui.INDEX_HTML
+    assert "Compare models" in webui.INDEX_HTML
+    assert 'href="#model-library"' in webui.INDEX_HTML
+    assert "vs previous" in webui.INDEX_HTML
+    assert "need review before trusting a champion" in webui.INDEX_HTML
     assert "renderResultsStudio(state)" in webui.INDEX_HTML
 
 

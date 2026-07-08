@@ -2310,7 +2310,6 @@ INDEX_HTML = r"""<!doctype html>
       display:grid;
       grid-template-columns:repeat(var(--trend-count, 1), minmax(12px,1fr));
       gap:5px;
-      height:86px;
       align-items:end;
       margin-top:12px;
       padding:8px;
@@ -2318,12 +2317,29 @@ INDEX_HTML = r"""<!doctype html>
       border-radius:8px;
       background:rgba(0,0,0,.12);
     }
+    .trend-bar {
+      display:grid;
+      grid-template-rows:minmax(64px,1fr) auto;
+      gap:5px;
+      min-width:0;
+      align-items:end;
+    }
     .trend-bars i {
       display:block;
       height:max(8px, var(--bar-height, 8%));
       border-radius:4px 4px 2px 2px;
       background:linear-gradient(180deg, var(--teal), rgba(32,196,207,.28));
       box-shadow:0 0 18px rgba(32,196,207,.14);
+    }
+    .trend-bars small {
+      min-width:0;
+      color:var(--muted);
+      font-size:10px;
+      text-align:center;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+      font-variant-numeric:tabular-nums;
     }
     .result-stats {
       display:grid;
@@ -2363,6 +2379,28 @@ INDEX_HTML = r"""<!doctype html>
     }
     .result-links a:hover { border-color:var(--teal-dim); background:rgba(32,196,207,.10); }
     .result-links a.primary:hover { background:#39d5df; }
+    .result-resume-strip {
+      display:grid;
+      grid-template-columns:repeat(4,minmax(0,1fr));
+      gap:8px;
+      margin-top:10px;
+    }
+    .resume-card {
+      min-width:0;
+      border:1px solid var(--line);
+      border-radius:8px;
+      background:rgba(255,255,255,.025);
+      padding:10px;
+      color:var(--text);
+      text-decoration:none;
+      transition:transform .14s ease, border-color .14s ease, background-color .14s ease;
+    }
+    .resume-card:hover { transform:translateY(-1px); border-color:var(--teal-dim); background:rgba(32,196,207,.08); }
+    .resume-card b { display:block; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .resume-card span { display:block; color:var(--muted); font-size:11px; line-height:1.35; margin-top:4px; }
+    .delta.good { color:var(--good); }
+    .delta.warn { color:var(--amber); }
+    .delta.bad { color:var(--bad); }
     .seam-diagram {
       display: grid;
       grid-template-columns: 1fr auto 1fr auto 1fr;
@@ -2633,6 +2671,7 @@ INDEX_HTML = r"""<!doctype html>
       .launch-zone #start { display:none; }
       .analytics-grid { grid-template-columns:1fr; }
       .results-studio-grid { grid-template-columns:1fr; }
+      .result-resume-strip { grid-template-columns:1fr 1fr; }
       .results-studio-head { align-items:flex-start; flex-direction:column; gap:6px; }
       .bottom-grid { grid-template-columns:1fr; }
       .receipt-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
@@ -2689,6 +2728,7 @@ INDEX_HTML = r"""<!doctype html>
       .reports-head { align-items:flex-start; flex-direction:column; gap:4px; }
       .links { width:100%; }
       .links a, .link-count { flex:1 1 auto; text-align:center; }
+      .result-resume-strip { grid-template-columns:1fr; }
       .model-table-wrap { height:auto; max-height:420px; }
       .model-table-wrap table { min-width:0; table-layout:fixed; }
       .model-table th, .model-table td { padding:8px 8px; }
@@ -3685,7 +3725,7 @@ INDEX_HTML = r"""<!doctype html>
             <div class="results-card">
               <div class="results-kicker">Trend</div>
               <p>No score history yet.</p>
-              <div class="trend-bars" style="--trend-count:1"><i style="--bar-height:8%"></i></div>
+              <div class="trend-bars" style="--trend-count:1"><span class="trend-bar"><i style="--bar-height:8%"></i><small>-</small></span></div>
             </div>
             <div class="results-card">
               <div class="results-kicker">Next</div>
@@ -3714,16 +3754,33 @@ INDEX_HTML = r"""<!doctype html>
       const trendHtml = trend.length
         ? trend.map(item => {
             const height = Math.max(8, Math.round((item.score / maxScore) * 100));
-            return `<i style="--bar-height:${height}%" title="${escapeHtml(item.receipt.model)}: ${escapeHtml(item.score.toFixed(3))}"></i>`;
+            return `<span class="trend-bar" title="${escapeHtml(item.receipt.model)}: ${escapeHtml(item.score.toFixed(3))}">
+              <i style="--bar-height:${height}%"></i>
+              <small>${escapeHtml(item.score.toFixed(1))}</small>
+            </span>`;
           }).join("")
-        : `<i style="--bar-height:8%" title="No scored receipts yet"></i>`;
+        : `<span class="trend-bar" title="No scored receipts yet"><i style="--bar-height:8%"></i><small>-</small></span>`;
       const latestClass = String(latest.verdict_state || "").toLowerCase();
       const bestScore = best ? best.score.toFixed(3) : "-";
       const bestModel = best ? best.receipt.model : "No scored run yet";
       const latestScore = Number.isFinite(receiptScore(latest.score))
         ? receiptScore(latest.score).toFixed(3)
         : "not scored";
+      const previousScore = receipts.length > 1 ? receiptScore(receipts[1].score) : NaN;
+      const latestNumericScore = receiptScore(latest.score);
+      const delta = Number.isFinite(latestNumericScore) && Number.isFinite(previousScore)
+        ? latestNumericScore - previousScore
+        : NaN;
+      const deltaClass = Number.isFinite(delta) ? (delta > 0 ? "good" : delta < 0 ? "bad" : "warn") : "warn";
+      const deltaLabel = Number.isFinite(delta)
+        ? `${delta >= 0 ? "+" : ""}${delta.toFixed(3)} vs previous`
+        : "No previous scored run";
+      const partialNote = statusCounts.partial || statusCounts.failed
+        ? `${statusCounts.partial + statusCounts.failed} run${statusCounts.partial + statusCounts.failed === 1 ? "" : "s"} need review before trusting a champion.`
+        : "All recent runs completed cleanly.";
       const primaryReceipt = latest.primary_artifact || (latest.artifacts || [])[0];
+      const dashboardReport = findReport(reports, "Results dashboard") || primaryGlobalReports(reports)[0] || primaryReceipt;
+      const compareReport = findReport(reports, "Model comparison") || findReport(reports, "Leaderboard") || dashboardReport;
       const reportLinks = [
         primaryReceipt ? {...primaryReceipt, primary: true} : null,
         ...primaryGlobalReports(reports).map(report => ({...report, primary: false})),
@@ -3739,14 +3796,15 @@ INDEX_HTML = r"""<!doctype html>
         <div class="results-studio-grid">
           <div class="results-hero">
             <div class="results-kicker">Latest run</div>
-            <h3 title="${escapeHtml(latest.model)}">${escapeHtml(latest.model)}</h3>
+            <h3 title="${escapeHtml(latest.model)}">${escapeHtml(conciseModelName(latest.model))}</h3>
             <span class="result-verdict ${escapeHtml(latestClass)}">${escapeHtml(latest.verdict || "Receipt")}</span>
             <p>${escapeHtml(latest.reason || "Finished with benchmark evidence recorded.")}</p>
             <div class="result-scoreline"><b>${escapeHtml(latestScore)}</b><span>latest score</span></div>
+            <p class="delta ${escapeHtml(deltaClass)}">${escapeHtml(deltaLabel)}</p>
           </div>
           <div class="results-card">
             <div class="results-kicker">Score trend</div>
-            <p>Best so far: <strong>${escapeHtml(bestModel)}</strong> at <strong>${escapeHtml(bestScore)}</strong>.</p>
+            <p>Best so far: <strong>${escapeHtml(conciseModelName(bestModel))}</strong> at <strong>${escapeHtml(bestScore)}</strong>. ${escapeHtml(partialNote)}</p>
             <div class="trend-bars" style="--trend-count:${Math.max(1, trend.length)}">${trendHtml}</div>
             <div class="result-stats">
               <div class="result-stat"><span>Complete</span><b>${statusCounts.completed}</b></div>
@@ -3763,6 +3821,20 @@ INDEX_HTML = r"""<!doctype html>
                 : `<span class="sub">Report links appear after the first artifact is written.</span>`}
             </div>
           </div>
+        </div>
+        <div class="result-resume-strip" aria-label="Resume results actions">
+          <a class="resume-card" href="${escapeHtml(primaryReceipt?.url || "#recent-receipts")}" target="${primaryReceipt ? "_blank" : "_self"}" rel="noreferrer">
+            <b>Read latest run</b><span>Open the report with verdict, settings, and proof artifacts.</span>
+          </a>
+          <a class="resume-card" href="#recent-receipts">
+            <b>Browse history</b><span>${receipts.length} recent receipts, newest first.</span>
+          </a>
+          <a class="resume-card" href="${escapeHtml(compareReport?.url || "#recent-receipts")}" target="${compareReport?.url ? "_blank" : "_self"}" rel="noreferrer">
+            <b>Compare models</b><span>Open leaderboard and comparison views when available.</span>
+          </a>
+          <a class="resume-card" href="#model-library">
+            <b>Run another test</b><span>Select models and reuse the same local cockpit.</span>
+          </a>
         </div>`;
     }
 
@@ -3820,8 +3892,8 @@ INDEX_HTML = r"""<!doctype html>
             return `
               <div class="receipt-row" data-receipt-row="${index}">
                 <div class="receipt-main">
-                  <strong title="${escapeHtml(receipt.model)}">${escapeHtml(receipt.model)}</strong>
-                  <div class="receipt-meta" title="${escapeHtml(receipt.run_id)}">${escapeHtml(receipt.run_id)} | ${escapeHtml(receipt.modified)}</div>
+                  <strong title="${escapeHtml(receipt.model)}">${escapeHtml(conciseModelName(receipt.model))}</strong>
+                  <div class="receipt-meta" title="${escapeHtml(receipt.run_id)}">Run ${escapeHtml(shortRunId(receipt.run_id))} - ${escapeHtml(receipt.modified)}</div>
                   <div class="receipt-reason" title="${escapeHtml(reason)}">${escapeHtml(reason)}</div>
                 </div>
                 <div class="receipt-status ${statusClass}" title="${escapeHtml(status)}">${escapeHtml(verdict)}</div>
@@ -3892,6 +3964,19 @@ INDEX_HTML = r"""<!doctype html>
         if (!selectedReports.includes(report)) selectedReports.push(report);
       }
       return selectedReports;
+    }
+
+    function findReport(reports, label) {
+      return (reports || []).find(report => report.label === label);
+    }
+
+    function shortRunId(runId) {
+      const text = String(runId || "");
+      const parts = text.split("-");
+      if (/^\d{8}$/.test(parts[0] || "") && /^\d{6}$/.test(parts[1] || "")) {
+        return `${parts[0]}-${parts[1]}`;
+      }
+      return text.length > 28 ? text.slice(0, 25) + "..." : text;
     }
 
     function receiptStatusLabel(status) {
