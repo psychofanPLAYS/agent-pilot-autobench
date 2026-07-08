@@ -72,12 +72,33 @@ _THEME_JS = """
     }
   };
   window.__apCharts = window.__apCharts || {};
+  window.__apChartObserver = window.__apChartObserver || (
+    window.ResizeObserver ? new ResizeObserver(function (entries) {
+      entries.forEach(function (entry) {
+        var canvas = entry.target.querySelector('canvas');
+        if (canvas && window.__apCharts[canvas.id]) {
+          window.__apCharts[canvas.id].resize();
+        }
+      });
+    }) : null
+  );
   window.renderChart = function (id, cfg) {
     var el = document.getElementById(id);
     if (!el) return;
     if (window.__apCharts[id]) { window.__apCharts[id].destroy(); }
+    cfg.options = cfg.options || {};
+    cfg.options.responsive = true;
+    cfg.options.maintainAspectRatio = false;
     window.__apCharts[id] = new C(el, cfg);
+    if (window.__apChartObserver && el.parentElement) {
+      window.__apChartObserver.observe(el.parentElement);
+    }
   };
+  window.addEventListener('resize', function () {
+    Object.keys(window.__apCharts).forEach(function (id) {
+      window.__apCharts[id].resize();
+    });
+  });
 })();
 """ % {"muted": PALETTE["muted"], "text": PALETTE["text"]}
 
@@ -89,12 +110,24 @@ def chartjs_runtime() -> str:
 
 def render_chart(canvas_id: str, config: dict, *, height: int = 320) -> str:
     """A ``<canvas>`` plus the init snippet that draws *config* into it."""
-    payload = json.dumps(config)
+    payload = _script_json(config)
     cid = escape(canvas_id)
     return (
         f'<div class="chart-box" style="position:relative;height:{int(height)}px">'
         f'<canvas id="{cid}"></canvas></div>'
         f"<script>renderChart({json.dumps(canvas_id)}, {payload});</script>"
+    )
+
+
+def _script_json(value: object) -> str:
+    """JSON safe to embed inside an inline script tag."""
+    return (
+        json.dumps(value)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
     )
 
 

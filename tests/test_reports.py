@@ -550,6 +550,7 @@ def test_results_html_is_actionable_and_beautiful_enough_to_open(tmp_path):
 
     html = (tmp_path / "results.html").read_text(encoding="utf-8")
     assert "<!doctype html>" in html
+    assert '<meta name="viewport" content="width=device-width, initial-scale=1">' in html
     assert "pilotBENCHY Results" in html
     assert "Plain-English takeaway" in html
     assert "winner.gguf" in html
@@ -562,12 +563,80 @@ def test_results_html_is_actionable_and_beautiful_enough_to_open(tmp_path):
     assert "LOAD FAIL" in html
     assert "Evidence" in html
     assert "Model comparison" in html
-    assert "_runs\\model-comparison.md" in html
+    assert 'href="model-comparison.md"' in html
     assert "model comparison view" in html
     assert "per-model winner view" not in html
     # Must not carry the old Agent Pilot browser branding.
     assert "Agent Pilot Autobench Results" not in html
     assert "Gemma vs Qwen" not in html
+
+
+def test_results_html_starts_with_return_summary_and_proof_links(tmp_path):
+    _write_run(
+        tmp_path,
+        "20260706-234917-gemma",
+        70.0,
+        40.0,
+        context=32768,
+        agent_bench_score=0.70,
+    )
+    _write_run(
+        tmp_path,
+        "20260707-000033-gemma",
+        82.0,
+        44.0,
+        context=65536,
+        agent_bench_score=0.82,
+    )
+    _write_run(tmp_path, "20260707-010000-broken", -10000.0, 0.0, failure="model_load")
+
+    write_leaderboard(tmp_path)
+
+    html = (tmp_path / "results.html").read_text(encoding="utf-8")
+    assert html.index("Return summary") < html.index("Model comparison")
+    assert "What happened while you were away" in html
+    assert "Open latest browser report" in html
+    assert 'href="20260707-010000-broken/report.html"' in html
+    assert "Open itemized proof" in html
+    assert 'href="20260707-010000-broken/itemized-report.md"' in html
+    assert "Score movement" in html
+    assert "-10000.82" in html
+    assert "vs previous run" in html
+    assert "Run health" in html
+    assert "Models compared" in html
+    assert 'aria-label="Recent score trend"' in html
+    assert 'href="leaderboard.md"' in html
+    assert 'href="model-comparison.md"' in html
+    assert "_runs\\model-comparison.md" not in html
+    assert "20260706-234917-gemma" in html
+    assert 'href="20260706-234917-gemma/report.html"' in html
+    assert 'href="20260706-234917-gemma/itemized-report.md"' in html
+
+
+def test_results_html_escapes_chart_payload_strings(tmp_path):
+    run = _write_run(tmp_path, "hostile-pack", 50.0, 40.0, context=32768)
+    (run / "results.json").write_text(
+        json.dumps(
+            {
+                "packs": [
+                    {
+                        "pack_id": "librarian-</script><script>x</script>",
+                        "status": "scored",
+                        "asked": 10,
+                        "correct": 8,
+                        "accuracy": 0.8,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    write_leaderboard(tmp_path)
+
+    html = (tmp_path / "results.html").read_text(encoding="utf-8")
+    assert "</script><script>x</script>" not in html
+    assert "\\u003c/script\\u003e\\u003cscript\\u003ex\\u003c/script\\u003e" in html
 
 
 def test_write_leaderboard_handles_missing_runs_folder(tmp_path):

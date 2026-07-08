@@ -1148,6 +1148,88 @@ def _kpi_strip(models: list[dict], leaderboard: Leaderboard) -> str:
     return f'<section class="kpis">{items}</section>'
 
 
+def _run_mix(leaderboard: Leaderboard) -> dict[str, int]:
+    mix = {"complete": 0, "partial": 0, "failed": 0}
+    for entry in leaderboard.entries:
+        if "FAIL" in entry.status or entry.failure not in {"none", "unknown"}:
+            mix["failed"] += 1
+        elif entry.agent_bench_score is None and not entry.pack_scores:
+            mix["partial"] += 1
+        else:
+            mix["complete"] += 1
+    return mix
+
+
+def _relative_receipt_link(receipt_path: str, filename: str) -> str:
+    return f"{Path(receipt_path).name}/{filename}"
+
+
+def _details_links(receipt_path: str) -> str:
+    report = _relative_receipt_link(receipt_path, "report.html")
+    itemized = _relative_receipt_link(receipt_path, "itemized-report.md")
+    return (
+        '<span class="row-links">'
+        f'<a href="{escape(report)}">Report</a>'
+        f'<a href="{escape(itemized)}">Proof</a>'
+        "</span>"
+    )
+
+
+def _return_summary_html(leaderboard: Leaderboard, model_comparison: ModelComparison) -> str:
+    chronological = sorted(leaderboard.entries, key=lambda entry: entry.run_id)
+    latest = chronological[-1]
+    previous = chronological[-2] if len(chronological) > 1 else None
+    delta = latest.score - previous.score if previous is not None else None
+    delta_label = "first run" if delta is None else f"{delta:+.2f}"
+    trend_items = "".join(
+        f"<li><span>{escape(entry.run_id)}</span><strong>{entry.score:.2f}</strong></li>"
+        for entry in chronological[-5:]
+    )
+    mix = _run_mix(leaderboard)
+    compared_models = len(model_comparison.entries)
+    latest_report = _relative_receipt_link(latest.receipt_path, "report.html")
+    latest_itemized = _relative_receipt_link(latest.receipt_path, "itemized-report.md")
+    latest_status = _plain_english_status(latest)
+    return f"""
+    <section class="return-summary">
+      <div class="return-copy">
+        <p class="eyebrow">Return summary</p>
+        <h2>What happened while you were away</h2>
+        <p>{escape(latest_status)}</p>
+        <div class="proof-links">
+          <a href="{escape(latest_report)}">Open latest browser report</a>
+          <a href="{escape(latest_itemized)}">Open itemized proof</a>
+        </div>
+      </div>
+      <div class="return-cards">
+        <div class="return-card hero-card">
+          <span>Latest run</span>
+          <strong>{escape(latest.model_name)}</strong>
+          <em>{escape(latest.run_id)}</em>
+        </div>
+        <div class="return-card">
+          <span>Score movement</span>
+          <strong>{escape(delta_label)}</strong>
+          <em>{escape("vs previous run" if delta is not None else "no prior run yet")}</em>
+        </div>
+        <div class="return-card">
+          <span>Run health</span>
+          <strong>{mix["complete"]}/{len(leaderboard.entries)}</strong>
+          <em>{mix["partial"]} partial, {mix["failed"]} failed</em>
+        </div>
+        <div class="return-card">
+          <span>Models compared</span>
+          <strong>{compared_models}</strong>
+          <em>grouped across repeated runs</em>
+        </div>
+      </div>
+      <ol class="mini-trend" aria-label="Recent score trend">
+        {trend_items}
+      </ol>
+    </section>
+    """
+
+
 def _charts_section(models: list[dict], pack_ids: list[str], history: list[dict]) -> str:
     blocks: list[str] = []
     frontier = charts.quality_vs_speed_config(models)
@@ -1224,6 +1306,7 @@ def _leaderboard_html(leaderboard: Leaderboard) -> str:
     pack_ids = _ordered_pack_ids(model_comparison)
     dashboard_models = _dashboard_models(leaderboard, model_comparison)
     kpi_strip = _kpi_strip(dashboard_models, leaderboard)
+    return_summary = _return_summary_html(leaderboard, model_comparison)
     charts_section = _charts_section(dashboard_models, pack_ids, _index_history(leaderboard))
     chart_runtime = charts.chartjs_runtime() if charts_section else ""
     rows = "\n".join(
@@ -1269,6 +1352,7 @@ def _leaderboard_html(leaderboard: Leaderboard) -> str:
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>pilotBENCHY Results</title>
   <style>
 {_html_css()}
@@ -1307,6 +1391,7 @@ def _leaderboard_html(leaderboard: Leaderboard) -> str:
         {audit_body}
       </div>
     </section>
+    {return_summary}
     {kpi_strip}
     {charts_section}
     <section class="panel">
@@ -1321,7 +1406,7 @@ def _leaderboard_html(leaderboard: Leaderboard) -> str:
             <tr>
               <th>Rank</th><th>Model</th><th>Eligible agent score</th>
               {pack_headers}
-              <th>Gen tok/s</th><th>Cold TTFT</th>
+              <th>Gen tok/s</th><th>Cold TTFT</th><th>Details</th>
             </tr>
           </thead>
           <tbody>
@@ -1339,8 +1424,8 @@ def _leaderboard_html(leaderboard: Leaderboard) -> str:
     <section class="panel">
       <h2>What to do next</h2>
       <ol>
-        <li>Open <code>_runs\\leaderboard.md</code> when you want the compact Markdown version.</li>
-        <li>Open <code>_runs\\model-comparison.md</code> when you want the model comparison view.</li>
+        <li><a href="leaderboard.md">Open leaderboard.md</a> when you want the compact Markdown version.</li>
+        <li><a href="model-comparison.md">Open model-comparison.md</a> when you want the model comparison view.</li>
         <li>
           Run <code>agent-autobench deployment-readiness</code> before
           <code>agent-autobench export-profile</code>; export is only a deployment
@@ -1363,7 +1448,7 @@ def _leaderboard_html(leaderboard: Leaderboard) -> str:
           <thead>
             <tr>
               <th>Rank</th><th>Status</th><th>Score</th><th>Generation</th>
-              <th>Agent Bench</th><th>Suite</th><th>Prompt</th><th>Cold TTFT</th><th>Warm TTFT</th><th>Warmup</th><th>Serving</th><th>Context</th><th>Model</th>
+              <th>Agent Bench</th><th>Suite</th><th>Prompt</th><th>Cold TTFT</th><th>Warm TTFT</th><th>Warmup</th><th>Serving</th><th>Context</th><th>Model</th><th>Details</th>
             </tr>
           </thead>
           <tbody>
@@ -1395,6 +1480,7 @@ def _html_row(rank: int, entry: LeaderboardEntry) -> str:
         f"<td>{escape(_format_tps(entry.serving_tps))}</td>"
         f"<td>{escape(entry.context_label)}</td>"
         f"<td><code>{escape(entry.model_name)}</code></td>"
+        f"<td>{_details_links(entry.receipt_path)}</td>"
         "</tr>"
     )
 
@@ -1441,6 +1527,7 @@ def _model_html_row(rank: int, entry: ModelComparisonEntry, pack_ids: list[str])
         f"{pack_cells}"
         f"<td>{entry.generation_tps:.2f}</td>"
         f"<td>{escape(_format_ms(entry.cold_ttft_ms))}</td>"
+        f"<td>{_details_links(entry.best_receipt_path)}</td>"
         "</tr>"
     )
 
@@ -1552,12 +1639,13 @@ def _html_css() -> str:
     body {
       margin: 0;
       min-height: 100vh;
+      overflow-x: hidden;
       background: var(--bg);
       color: var(--text);
       font: 16px/1.5 "Segoe UI", system-ui, sans-serif;
     }
     .shell {
-      width: min(1120px, calc(100% - 32px));
+      width: min(1120px, calc(100vw - 32px));
       margin: 0 auto;
       padding: 32px 0 48px;
     }
@@ -1629,7 +1717,107 @@ def _html_css() -> str:
       padding: 0;
       margin: 12px 0 0;
     }
-    .table-wrap { overflow-x: auto; }
+    .return-summary {
+      display: grid;
+      grid-template-columns: minmax(240px, 0.9fr) minmax(320px, 1.1fr);
+      gap: 16px;
+      align-items: stretch;
+      border: 1px solid rgba(101, 183, 255, 0.30);
+      border-radius: 8px;
+      background:
+        linear-gradient(135deg, rgba(101, 183, 255, 0.10), rgba(61, 220, 132, 0.05)),
+        var(--panel);
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .return-copy h2 { margin-bottom: 8px; }
+    .return-copy p { color: var(--muted); margin: 0; }
+    .proof-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 16px;
+    }
+    .proof-links a {
+      display: inline-flex;
+      align-items: center;
+      min-height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-strong);
+      color: var(--text);
+      text-decoration: none;
+      font-weight: 800;
+      padding: 8px 12px;
+    }
+    .proof-links a:first-child {
+      border-color: transparent;
+      background: var(--blue);
+      color: #08111c;
+    }
+    a {
+      color: var(--blue);
+      font-weight: 800;
+    }
+    .row-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      min-width: 0;
+    }
+    .row-links a {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel-strong);
+      color: var(--text);
+      text-decoration: none;
+      padding: 4px 7px;
+      font-size: 0.78rem;
+    }
+    .return-cards {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .return-card {
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(13, 17, 23, 0.55);
+      padding: 12px;
+    }
+    .return-card.hero-card { border-color: rgba(61, 220, 132, 0.35); }
+    .return-card strong {
+      overflow-wrap: anywhere;
+      font-size: 1.28rem;
+      line-height: 1.15;
+    }
+    .return-card em {
+      display: block;
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 0.82rem;
+      font-style: normal;
+    }
+    .mini-trend {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 8px;
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+    .mini-trend li {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(13, 17, 23, 0.38);
+      color: var(--muted);
+      padding: 10px;
+      min-width: 0;
+    }
+    .mini-trend strong { font-size: 1.05rem; }
+    .table-wrap { max-width: 100%; overflow-x: auto; }
     table {
       width: 100%;
       border-collapse: collapse;
@@ -1677,8 +1865,12 @@ def _html_css() -> str:
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 14px;
       margin-top: 12px;
+      min-width: 0;
+      max-width: 100%;
     }
     .chart-card {
+      min-width: 0;
+      max-width: 100%;
       background: var(--panel-strong);
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -1687,11 +1879,28 @@ def _html_css() -> str:
     .chart-card.wide { grid-column: 1 / -1; }
     .chart-card h3 { margin: 0 0 4px; font-size: 1.0rem; }
     .chart-card .receipt { margin: 0 0 12px; font-size: 0.84rem; }
-    .chart-box { width: 100%; }
+    .chart-box { width: 100%; min-width: 0; max-width: 100%; overflow: hidden; }
+    .chart-box canvas { max-width: 100% !important; }
     @media (max-width: 720px) {
       h1 { font-size: 1.8rem; }
       .hero, .panel { padding: 18px; }
-      table { font-size: 0.88rem; }
+      table { font-size: 0.78rem; table-layout: fixed; }
+      table.matrix th, table.matrix td { white-space: normal; }
+      th, td { overflow-wrap: anywhere; padding: 7px 5px; }
       .chart-grid { grid-template-columns: 1fr; }
+      .return-summary { grid-template-columns: 1fr; padding: 16px; }
+      .return-cards { grid-template-columns: 1fr; }
+      .row-links {
+        display: grid;
+        gap: 4px;
+      }
+      .row-links a {
+        width: 100%;
+        max-width: 44px;
+        overflow: hidden;
+        padding: 3px 4px;
+        font-size: 0.68rem;
+        text-overflow: ellipsis;
+      }
     }
     """
