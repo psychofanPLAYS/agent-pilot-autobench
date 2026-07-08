@@ -58,6 +58,11 @@ from gguf_limit_bench.tui import active_run_status
 SpawnEngine = Callable[[Path], "subprocess.Popen"]
 # A finished phase means a previous run dir is free to be replaced.
 _DONE_PHASES = ("complete", "stopped", "failed", "aborted")
+_TINY_MODEL_BYTES = 1024 * 1024
+_TINY_MODEL_MESSAGE = (
+    "Selected files look like tiny placeholders, not runnable GGUF model files. "
+    "Pick a real GGUF before starting."
+)
 
 RECENT_RECEIPT_LIMIT = 8
 GLOBAL_REPORTS = (
@@ -738,6 +743,8 @@ def _find_live_run_dir(runs_root: Path) -> Path | None:
 def validate_web_selection(selected: list[ModelInfo], mode_id: str) -> str | None:
     if not selected:
         return "Select at least one model first."
+    if any(0 < model.size_bytes < _TINY_MODEL_BYTES for model in selected):
+        return _TINY_MODEL_MESSAGE
     # pilotBENCHY benchmarks any GGUF model on agent workloads. There is no
     # hardcoded Gemma-vs-Qwen requirement; one model runs, two or more compare.
     return None
@@ -1374,7 +1381,7 @@ def resolve_run_artifact(runs_root: Path, encoded_relative_path: str) -> Path | 
 
 
 def _model_payload(model: ModelInfo) -> dict:
-    tiny_file = 0 < model.size_bytes < 1024 * 1024
+    tiny_file = 0 < model.size_bytes < _TINY_MODEL_BYTES
     size_label = "tiny file" if tiny_file else _size_label(model.size_gb)
     size_display = f"{size_label} GB" if size_label not in {"unknown", "tiny file"} else size_label
     return {
@@ -1786,6 +1793,14 @@ INDEX_HTML = r"""<!doctype html>
       border-radius: 0;
       font-size: 20px;
       box-shadow: 0 16px 38px rgba(32,196,207,.18);
+    }
+    #start:disabled,
+    .launch-dock button:disabled {
+      background: var(--panel-3);
+      color: var(--muted);
+      border-color: var(--line);
+      box-shadow: none;
+      opacity: .86;
     }
     #start::before { content:"▶"; margin-right:12px; }
     .launch-zone {
@@ -2609,6 +2624,7 @@ INDEX_HTML = r"""<!doctype html>
       #strip-clear { justify-self:stretch; width:100%; }
       .plan-menu { position:static; margin-top:8px; }
       .run-flow { grid-template-columns:1fr; }
+      .launch-zone #start { display:none; }
       .analytics-grid { grid-template-columns:1fr; }
       .results-studio-grid { grid-template-columns:1fr; }
       .results-studio-head { align-items:flex-start; flex-direction:column; gap:6px; }
@@ -3075,6 +3091,7 @@ INDEX_HTML = r"""<!doctype html>
     let selectionInitialized = false;
     let startPending = false;
     let modelSearch = "";
+    const tinyModelMessage = "Selected files look like tiny placeholders, not runnable GGUF model files. Pick a real GGUF before starting.";
 
     function escapeHtml(value) {
       return String(value ?? "")
@@ -4011,6 +4028,8 @@ INDEX_HTML = r"""<!doctype html>
         } else {
           guard.textContent = "Click Select visible, or choose one or more models before starting.";
         }
+      } else if (selectedTinyModels(models).length) {
+        guard.textContent = tinyModelMessage;
       } else {
         const flightPlanText = flightPlan ? ` Test: ${flightPlan.label}` : "";
         const planText = plan ? ` Extra questions: ${plan.split(/[\\\\/]/).pop()}.` : "";
@@ -4056,6 +4075,10 @@ INDEX_HTML = r"""<!doctype html>
       const shown = models.slice(0, 2).map(model => conciseModelName(model.name));
       const extra = models.length > 2 ? ` +${models.length - 2} more` : "";
       return `${shown.join(", ")}${extra}`;
+    }
+
+    function selectedTinyModels(models) {
+      return models.filter(model => model.size_warning);
     }
 
     function updateSelectedModelStats(models) {
@@ -4140,8 +4163,9 @@ INDEX_HTML = r"""<!doctype html>
       const running = phase === "running";
       const hasModels = appState.models.length > 0;
       const selectedCount = models.length;
+      const tinyCount = selectedTinyModels(models).length;
       const planName = flightPlan?.label || "advanced settings";
-      start.disabled = startPending || running || !hasModels || selectedCount === 0;
+      start.disabled = startPending || running || !hasModels || selectedCount === 0 || tinyCount > 0;
       let dockLabel = "Start run";
       if (!hasModels) {
         title.textContent = "No models found";
@@ -4167,6 +4191,12 @@ INDEX_HTML = r"""<!doctype html>
         pill.textContent = "needs model";
         start.textContent = "Select model first";
         dockLabel = "Select";
+      } else if (tinyCount > 0) {
+        title.textContent = `${tinyCount} placeholder file${tinyCount === 1 ? "" : "s"} selected`;
+        detail.textContent = tinyModelMessage;
+        pill.textContent = "blocked";
+        start.textContent = "Pick real GGUF";
+        dockLabel = "Blocked";
       } else {
         title.textContent = `${selectedCount} model${selectedCount === 1 ? "" : "s"} ready`;
         detail.textContent = `${selectedModelLabel(models)} · ${planName}; ${runSnapshot} Receipts will be saved under _runs.`;
@@ -4186,11 +4216,16 @@ INDEX_HTML = r"""<!doctype html>
     function modelPathsForStart() {
       const paths = Array.from(selected);
       const guard = document.querySelector("#guard");
-      if (paths.length) return paths;
       if (!appState || appState.models.length === 0) {
         guard.textContent = "No GGUF models found in the configured model folder.";
         return null;
       }
+      const models = appState.models.filter(model => selected.has(model.path));
+      if (selectedTinyModels(models).length) {
+        guard.textContent = tinyModelMessage;
+        return null;
+      }
+      if (paths.length) return paths;
       guard.textContent = "Select one or more GGUF models before starting a run.";
       return null;
     }

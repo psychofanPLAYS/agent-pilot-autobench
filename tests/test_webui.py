@@ -44,6 +44,12 @@ def _fake_spawn_factory(recorder=None):
     return _spawn
 
 
+def _write_model_fixture(path: Path, size_bytes: int = 2 * 1024 * 1024) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as handle:
+        handle.truncate(size_bytes)
+
+
 def test_tail_live_records_preserves_type_and_data(tmp_path):
     run_directory = tmp_path / "run"
     run_directory.mkdir()
@@ -95,8 +101,8 @@ def test_state_payload_exposes_structured_live_events(tmp_path):
 def test_webui_state_lists_models_modes_and_librarian_packs(tmp_path):
     model_root = tmp_path / "models"
     model_root.mkdir()
-    (model_root / "Gemma-3-27B-Q4_K_M.gguf").write_bytes(b"1" * 20)
-    (model_root / "Qwen3.6-35B-A3B-Q4_K_M.gguf").write_bytes(b"1" * 30)
+    _write_model_fixture(model_root / "Gemma-3-27B-Q4_K_M.gguf")
+    _write_model_fixture(model_root / "Qwen3.6-35B-A3B-Q4_K_M.gguf", size_bytes=3 * 1024 * 1024)
 
     state = WebUiState(root=model_root, runs_root=tmp_path / "_runs")
     payload = state.state_payload()
@@ -131,7 +137,7 @@ def test_webui_state_exposes_truthful_local_status(tmp_path, monkeypatch):
     monkeypatch.setattr(webui, "sample_telemetry", lambda: _Telemetry())
     model_root = tmp_path / "models"
     model_root.mkdir()
-    (model_root / "Qwen2.5-14B-Instruct-Q4_K_M.gguf").write_bytes(b"1" * 30)
+    _write_model_fixture(model_root / "Qwen2.5-14B-Instruct-Q4_K_M.gguf")
     llama_server = tmp_path / "llama-server.exe"
     llama_server.write_bytes(b"exe")
 
@@ -176,6 +182,11 @@ def test_index_html_includes_responsive_launch_dock():
     assert 'id="dock-start"' in webui.INDEX_HTML
     assert 'dockLabel = "Start run"' in webui.INDEX_HTML
     assert 'document.querySelector("#start").click()' in webui.INDEX_HTML
+    assert ".launch-zone #start { display:none; }" in webui.INDEX_HTML
+    assert "#start:disabled" in webui.INDEX_HTML
+    assert "function selectedTinyModels(models)" in webui.INDEX_HTML
+    assert "tiny placeholders, not runnable GGUF model files" in webui.INDEX_HTML
+    assert 'dockLabel = "Blocked"' in webui.INDEX_HTML
 
 
 def test_index_html_uses_probe_backed_status_rows():
@@ -268,6 +279,20 @@ def test_librarian_web_selection_accepts_any_models():
     assert validate_web_selection([], "librarian_bench") is not None
 
 
+def test_librarian_web_selection_rejects_tiny_placeholder_models():
+    tiny = ModelInfo(
+        path=Path("Gemma-3-27B-Q4_K_M.gguf"),
+        name="Gemma-3-27B-Q4_K_M.gguf",
+        family="gemma",
+        size_bytes=128,
+    )
+
+    message = validate_web_selection([tiny], "librarian_bench")
+
+    assert message is not None
+    assert "tiny placeholders" in message
+
+
 def test_webui_start_run_writes_spec_and_spawns_engine(tmp_path):
     plans_root = tmp_path / "benchmarks" / "plans"
     plans_root.mkdir(parents=True)
@@ -277,8 +302,8 @@ def test_webui_start_run_writes_spec_and_spawns_engine(tmp_path):
     model_root.mkdir()
     gemma_path = model_root / "Gemma-3-27B-Q4_K_M.gguf"
     qwen_path = model_root / "Qwen3.6-35B-A3B-Q4_K_M.gguf"
-    gemma_path.write_bytes(b"1" * 20)
-    qwen_path.write_bytes(b"1" * 30)
+    _write_model_fixture(gemma_path)
+    _write_model_fixture(qwen_path)
 
     spawned: list = []
     state = WebUiState(
@@ -318,11 +343,31 @@ def test_webui_start_run_writes_spec_and_spawns_engine(tmp_path):
     assert state.run.phase == "running"
 
 
+def test_webui_start_run_rejects_tiny_placeholder_model(tmp_path):
+    model_root = tmp_path / "models"
+    model_root.mkdir()
+    tiny_path = model_root / "Gemma-3-27B-Q4_K_M.gguf"
+    tiny_path.write_bytes(b"tiny")
+    spawned: list = []
+    state = WebUiState(
+        root=model_root,
+        runs_root=tmp_path / "_runs",
+        spawn_engine=_fake_spawn_factory(spawned),
+        project_root=tmp_path,
+    )
+
+    ok, message = state.start_run([str(tiny_path)], "librarian_bench", {"budget_minutes": 1})
+
+    assert ok is False
+    assert "tiny placeholders" in message
+    assert spawned == []
+
+
 def test_webui_start_run_writes_resolved_llama_paths(tmp_path):
     model_root = tmp_path / "models"
     model_root.mkdir()
     model_path = model_root / "Qwen3.6-35B-A3B-Q4_K_M.gguf"
-    model_path.write_bytes(b"1" * 30)
+    _write_model_fixture(model_path)
     runs_root = tmp_path / "_runs"
     server = tmp_path / "llama" / "llama-server.exe"
     bench = tmp_path / "llama" / "llama-bench.exe"
@@ -353,7 +398,7 @@ def test_webui_start_run_writes_null_llama_paths_when_unset(tmp_path):
     model_root = tmp_path / "models"
     model_root.mkdir()
     model_path = model_root / "Qwen3.6-35B-A3B-Q4_K_M.gguf"
-    model_path.write_bytes(b"1" * 30)
+    _write_model_fixture(model_path)
     runs_root = tmp_path / "_runs"
 
     spawned: list = []
@@ -381,7 +426,7 @@ def test_webui_start_run_rejects_when_engine_already_running(tmp_path):
     model_root = tmp_path / "models"
     model_root.mkdir()
     model_path = model_root / "Qwen3.6-35B-A3B-Q4_K_M.gguf"
-    model_path.write_bytes(b"1" * 30)
+    _write_model_fixture(model_path)
     state = WebUiState(
         root=model_root,
         runs_root=tmp_path / "_runs",
@@ -401,7 +446,7 @@ def test_webui_start_run_allows_new_run_after_previous_completed(tmp_path):
     model_root = tmp_path / "models"
     model_root.mkdir()
     model_path = model_root / "Qwen3.6-35B-A3B-Q4_K_M.gguf"
-    model_path.write_bytes(b"1" * 30)
+    _write_model_fixture(model_path)
     state = WebUiState(
         root=model_root,
         runs_root=tmp_path / "_runs",
@@ -419,7 +464,7 @@ def test_webui_state_payload_reflects_engine_status_and_live_events(tmp_path):
     model_root = tmp_path / "models"
     model_root.mkdir()
     model_path = model_root / "Qwen3.6-35B-A3B-Q4_K_M.gguf"
-    model_path.write_bytes(b"1" * 30)
+    _write_model_fixture(model_path)
     state = WebUiState(
         root=model_root,
         runs_root=tmp_path / "_runs",
@@ -481,7 +526,7 @@ def test_webui_abort_writes_control_and_kills_engine(tmp_path, monkeypatch):
     model_root = tmp_path / "models"
     model_root.mkdir()
     model_path = model_root / "Qwen3.6-35B-A3B-Q4_K_M.gguf"
-    model_path.write_bytes(b"1" * 30)
+    _write_model_fixture(model_path)
     killed: list = []
     killed_pids: list[int] = []
     monkeypatch.setattr(webui, "kill_process_tree", lambda proc: killed.append(proc))
@@ -533,7 +578,7 @@ def test_webui_rejects_unknown_model_path(tmp_path):
     model_root = tmp_path / "models"
     model_root.mkdir()
     qwen_path = model_root / "Qwen3.6-35B-A3B-Q4_K_M.gguf"
-    qwen_path.write_bytes(b"1" * 30)
+    _write_model_fixture(qwen_path)
     state = WebUiState(root=model_root, runs_root=tmp_path / "_runs")
 
     ok, message = state.start_run([str(qwen_path), str(model_root / "typo.gguf")], "quick")
@@ -661,7 +706,7 @@ def test_webui_start_endpoint_rejects_malformed_json(tmp_path):
 def test_webui_websocket_sends_hello_and_state(tmp_path):
     model_root = tmp_path / "models"
     model_root.mkdir()
-    (model_root / "Gemma-3-27B-Q4_K_M.gguf").write_bytes(b"1" * 20)
+    _write_model_fixture(model_root / "Gemma-3-27B-Q4_K_M.gguf")
     state = WebUiState(root=model_root, runs_root=tmp_path / "_runs")
     client = TestClient(create_web_app(state))
 
@@ -684,8 +729,8 @@ def test_webui_websocket_start_run_spawns_engine(tmp_path):
     model_root.mkdir()
     gemma_path = model_root / "Gemma-3-27B-Q4_K_M.gguf"
     qwen_path = model_root / "Qwen3.6-35B-A3B-Q4_K_M.gguf"
-    gemma_path.write_bytes(b"1" * 20)
-    qwen_path.write_bytes(b"1" * 30)
+    _write_model_fixture(gemma_path)
+    _write_model_fixture(qwen_path)
     spawned: list = []
 
     state = WebUiState(
@@ -731,7 +776,7 @@ def _running_state(tmp_path):
     model_root = tmp_path / "models"
     model_root.mkdir()
     model_path = model_root / "Qwen3.6-35B-A3B-Q4_K_M.gguf"
-    model_path.write_bytes(b"1" * 30)
+    _write_model_fixture(model_path)
     state = WebUiState(
         root=model_root,
         runs_root=tmp_path / "_runs",
