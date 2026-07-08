@@ -244,6 +244,17 @@ def test_index_html_includes_results_studio_for_returning_users():
     assert "renderResultsStudio(state)" in webui.INDEX_HTML
 
 
+def test_index_html_names_selected_models_before_launch():
+    assert (
+        'id="selected-model-preview" class="selected-preview" aria-live="polite"'
+        in webui.INDEX_HTML
+    )
+    assert "function selectedModelLabel(models)" in webui.INDEX_HTML
+    assert 'class="model-chip"' in webui.INDEX_HTML
+    assert "models.slice(0, 6)" in webui.INDEX_HTML
+    assert "selectedModelLabel(models)" in webui.INDEX_HTML
+
+
 def test_librarian_web_selection_accepts_any_models():
     gemma = ModelInfo(path=Path("Gemma-3-27B.gguf"), name="Gemma-3-27B.gguf", family="gemma")
     qwen = ModelInfo(path=Path("Qwen3.6-35B-A3B.gguf"), name="Qwen3.6-35B-A3B.gguf", family="qwen")

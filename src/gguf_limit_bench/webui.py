@@ -2002,6 +2002,8 @@ INDEX_HTML = r"""<!doctype html>
       display:grid;
       gap:5px;
       margin-top:8px;
+      max-height:148px;
+      overflow:auto;
     }
     .selected-preview span {
       min-width:0;
@@ -2014,6 +2016,25 @@ INDEX_HTML = r"""<!doctype html>
       line-height:1.25;
       overflow:hidden;
       text-overflow:ellipsis;
+    }
+    .selected-preview .model-chip {
+      display:grid;
+      grid-template-columns:minmax(0,1fr) auto;
+      gap:6px;
+      align-items:center;
+    }
+    .selected-preview .model-chip b {
+      min-width:0;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+      color:var(--text);
+      font-size:11px;
+      font-weight:800;
+    }
+    .selected-preview .model-chip small {
+      color:var(--muted);
+      font-size:10px;
       white-space:nowrap;
     }
     .selected-preview .empty { color:var(--muted); }
@@ -2850,7 +2871,7 @@ INDEX_HTML = r"""<!doctype html>
                       <span>Total size<b id="selected-size">-</b></span>
                       <span>Est. VRAM<b id="selected-vram">-</b></span>
                     </div>
-                    <div id="selected-model-preview" class="selected-preview"></div>
+                    <div id="selected-model-preview" class="selected-preview" aria-live="polite"></div>
                   </div>
                 </div>
                 <div class="builder-card">
@@ -4030,6 +4051,13 @@ INDEX_HTML = r"""<!doctype html>
         .replace(/-Chat/gi, "");
     }
 
+    function selectedModelLabel(models) {
+      if (!models.length) return "";
+      const shown = models.slice(0, 2).map(model => conciseModelName(model.name));
+      const extra = models.length > 2 ? ` +${models.length - 2} more` : "";
+      return `${shown.join(", ")}${extra}`;
+    }
+
     function updateSelectedModelStats(models) {
       const totalSize = models.reduce((sum, model) => sum + modelSizeGb(model), 0);
       const hasTinyFiles = models.some(model => model.size_warning);
@@ -4049,10 +4077,10 @@ INDEX_HTML = r"""<!doctype html>
       if (bar) bar.style.width = `${fill}%`;
       const preview = document.querySelector("#selected-model-preview");
       if (preview) {
-        const chips = models.slice(0, 2).map(model =>
-          `<span title="${escapeHtml(model.name)}">${escapeHtml(conciseModelName(model.name))}</span>`
+        const chips = models.slice(0, 6).map(model =>
+          `<span class="model-chip" title="${escapeHtml(model.path)}"><b>${escapeHtml(conciseModelName(model.name))}</b><small>${escapeHtml(model.quant || "GGUF")} · ${modelSizeDisplay(model)}</small></span>`
         );
-        if (models.length > 2) chips.push(`<span class="more">+${models.length - 2} more selected</span>`);
+        if (models.length > 6) chips.push(`<span class="more">+${models.length - 6} more selected</span>`);
         preview.innerHTML = chips.length ? chips.join("") : `<span class="empty">Select models from the library.</span>`;
       }
     }
@@ -4141,7 +4169,7 @@ INDEX_HTML = r"""<!doctype html>
         dockLabel = "Select";
       } else {
         title.textContent = `${selectedCount} model${selectedCount === 1 ? "" : "s"} ready`;
-        detail.textContent = `${planName}; ${runSnapshot} Receipts will be saved under _runs.`;
+        detail.textContent = `${selectedModelLabel(models)} · ${planName}; ${runSnapshot} Receipts will be saved under _runs.`;
         pill.textContent = "ready";
         start.textContent = flightPlan?.start_label || "Start benchmark";
         dockLabel = "Start run";
