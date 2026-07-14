@@ -41,7 +41,7 @@ dev = [
 ]
 bench = [
     "inspect-ai>=0.3.242",
-    "openai>=2.44.0",
+    "openai>=2.45.0",
 ]
 
 [project.scripts]
